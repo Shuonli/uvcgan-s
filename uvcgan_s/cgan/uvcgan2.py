@@ -10,7 +10,10 @@ from torchvision.transforms import GaussianBlur, Resize
 from uvcgan_s.torch.select     import select_optimizer, extract_name_kwargs
 from uvcgan_s.torch.gan_losses import select_gan_loss
 from uvcgan_s.torch.queue      import FastQueue
-from uvcgan_s.torch.funcs      import prepare_model, update_average_model
+from uvcgan_s.torch.funcs      import update_average_model
+from uvcgan_s.torch.distributed import (
+    is_distributed, no_sync, wrap_model
+)
 
 from uvcgan_s.torch.layers.batch_head import BatchHeadWrapper, get_batch_head
 from uvcgan_s.torch.gradient_penalty  import GradientPenalty
@@ -75,14 +78,21 @@ class UVCGAN2(ModelBase):
         return NamedDict(*images)
 
     def _construct_batch_head_disc(self, model_config, input_shape):
+        distributed = is_distributed()
+
         disc_body = construct_discriminator(
-            model_config, input_shape, self.device
+            model_config, input_shape, self.device, wrap = not distributed
         )
+        disc_head = get_batch_head(self.head_config).to(self.device)
 
-        disc_head = get_batch_head(self.head_config)
-        disc_head = prepare_model(disc_head, self.device)
+        if distributed:
+            # a single DDP wrapper around the whole discriminator keeps the
+            # checkpoint keys identical to those of a single process run
+            return wrap_model(BatchHeadWrapper(disc_body, disc_head))
 
-        return BatchHeadWrapper(disc_body, disc_head)
+        # legacy: DataParallel over body and head separately, so that the
+        # queue concatenation happens on the main device
+        return BatchHeadWrapper(disc_body, wrap_model(disc_head))
 
     def _add_hc_to_shape(self, shape):
         return (shape[0] + self.n_hidden, *shape[1:])
@@ -454,11 +464,19 @@ class UVCGAN2(ModelBase):
         loss_gp = None
 
         if self.gp is not None:
-            loss_gp = gp_cacher(
-                model, fake, real,
-                model_kwargs_fake = { 'extra_bodies' : queue_fake.query() },
-                model_kwargs_real = { 'extra_bodies' : queue_real.query() },
-            )
+            # DDP: the double backward of the gradient penalty does not
+            # reach every parameter, so its gradient is accumulated locally
+            # and all-reduced by the synchronized backward below.
+            with no_sync(model):
+                loss_gp = gp_cacher(
+                    model, fake, real,
+                    model_kwargs_fake = {
+                        'extra_bodies' : queue_fake.query()
+                    },
+                    model_kwargs_real = {
+                        'extra_bodies' : queue_real.query()
+                    },
+                )
 
         pred_real = queued_forward(
             model, real, queue_real, update_queue = True
@@ -498,16 +516,39 @@ class UVCGAN2(ModelBase):
             self.losses.gp_a = loss_gp_a
 
     def optimization_step_gen(self):
-        self.set_requires_grad([self.models.disc_a, self.models.disc_b], False)
+        discs = [ self.models.disc_a, self.models.disc_b ]
+
+        self.set_requires_grad(discs, False)
         self.optimizers.gen.zero_grad(set_to_none = True)
 
         dir_list = [ 'ab', 'ba' ]
         if self.lambda_idt > 0:
             dir_list += [ 'aa', 'bb' ]
 
-        for direction in dir_list:
-            self.forward_dispatch(direction)
-            self.backward_gen(direction)
+        # DDP: the frozen discriminators must never synchronize, and each
+        # generator synchronizes only on its last use, all-reducing the
+        # gradient accumulated over the whole step at once.
+        gens_used = {
+            'ab' : (self.models.gen_ab, self.models.gen_ba),
+            'ba' : (self.models.gen_ab, self.models.gen_ba),
+            'aa' : (self.models.gen_ba, ),
+            'bb' : (self.models.gen_ab, ),
+        }
+
+        last_use = {}
+        for (idx, direction) in enumerate(dir_list):
+            for gen in gens_used[direction]:
+                last_use[id(gen)] = idx
+
+        for (idx, direction) in enumerate(dir_list):
+            unsynced = discs + [
+                gen for gen in gens_used[direction]
+                    if last_use[id(gen)] != idx
+            ]
+
+            with no_sync(*unsynced):
+                self.forward_dispatch(direction)
+                self.backward_gen(direction)
 
         self.optimizers.gen.step()
 

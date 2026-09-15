@@ -73,15 +73,18 @@ class Args:
         label      = None,
         log_level  = 'INFO',
         checkpoint = 100,
+        write      = True,
         **args_dict
     ):
+        # pylint: disable=too-many-arguments
         config  = Config(**args_dict)
         savedir = config.get_savedir(outdir, label)
 
         result = Args(config, savedir, label, log_level, checkpoint)
         result.check_no_collision()
 
-        result.save()
+        if write:
+            result.save()
 
         return result
 

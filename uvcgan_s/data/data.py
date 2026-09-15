@@ -3,10 +3,13 @@ import torch
 
 import torchvision
 
+from torch.utils.data import DataLoader, DistributedSampler
+
 from uvcgan_s.consts import (
     ROOT_DATA, SPLIT_TRAIN, MERGE_PAIRED, MERGE_UNPAIRED
 )
-from uvcgan_s.torch.select import extract_name_kwargs
+from uvcgan_s.torch.select      import extract_name_kwargs
+from uvcgan_s.torch.distributed import is_distributed
 
 from .datasets.celeba                 import CelebaDataset
 from .datasets.image_domain_folder    import ImageDomainFolder
@@ -86,19 +89,49 @@ def construct_single_loader(
     dataset, batch_size, shuffle,
     workers         = None,
     prefetch_factor = 2,
+    drop_last       = False,
     **kwargs
 ):
+    # pylint: disable=too-many-arguments
     if workers is None:
         workers = min(torch.get_num_threads(), 20)
 
-    return torch.utils.data.DataLoader(
+    sampler = None
+    if is_distributed():
+        # each process draws its own disjoint shard of the dataset
+        sampler = DistributedSampler(
+            dataset, shuffle = shuffle, drop_last = drop_last
+        )
+        shuffle = False
+
+    if workers > 0:
+        # torch >= 2 rejects prefetch_factor without workers
+        kwargs['prefetch_factor'] = prefetch_factor
+
+    return DataLoader(
         dataset, batch_size,
-        shuffle         = shuffle,
-        num_workers     = workers,
-        prefetch_factor = prefetch_factor,
-        pin_memory      = True,
+        shuffle     = shuffle,
+        sampler     = sampler,
+        num_workers = workers,
+        pin_memory  = True,
+        drop_last   = drop_last,
         **kwargs
     )
+
+def set_loader_epoch(loader, epoch):
+    """Reseed distributed samplers so that shuffling differs per epoch."""
+    if isinstance(loader, (list, tuple)):
+        for x in loader:
+            set_loader_epoch(x, epoch)
+        return
+
+    if hasattr(loader, 'set_epoch'):
+        loader.set_epoch(epoch)
+        return
+
+    sampler = getattr(loader, 'sampler', None)
+    if hasattr(sampler, 'set_epoch'):
+        sampler.set_epoch(epoch)
 
 def construct_data_loaders(data_config, batch_size, split):
     datasets = construct_datasets(data_config, split)

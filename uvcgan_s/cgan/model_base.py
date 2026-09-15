@@ -2,7 +2,8 @@ import logging
 import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
-from uvcgan_s.base.schedulers import get_scheduler
+from uvcgan_s.base.schedulers   import get_scheduler
+from uvcgan_s.torch.distributed import is_main_process
 from .named_dict import NamedDict
 from .checkpoint import find_last_checkpoint_epoch, save, load
 
@@ -112,6 +113,10 @@ class ModelBase:
         self._handle_epoch_end()
 
     def save(self, epoch = None):
+        if not is_main_process():
+            # under DDP all processes hold identical weights
+            return
+
         LOGGER.debug('Saving model at epoch %s', epoch)
 
         save(self.models,     self.savedir, PREFIX_MODEL, epoch)

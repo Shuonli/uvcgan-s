@@ -6,6 +6,7 @@ import torch
 from uvcgan_s.consts import ROOT_OUTDIR
 from uvcgan_s.config import Args
 from uvcgan_s.cgan   import construct_model
+from uvcgan_s.torch.distributed import unwrap_model
 
 LOGGER = logging.getLogger('uvcgan_s.train')
 
@@ -166,7 +167,8 @@ def transfer_state_dict(module, state_dict, fuzzy, strict):
 def transfer_parameters(model, base_model, transfer_config):
     for (dst, src) in transfer_config.transfer_map.items():
         transfer_state_dict(
-            model.models[dst], base_model.models[src].state_dict(),
+            unwrap_model(model.models[dst]),
+            unwrap_model(base_model.models[src]).state_dict(),
             transfer_config.fuzzy, transfer_config.strict
         )
 

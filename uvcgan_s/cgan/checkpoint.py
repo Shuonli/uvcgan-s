@@ -2,6 +2,8 @@ import os
 import re
 import torch
 
+from uvcgan_s.torch.distributed import unwrap_model
+
 CHECKPOINTS_DIR = 'checkpoints'
 
 def find_last_checkpoint_epoch(savedir, prefix = None):
@@ -48,10 +50,7 @@ def save(named_dict, savedir, prefix, epoch = None):
             savedir, prefix + '_' + k, epoch, mkdir = True
         )
 
-        if isinstance(v, torch.nn.DataParallel):
-            torch.save(v.module.state_dict(), save_path)
-        else:
-            torch.save(v.state_dict(), save_path)
+        torch.save(unwrap_model(v).state_dict(), save_path)
 
 def load(named_dict, savedir, prefix, epoch, device):
     for (k,v) in named_dict.items():
@@ -62,12 +61,7 @@ def load(named_dict, savedir, prefix, epoch, device):
             savedir, prefix + '_' + k, epoch, mkdir = False
         )
 
-        if isinstance(v, torch.nn.DataParallel):
-            v.module.load_state_dict(
-                torch.load(load_path, map_location = device)
-            )
-        else:
-            v.load_state_dict(
-                torch.load(load_path, map_location = device)
-            )
+        unwrap_model(v).load_state_dict(
+            torch.load(load_path, map_location = device)
+        )
 

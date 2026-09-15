@@ -251,6 +251,29 @@ Each output file contains a 24×64 calorimeter energy grid that can be used for
 physics analysis.
 
 
+# Distributed Training
+
+Training scripts run unchanged on several GPUs with `torch.distributed`
+(DDP), one process per GPU. `batch_size` is the batch of a single process, so
+`N` processes see `N * batch_size` samples per step; the losses recorded in
+`history.csv` are averaged over processes, and each epoch also records its
+wall time (`epoch_time`) and throughput (`samples_per_sec`). The process group
+is configured from the environment, so either launcher works:
+
+```bash
+# torchrun, single node
+torchrun --standalone --nproc_per_node=4 scripts/train/sphenix/train_uvcgan-s.py
+
+# SLURM, one task per GPU (c.f. scripts/slurm/bench_ddp.sbatch)
+srun --ntasks-per-node=4 --gres=gpu:4 python scripts/train/sphenix/train_uvcgan-s.py
+```
+
+Without a distributed launcher the previous behavior is preserved, i.e. a
+single process using `DataParallel` over all visible GPUs.
+`scripts/slurm/submit_bench.sh` submits a 1/2/4/8-GPU throughput benchmark
+and `scripts/slurm/collect_bench.py` tabulates its results.
+
+
 # F.A.Q.
 
 ## I am training my model on a multi-GPU node. How to make sure that I use only one GPU?

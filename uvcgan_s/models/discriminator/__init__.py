@@ -16,11 +16,11 @@ def select_discriminator(name, **kwargs):
 
     return select_base_discriminator(name, **kwargs)
 
-def construct_discriminator(model_config, image_shape, device):
+def construct_discriminator(model_config, image_shape, device, wrap = True):
     model = select_discriminator(
         model_config.model, image_shape = image_shape,
         **model_config.model_args
     )
 
-    return default_model_init(model, model_config, device)
+    return default_model_init(model, model_config, device, wrap)
 
