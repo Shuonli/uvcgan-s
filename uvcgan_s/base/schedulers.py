@@ -1,7 +1,7 @@
 from torch.optim         import lr_scheduler
 from uvcgan_s.torch.select import extract_name_kwargs
 
-def linear_scheduler(optimizer, epochs_warmup, epochs_anneal, verbose = True):
+def linear_scheduler(optimizer, epochs_warmup, epochs_anneal):
 
     def lambda_rule(epoch, epochs_warmup, epochs_anneal):
         if epoch < epochs_warmup:
@@ -11,7 +11,7 @@ def linear_scheduler(optimizer, epochs_warmup, epochs_anneal, verbose = True):
 
     lr_fn = lambda epoch : lambda_rule(epoch, epochs_warmup, epochs_anneal)
 
-    return lr_scheduler.LambdaLR(optimizer, lr_fn, verbose = verbose)
+    return lr_scheduler.LambdaLR(optimizer, lr_fn)
 
 SCHED_DICT = {
     'step'            : lr_scheduler.StepLR,
@@ -30,7 +30,6 @@ def select_single_scheduler(optimizer, scheduler):
         return None
 
     name, kwargs = extract_name_kwargs(scheduler)
-    kwargs['verbose'] = True
 
     if name not in SCHED_DICT:
         raise ValueError(
