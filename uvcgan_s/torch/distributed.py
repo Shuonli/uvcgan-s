@@ -148,19 +148,43 @@ def wrap_model(model):
         if torch.cuda.is_available():
             device_ids = [ torch.cuda.current_device(), ]
 
-        find_unused = bool(int(os.environ.get('UVCGAN_S_DDP_FIND_UNUSED', 0)))
+        # Tuning knobs (c.f. `torch.nn.parallel.DistributedDataParallel`):
+        #   UVCGAN_S_DDP_FIND_UNUSED=1   find_unused_parameters
+        #   UVCGAN_S_DDP_BUCKET_MB=25    bucket_cap_mb
+        #   UVCGAN_S_DDP_BUCKET_VIEW=1   gradient_as_bucket_view
+        #   UVCGAN_S_DDP_COMPRESS=bf16   fp16 / bf16 gradient compression
+        env         = os.environ
+        find_unused = bool(int(env.get('UVCGAN_S_DDP_FIND_UNUSED', 0)))
+        bucket_mb   = float(env.get('UVCGAN_S_DDP_BUCKET_MB', 25))
+        bucket_view = bool(int(env.get('UVCGAN_S_DDP_BUCKET_VIEW', 0)))
+        compress    = env.get('UVCGAN_S_DDP_COMPRESS', None)
 
         # NOTE: buffers (BatchNorm running statistics, spectral norm
         #       vectors) are synchronized once at construction and then
         #       evolve per process. DDP's per-forward buffer broadcast
         #       writes them in place between the real / fake forwards of
         #       a discriminator, invalidating tensors saved for backward.
-        return DistributedDataParallel(
+        ddp = DistributedDataParallel(
             model,
-            device_ids             = device_ids,
-            broadcast_buffers      = False,
-            find_unused_parameters = find_unused,
+            device_ids              = device_ids,
+            broadcast_buffers       = False,
+            find_unused_parameters  = find_unused,
+            bucket_cap_mb           = bucket_mb,
+            gradient_as_bucket_view = bucket_view,
         )
+
+        if compress:
+            # pylint: disable=import-outside-toplevel
+            from torch.distributed.algorithms.ddp_comm_hooks import (
+                default_hooks
+            )
+            hooks = {
+                'fp16' : default_hooks.fp16_compress_hook,
+                'bf16' : default_hooks.bf16_compress_hook,
+            }
+            ddp.register_comm_hook(state = None, hook = hooks[compress])
+
+        return ddp
 
     if torch.cuda.device_count() > 1:
         LOGGER.warning(
