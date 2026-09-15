@@ -92,17 +92,21 @@ def init_distributed(backend = None, timeout_minutes = 30):
     os.environ['WORLD_SIZE'] = str(world_size)
     os.environ['LOCAL_RANK'] = str(local_rank)
 
+    device_id = None
     if torch.cuda.is_available():
         # SLURM may expose either all GPUs of a node or a single GPU per task
         torch.cuda.set_device(local_rank % torch.cuda.device_count())
+        device_id = torch.device('cuda', torch.cuda.current_device())
 
     if backend is None:
         backend = 'nccl' if torch.cuda.is_available() else 'gloo'
 
+    # declaring the device binds this rank to its GPU for NCCL up front
     dist.init_process_group(
         backend     = backend,
         init_method = 'env://',
         timeout     = datetime.timedelta(minutes = timeout_minutes),
+        device_id   = device_id,
     )
 
     LOGGER.info(
