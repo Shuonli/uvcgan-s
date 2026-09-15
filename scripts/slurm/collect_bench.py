@@ -5,6 +5,7 @@ import argparse
 import glob
 import json
 import os
+import re
 
 import pandas as pd
 
@@ -25,13 +26,23 @@ def parse_cmdargs():
         '--prefix', default = 'bench_',
         help = 'only collect models whose label starts with this prefix',
     )
+    parser.add_argument(
+        '--filter', default = None,
+        help = (
+            'regex that labels must match, e.g. the job id suffix of one'
+            ' series so that speedups are relative to the same node'
+        ),
+    )
     return parser.parse_args()
 
-def collect_run(path, warmup, prefix):
+def collect_run(path, warmup, prefix, pattern):
     with open(os.path.join(path, 'label'), encoding = 'utf-8') as f:
         label = f.read().strip()
 
     if not label.startswith(prefix):
+        return None
+
+    if (pattern is not None) and (re.search(pattern, label) is None):
         return None
 
     history = pd.read_csv(os.path.join(path, 'history.csv'))
@@ -67,7 +78,9 @@ def main():
         if not os.path.exists(os.path.join(path, 'history.csv')):
             continue
 
-        run = collect_run(path, cmdargs.warmup, cmdargs.prefix)
+        run = collect_run(
+            path, cmdargs.warmup, cmdargs.prefix, cmdargs.filter
+        )
         if run is not None:
             runs.append(run)
 

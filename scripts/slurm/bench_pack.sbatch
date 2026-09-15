@@ -3,9 +3,13 @@
 # every point shares the same node and no other job interleaves:
 #
 #   sbatch -w dahlia scripts/slurm/bench_pack.sbatch
+#   PLAN=solo BENCH_EPOCHS=2 sbatch -w dahlia -J bench_solo scripts/slurm/bench_pack.sbatch
 #
-# Each configuration is a job step on a subset of the allocated GPUs; steps
-# that fit together run concurrently. Per-step logs go to slurm_logs/.
+# Each configuration is a job step on a subset of the allocated GPUs.
+# PLAN=concurrent (default) packs small runs side by side on disjoint GPUs,
+# which is fast but lets concurrent all-reduces share the interconnect;
+# PLAN=solo runs every point alone, one after another, for clean timings.
+# Per-step logs go to slurm_logs/.
 #
 #SBATCH -p a6k
 #SBATCH --nodes=1
@@ -51,21 +55,40 @@ run() {
 echo "job $SLURM_JOB_ID on $SLURM_JOB_NODELIST, $BENCH_STEPS steps/epoch"
 nvidia-smi -L | head -n 1
 
-# wave 1: 1 + 2 + 1 + 4 GPUs concurrently
-run 1  4 bench_g1_b4  1 &
-run 2  4 bench_g2_b4  2 &
-run 1 32 bench_g1_b32 3 &
-run 4 32 bench_g4_b32 4 &
-wait
+case "${PLAN:-concurrent}" in
+    concurrent)
+        # wave 1: 1 + 2 + 1 + 4 GPUs concurrently
+        run 1  4 bench_g1_b4  1 &
+        run 2  4 bench_g2_b4  2 &
+        run 1 32 bench_g1_b32 3 &
+        run 4 32 bench_g4_b32 4 &
+        wait
 
-# wave 2: plain vs bf16-compressed gradients, side by side
-run 4  4 bench_g4_b4      5 &
-run 4  4 bench_g4_b4_bf16 6 UVCGAN_S_DDP_COMPRESS=bf16 &
-wait
+        # wave 2: plain vs bf16-compressed gradients, side by side
+        run 4  4 bench_g4_b4      5 &
+        run 4  4 bench_g4_b4_bf16 6 UVCGAN_S_DDP_COMPRESS=bf16 &
+        wait
 
-# waves 3-5: whole node
-run 8  4 bench_g8_b4      7
-run 8  4 bench_g8_b4_bf16 8 UVCGAN_S_DDP_COMPRESS=bf16
-run 8 32 bench_g8_b32     9
+        # waves 3-5: whole node
+        run 8  4 bench_g8_b4      7
+        run 8  4 bench_g8_b4_bf16 8 UVCGAN_S_DDP_COMPRESS=bf16
+        run 8 32 bench_g8_b32     9
+        ;;
+
+    solo)
+        run 1  4 bench_g1_b4       1
+        run 2  4 bench_g2_b4       2
+        run 4  4 bench_g4_b4       3
+        run 4  4 bench_g4_b4_bf16  4 UVCGAN_S_DDP_COMPRESS=bf16
+        run 1 32 bench_g1_b32      5
+        run 4 32 bench_g4_b32      6
+        run 8 32 bench_g8_b32_bf16 7 UVCGAN_S_DDP_COMPRESS=bf16
+        ;;
+
+    *)
+        echo "unknown PLAN '$PLAN'" >&2
+        exit 1
+        ;;
+esac
 
 echo "[$(date +%T)] all done"
