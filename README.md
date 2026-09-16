@@ -305,6 +305,30 @@ Other knobs, all optional:
 | `UVCGAN_S_DDP_FIND_UNUSED` | `ddp` `find_unused_parameters` |
 | `UVCGAN_S_DDP_TIMEOUT_MIN` | collective timeout in minutes, default 30 |
 
+## Measured throughput
+
+sPHENIX configuration on one node of eight RTX A6000, samples per second,
+warm-up epoch discarded. `manual` synchronization is safe at every point;
+`ddp` deadlocked in about a quarter of the eight process runs.
+
+| processes | batch / process | `ddp` | `ddp` + bf16 | `manual` | `manual` + bf16 |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 |  4 |   8.6 |      |      |       |
+| 2 |  4 |  15.9 |      |      |       |
+| 4 |  4 |  15.0 | 24.8 |      |       |
+| 8 |  4 |  17.2 | 38.7 | 18.0 |       |
+| 1 | 32 |  54.0 |      |      |       |
+| 4 | 32 | 106.8 |      |      |       |
+| 8 | 32 | 194.2 | 272.8 | 151.0 | 217.2 |
+
+At `batch_size` 4 the step is bound by kernel launches rather than by
+communication, so overlapping the all-reduce with the backward pass buys
+nothing and `manual` is free; raising the batch is worth far more than
+adding processes (a single process at batch 32 is six times faster than at
+batch 4). At `batch_size` 32 the overlap does matter and `manual` costs
+about a fifth of the throughput, though it is still faster than `ddp`
+without gradient compression.
+
 ## Benchmarks
 
 `scripts/slurm/bench_pack.sbatch` runs a scaling benchmark inside a single
