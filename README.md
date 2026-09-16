@@ -361,6 +361,23 @@ batch 4). At `batch_size` 32 the overlap does matter and `manual` costs
 about a fifth of the throughput, though it is still faster than `ddp`
 without gradient compression.
 
+## Two GPUs
+
+Whether a second GPU halves the training time depends on what is held
+fixed. Measured on two RTX A6000, three runs per point:
+
+| | 1 GPU | 2 GPUs | |
+| :--- | ---: | ---: | ---: |
+| same run, effective batch 4 (2 per process) | 8.5 | 8.0 | 0.94 |
+| same run, effective batch 32 (16 per process) | 53.7 | 60.2 | 1.12 |
+| batch 4 per process, effective batch 4 -> 8 | 8.5 | 15.9 | 1.88 |
+| batch 32 per process, effective batch 32 -> 64 | 53.7 | 103.8 | 1.93 |
+
+Splitting an unchanged run across two GPUs gains nothing, because the step
+is bound by kernel launches: halving the work per process barely shortens
+it, while the all-reduce is added on top. A second GPU pays off only by
+doubling the effective batch, which is a different training run.
+
 ## Benchmarks
 
 `scripts/slurm/bench_pack.sbatch` runs a scaling benchmark inside a single
