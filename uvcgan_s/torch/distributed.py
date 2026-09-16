@@ -292,10 +292,16 @@ def all_reduce_gradients(optimizer, average = True):
     if not params:
         return
 
-    grads = []
+    # a parameter without a gradient contributes zeros, but its gradient is
+    # restored to None afterwards: optimizers skip such parameters, while a
+    # zero gradient would still decay their state
+    grads   = []
+    missing = []
+
     for param in params:
         if param.grad is None:
             param.grad = torch.zeros_like(param)
+            missing.append(param)
 
         grads.append(param.grad)
 
@@ -310,3 +316,7 @@ def all_reduce_gradients(optimizer, average = True):
         grads, torch._utils._unflatten_dense_tensors(flat, grads)
     ):
         grad.copy_(synced)
+
+    for param in missing:
+        if not torch.any(param.grad):
+            param.grad = None
