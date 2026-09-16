@@ -253,12 +253,12 @@ physics analysis.
 
 # Distributed Training
 
-Training scripts run unchanged on several GPUs with `torch.distributed`
-(DDP), one process per GPU. `batch_size` is the batch of a single process, so
-`N` processes see `N * batch_size` samples per step; the losses recorded in
+Training scripts run unchanged on several GPUs with `torch.distributed`,
+one process per GPU. `batch_size` is the batch of a single process, so `N`
+processes see `N * batch_size` samples per step; the losses recorded in
 `history.csv` are averaged over processes, and each epoch also records its
-wall time (`epoch_time`) and throughput (`samples_per_sec`). The process group
-is configured from the environment, so either launcher works:
+wall time (`epoch_time`) and throughput (`samples_per_sec`). The process
+group is configured from the environment, so either launcher works:
 
 ```bash
 # torchrun, single node
@@ -270,8 +270,47 @@ srun --ntasks-per-node=4 --gres=gpu:4 python scripts/train/sphenix/train_uvcgan-
 
 Without a distributed launcher the previous behavior is preserved, i.e. a
 single process using `DataParallel` over all visible GPUs.
-`scripts/slurm/submit_bench.sh` submits a 1/2/4/8-GPU throughput benchmark
-and `scripts/slurm/collect_bench.py` tabulates its results.
+
+## Gradient synchronization
+
+`UVCGAN_S_DDP_MODE` selects how gradients are synchronized:
+
+ - `ddp` (default) wraps every model into `DistributedDataParallel`, which
+   overlaps the all-reduce with the backward pass.
+ - `manual` leaves the models bare and all-reduces the gradients of each
+   optimizer once per step, from Python, in the fixed order of
+   `optimizer.param_groups`.
+
+**A CycleGAN step runs several forward and backward passes per iteration
+with `no_sync` interleaved, which is outside the one forward, one backward
+model that `DistributedDataParallel` assumes.** On eight processes this
+deadlocks in an all-reduce in roughly a quarter of the runs, with one
+process left out of step and the others waiting; the same mismatch makes
+`static_graph=True` fail outright. `manual` has not deadlocked in any run
+and costs nothing at small batches, where the step is bound by kernel
+launches rather than by communication, so **prefer `manual` on more than
+four processes**.
+
+Both modes keep the weights identical across processes, which
+`tests/test_ddp.py` checks by training two processes and comparing them.
+BatchNorm statistics are per process in both modes.
+
+Other knobs, all optional:
+
+| variable | effect |
+| :--- | :--- |
+| `UVCGAN_S_DDP_COMPRESS` | `fp16` / `bf16` gradient compression (both modes) |
+| `UVCGAN_S_DDP_BUCKET_MB` | `ddp` bucket size, default 25 |
+| `UVCGAN_S_DDP_BUCKET_VIEW` | `ddp` `gradient_as_bucket_view` |
+| `UVCGAN_S_DDP_FIND_UNUSED` | `ddp` `find_unused_parameters` |
+| `UVCGAN_S_DDP_TIMEOUT_MIN` | collective timeout in minutes, default 30 |
+
+## Benchmarks
+
+`scripts/slurm/bench_pack.sbatch` runs a scaling benchmark inside a single
+allocation and `scripts/slurm/collect_bench.py` tabulates it;
+`scripts/slurm/hang_stats.sbatch` repeats a configuration to measure how
+often it deadlocks.
 
 
 # F.A.Q.
