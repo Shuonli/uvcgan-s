@@ -36,7 +36,9 @@ attempt() {
 
     # A deadlocked run can wedge in NCCL teardown long after the watchdog
     # fires, so kill the step on the first bad rank and cap it from the
-    # outside as well.
+    # outside as well. ATTEMPT_TIMEOUT must exceed the run time of a
+    # healthy attempt, otherwise a slow variant is reported as a hang
+    # (timeout exits 124, a killed srun 143).
     env "$@" BENCH_LABEL=$label \
         MASTER_PORT=$(( 24000 + (SLURM_JOB_ID + RANDOM) % 10000 )) \
         timeout --kill-after=30 ${ATTEMPT_TIMEOUT:-300} \
