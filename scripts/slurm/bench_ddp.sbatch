@@ -29,7 +29,9 @@ export TMPDIR=/tmp      # keep DataLoader worker scratch off NFS
 
 # torch.distributed rendezvous; RANK / LOCAL_RANK / WORLD_SIZE are taken
 # from SLURM_PROCID / SLURM_LOCALID / SLURM_NTASKS by uvcgan_s
-export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
+# NOTE: some nodes resolve their own hostname to an address they
+#       cannot reach; these jobs are single node, so use loopback
+export MASTER_ADDR=127.0.0.1
 export MASTER_PORT=$(( 20000 + SLURM_JOB_ID % 20000 ))
 
 echo "job $SLURM_JOB_ID on $SLURM_JOB_NODELIST: $SLURM_NTASKS task(s), label $BENCH_LABEL"

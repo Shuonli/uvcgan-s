@@ -30,7 +30,9 @@ export UVCGAN_S_OUTDIR=${UVCGAN_S_OUTDIR:-$PWD/outdir}
 export BENCH_STEPS=${BENCH_STEPS:-200}
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}
 export TMPDIR=/tmp
-export MASTER_ADDR=$(hostname)
+# NOTE: some nodes resolve their own hostname to an address they
+#       cannot reach; these jobs are single node, so use loopback
+export MASTER_ADDR=127.0.0.1
 
 PORT_BASE=$(( 20000 + SLURM_JOB_ID % 20000 ))
 

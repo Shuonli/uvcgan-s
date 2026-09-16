@@ -31,7 +31,9 @@ export UVCGAN_S_OUTDIR=${UVCGAN_S_OUTDIR:-$PWD/outdir}
 export BENCH_BATCH=4 BENCH_STEPS=40 BENCH_EPOCHS=2
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export TMPDIR=/tmp
-export MASTER_ADDR=$(hostname)
+# NOTE: some nodes resolve their own hostname to an address they
+#       cannot reach; these jobs are single node, so use loopback
+export MASTER_ADDR=127.0.0.1
 export UVCGAN_S_DDP_TIMEOUT_MIN=3
 
 variant() {

@@ -76,13 +76,20 @@ def _guess_master_addr():
         try:
             hostnames = subprocess.check_output(
                 [ 'scontrol', 'show', 'hostnames', nodelist ], text = True
-            )
-            return hostnames.split()[0]
+            ).split()
+
+            # NOTE: a node may resolve its own hostname to an address that it
+            #       cannot reach, so within a single node use the loopback
+            #       address rather than the node's name.
+            if len(hostnames) == 1:
+                return '127.0.0.1'
+
+            return hostnames[0]
 
         except (OSError, subprocess.CalledProcessError, IndexError):
             pass
 
-    return 'localhost'
+    return '127.0.0.1'
 
 def init_distributed(backend = None, timeout_minutes = None):
     """Initialize the default process group if launched with > 1 process.
