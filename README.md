@@ -251,6 +251,38 @@ Each output file contains a 24×64 calorimeter energy grid that can be used for
 physics analysis.
 
 
+# Batch Size
+
+The step of this model is dominated by kernel launches rather than by
+arithmetic, so on a single GPU a larger batch is almost free until the GPU
+finally saturates. Measured on one RTX 6000 Ada (48 GB), sPHENIX
+configuration:
+
+| batch | ms / step | samples / s | vs batch 4 | gain over previous | memory |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+|   1 |  330 |   3.0 |  0.26 |      |       |
+|   2 |  340 |   5.9 |  0.50 | 1.94 |       |
+|   4 |  340 |  11.8 |  1.00 | 2.00 |       |
+|   8 |  340 |  23.5 |  2.00 | 2.00 |       |
+|  16 |  342 |  46.8 |  3.98 | 1.99 |       |
+|  32 |  357 |  89.7 |  7.63 | 1.92 |       |
+|  64 |  519 | 123.4 | 10.50 | 1.38 |  7 GB |
+| 128 | 1001 | 127.9 | 10.88 | 1.04 | 11 GB |
+| 256 | 2207 | 116.0 |  9.87 | 0.91 | 19 GB |
+
+Every doubling up to 32 returns a full factor of two in throughput for a
+few percent of extra time per step; past 64 the step time grows in
+proportion to the batch and the throughput saturates, and at 256 it
+declines. Memory is never the limit. `batch_size` 32 is a good default on
+one GPU, as `Config` already assumes -- the sPHENIX training script
+overrides it to 4, which leaves most of the GPU idle.
+
+Note that the batch size is a property of the training run, not only of
+its speed: a larger batch means fewer, better gradient estimates per
+sample, so the learning rate and the length of the run have to be revised
+along with it.
+
+
 # Distributed Training
 
 Training scripts run unchanged on several GPUs with `torch.distributed`,
