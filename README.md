@@ -378,6 +378,25 @@ is bound by kernel launches: halving the work per process barely shortens
 it, while the all-reduce is added on top. A second GPU pays off only by
 doubling the effective batch, which is a different training run.
 
+## Two GPUs on one node or on two nodes
+
+Measured on RTX 6000 Ada, samples per second and time per step, two runs
+per point. The nodes have no InfiniBand; between them the all-reduce
+reached 102 MiB/s over 1 Gb Ethernet.
+
+| batch / GPU | 1 GPU | 2 GPUs, one node | 2 GPUs, two nodes |
+| :--- | ---: | ---: | ---: |
+| 4 | 11.8 (340 ms) | 22.6 (355 ms), 1.92x | 1.7 (4845 ms), 0.14x |
+| 32 | 89.7 (357 ms) | 165.1 (388 ms), 1.84x | 13.4 (4789 ms), 0.15x |
+| 32, bf16 gradients | | 165.4 (387 ms), 1.84x | 23.9 (2682 ms), 0.27x |
+
+A step all-reduces about 470 MiB of gradients, which takes a few
+milliseconds inside a node and several seconds between nodes on this
+network: two nodes are several times slower than a single GPU. Across
+nodes each process has to bind NCCL to an interface the other nodes can
+reach, c.f. `scripts/slurm/with_subnet_iface.sh`; otherwise the process
+group hangs while initializing.
+
 ## Benchmarks
 
 `scripts/slurm/bench_pack.sbatch` runs a scaling benchmark inside a single
