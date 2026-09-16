@@ -160,11 +160,13 @@ def wrap_model(model):
         #   UVCGAN_S_DDP_BUCKET_MB=25    bucket_cap_mb
         #   UVCGAN_S_DDP_BUCKET_VIEW=1   gradient_as_bucket_view
         #   UVCGAN_S_DDP_COMPRESS=bf16   fp16 / bf16 gradient compression
+        #   UVCGAN_S_DDP_STATIC_GRAPH=1  static_graph
         env         = os.environ
         find_unused = bool(int(env.get('UVCGAN_S_DDP_FIND_UNUSED', 0)))
         bucket_mb   = float(env.get('UVCGAN_S_DDP_BUCKET_MB', 25))
         bucket_view = bool(int(env.get('UVCGAN_S_DDP_BUCKET_VIEW', 0)))
         compress    = env.get('UVCGAN_S_DDP_COMPRESS', None)
+        static      = bool(int(env.get('UVCGAN_S_DDP_STATIC_GRAPH', 0)))
 
         # NOTE: buffers (BatchNorm running statistics, spectral norm
         #       vectors) are synchronized once at construction and then
@@ -178,6 +180,7 @@ def wrap_model(model):
             find_unused_parameters  = find_unused,
             bucket_cap_mb           = bucket_mb,
             gradient_as_bucket_view = bucket_view,
+            static_graph            = static,
         )
 
         if compress:

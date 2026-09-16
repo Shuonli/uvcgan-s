@@ -48,8 +48,10 @@ run() {
              --cpus-per-task=$SLURM_CPUS_PER_TASK --kill-on-bad-exit=1 -l \
              "$PYTHON" scripts/train/sphenix/bench_uvcgan-s.py \
         > "slurm_logs/${label}.log" 2>&1
+    local status=$?
 
-    echo "[$(date +%T)] done  $label (exit $?)"
+    # NOTE: capture $? first; a $(...) substitution would overwrite it
+    echo "[$(date +%T)] done  $label (exit $status)"
 }
 
 echo "job $SLURM_JOB_ID on $SLURM_JOB_NODELIST, $BENCH_STEPS steps/epoch"

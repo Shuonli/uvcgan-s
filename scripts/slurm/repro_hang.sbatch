@@ -36,6 +36,9 @@ for i in 1 2 3; do
              --cpus-per-task=$SLURM_CPUS_PER_TASK --kill-on-bad-exit=1 -l \
              "$PYTHON" scripts/train/sphenix/bench_uvcgan-s.py \
         > "slurm_logs/${label}.log" 2>&1
-    echo "[$(date +%T)] attempt $i exit=$?"
+    status=$?
+
+    # NOTE: capture $? first; a $(...) substitution would overwrite it
+    echo "[$(date +%T)] attempt $i exit=$status"
 done
 echo "[$(date +%T)] all done"
