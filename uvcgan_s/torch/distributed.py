@@ -70,7 +70,7 @@ def _guess_master_addr():
 
     return 'localhost'
 
-def init_distributed(backend = None, timeout_minutes = 30):
+def init_distributed(backend = None, timeout_minutes = None):
     """Initialize the default process group if launched with > 1 process.
 
     Returns True when running distributed and False for a plain single
@@ -85,6 +85,13 @@ def init_distributed(backend = None, timeout_minutes = 30):
 
     rank       = get_rank()
     local_rank = get_local_rank()
+
+    if timeout_minutes is None:
+        # a shorter timeout turns a collective deadlock into a fast
+        # failure, which is what benchmarks and CI want
+        timeout_minutes = float(
+            os.environ.get('UVCGAN_S_DDP_TIMEOUT_MIN', 30)
+        )
 
     os.environ.setdefault('MASTER_ADDR', _guess_master_addr())
     os.environ.setdefault('MASTER_PORT', '29500')
