@@ -22,7 +22,7 @@ PYTHON=${PYTHON:-/home/shuhang/miniconda3/envs/fm4npp/bin/python}
 export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"
 export UVCGAN_S_DATA=${UVCGAN_S_DATA:-$PWD/data}
 export UVCGAN_S_OUTDIR=${UVCGAN_S_OUTDIR:-$PWD/outdir}
-export BENCH_BATCH=4 BENCH_STEPS=20 BENCH_EPOCHS=2
+export BENCH_BATCH=4 BENCH_STEPS=${BENCH_STEPS:-20} BENCH_EPOCHS=${BENCH_EPOCHS:-2}
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export TMPDIR=/tmp
 export MASTER_ADDR=$(hostname)
@@ -69,12 +69,15 @@ for i in $(seq 1 $REPEATS); do
             batch32)    attempt batch32    $i BENCH_BATCH=32 ;;
             manual)     attempt manual     $i UVCGAN_S_DDP_MODE=manual ;;
             manual32)   attempt manual32   $i UVCGAN_S_DDP_MODE=manual BENCH_BATCH=32 ;;
+            manual_bf16)   attempt manual_bf16   $i UVCGAN_S_DDP_MODE=manual UVCGAN_S_DDP_COMPRESS=bf16 ;;
+            manual32_bf16) attempt manual32_bf16 $i UVCGAN_S_DDP_MODE=manual UVCGAN_S_DDP_COMPRESS=bf16 BENCH_BATCH=32 ;;
+            ddp32_bf16)    attempt ddp32_bf16    $i UVCGAN_S_DDP_COMPRESS=bf16 BENCH_BATCH=32 ;;
             *) echo "unknown variant '$v'" >&2 ;;
         esac
     done
 done
 
 echo "[$(date +%T)] summary"
-grep -oE "(baseline|one_bucket|bf16|batch32|manual|manual32) #[0-9]+ (OK|HUNG)" "slurm_logs/hang_stats_${SLURM_JOB_ID}.out" \
+grep -ohE "[a-z0-9_]+ #[0-9]+ (OK|HUNG)" "slurm_logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.out" \
     | awk '{n[$1"_"$3]++} END {for (k in n) print "  ", k, n[k]}' | sort
 echo "[$(date +%T)] all done"

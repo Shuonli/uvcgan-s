@@ -307,10 +307,25 @@ def all_reduce_gradients(optimizer, average = True):
 
     # pylint: disable=protected-access
     flat = torch._utils._flatten_dense_tensors(grads)
-    dist.all_reduce(flat)
 
-    if average:
-        flat /= dist.get_world_size()
+    # UVCGAN_S_DDP_COMPRESS halves the bytes on the wire, as the equivalent
+    # DistributedDataParallel communication hook does
+    compress = os.environ.get('UVCGAN_S_DDP_COMPRESS', None)
+    dtypes   = { 'fp16' : torch.float16, 'bf16' : torch.bfloat16 }
+
+    if compress:
+        buffer = flat.to(dtypes[compress])
+        dist.all_reduce(buffer)
+
+        if average:
+            buffer /= dist.get_world_size()
+
+        flat = buffer.to(flat.dtype)
+    else:
+        dist.all_reduce(flat)
+
+        if average:
+            flat /= dist.get_world_size()
 
     for (grad, synced) in zip(
         grads, torch._utils._unflatten_dense_tensors(flat, grads)
