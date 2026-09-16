@@ -12,7 +12,7 @@ from uvcgan_s.torch.gan_losses import select_gan_loss
 from uvcgan_s.torch.queue      import FastQueue
 from uvcgan_s.torch.funcs      import update_average_model
 from uvcgan_s.torch.distributed import (
-    is_distributed, no_sync, wrap_model
+    all_reduce_gradients, is_distributed, no_sync, wrap_model
 )
 
 from uvcgan_s.torch.layers.batch_head import BatchHeadWrapper, get_batch_head
@@ -550,6 +550,7 @@ class UVCGAN2(ModelBase):
                 self.forward_dispatch(direction)
                 self.backward_gen(direction)
 
+        all_reduce_gradients(self.optimizers.gen)
         self.optimizers.gen.step()
 
     def optimization_step_disc(self):
@@ -558,6 +559,7 @@ class UVCGAN2(ModelBase):
 
         self.backward_discriminators()
 
+        all_reduce_gradients(self.optimizers.disc)
         self.optimizers.disc.step()
 
     def _accumulate_averages(self):

@@ -13,7 +13,7 @@ from uvcgan_s.torch.funcs             import (
     update_average_model, clip_gradients
 )
 from uvcgan_s.torch.distributed       import (
-    is_distributed, no_sync, wrap_model
+    all_reduce_gradients, is_distributed, no_sync, wrap_model
 )
 from uvcgan_s.torch.layers.batch_head import BatchHeadWrapper, get_batch_head
 from uvcgan_s.torch.gradient_penalty  import GradientPenalty
@@ -607,6 +607,7 @@ class UVCGAN_S(ModelBase):
                 self.forward_dispatch(direction)
                 self.backward_gen(direction)
 
+        all_reduce_gradients(self.optimizers.gen)
         clip_gradients(self.optimizers.gen, **self._grad_clip)
         self.optimizers.gen.step()
 
@@ -619,6 +620,7 @@ class UVCGAN_S(ModelBase):
 
         self.backward_discriminators()
 
+        all_reduce_gradients(self.optimizers.disc)
         clip_gradients(self.optimizers.disc, **self._grad_clip)
         self.optimizers.disc.step()
 

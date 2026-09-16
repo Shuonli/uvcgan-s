@@ -34,6 +34,20 @@ def _env_int(names, default = None):
 
     return default
 
+def get_sync_mode():
+    """How gradients are synchronized: 'ddp' or 'manual'.
+
+    'ddp'    wraps every model into `DistributedDataParallel`, which
+             overlaps the all-reduce with the backward pass.
+    'manual' leaves the models bare and all-reduces the gradients of each
+             optimizer once per step, from Python, in a fixed order. This
+             gives up the overlap but keeps the collectives independent of
+             the order in which autograd produces gradients, which the
+             several forward and backward passes of a CycleGAN step make
+             hard to predict.
+    """
+    return os.environ.get('UVCGAN_S_DDP_MODE', 'ddp')
+
 def is_distributed():
     return dist.is_available() and dist.is_initialized()
 
@@ -147,6 +161,11 @@ def wrap_model(model):
     GPUs is preserved.
     """
     if is_distributed():
+        if get_sync_mode() == 'manual':
+            # gradients are all-reduced explicitly, c.f.
+            # `all_reduce_gradients`
+            return model
+
         if not any(p.requires_grad for p in model.parameters()):
             # DDP refuses modules without trainable parameters (e.g. Identity)
             return model
@@ -249,3 +268,45 @@ def reduce_dict(values, average = True):
         tensor /= dist.get_world_size()
 
     return dict(zip(keys, tensor.tolist()))
+
+def all_reduce_gradients(optimizer, average = True):
+    """Average the gradients of an optimizer's parameters across processes.
+
+    Every process contributes one entry per parameter, in the order of
+    `optimizer.param_groups`, so the collectives are identical on all
+    processes regardless of what autograd did. Parameters without a
+    gradient contribute zeros, which keeps the buffer layout the same
+    everywhere.
+    """
+    if (not is_distributed()) or (get_sync_mode() != 'manual'):
+        # in 'ddp' mode the gradients are already reduced by the
+        # DistributedDataParallel hooks
+        return
+
+    params = [
+        param
+            for group in optimizer.param_groups
+                for param in group['params']
+    ]
+
+    if not params:
+        return
+
+    grads = []
+    for param in params:
+        if param.grad is None:
+            param.grad = torch.zeros_like(param)
+
+        grads.append(param.grad)
+
+    # pylint: disable=protected-access
+    flat = torch._utils._flatten_dense_tensors(grads)
+    dist.all_reduce(flat)
+
+    if average:
+        flat /= dist.get_world_size()
+
+    for (grad, synced) in zip(
+        grads, torch._utils._unflatten_dense_tensors(flat, grads)
+    ):
+        grad.copy_(synced)

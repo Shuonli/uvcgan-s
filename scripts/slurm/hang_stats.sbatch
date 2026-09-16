@@ -34,10 +34,15 @@ attempt() {
     local name=$1 i=$2; shift 2
     local label=stat_${name}_${i}_${SLURM_JOB_ID}
 
+    # A deadlocked run can wedge in NCCL teardown long after the watchdog
+    # fires, so kill the step on the first bad rank and cap it from the
+    # outside as well.
     env "$@" BENCH_LABEL=$label \
-        MASTER_PORT=$(( 24000 + SLURM_JOB_ID % 10000 )) \
+        MASTER_PORT=$(( 24000 + (SLURM_JOB_ID + RANDOM) % 10000 )) \
+        timeout --kill-after=30 ${ATTEMPT_TIMEOUT:-300} \
         srun --exact -N1 -n8 --ntasks-per-node=8 --gres=gpu:8 \
-             --cpus-per-task=$SLURM_CPUS_PER_TASK -l \
+             --cpus-per-task=$SLURM_CPUS_PER_TASK \
+             --kill-on-bad-exit=1 --wait=30 -l \
              "$PYTHON" scripts/train/sphenix/bench_uvcgan-s.py \
         > "slurm_logs/${label}.log" 2>&1
     local status=$?
@@ -53,13 +58,23 @@ attempt() {
 }
 
 for i in $(seq 1 $REPEATS); do
-    attempt baseline    $i
-    attempt one_bucket  $i UVCGAN_S_DDP_BUCKET_MB=512
-    attempt static      $i UVCGAN_S_DDP_STATIC_GRAPH=1
-    attempt bf16        $i UVCGAN_S_DDP_COMPRESS=bf16
+    # NOTE: UVCGAN_S_DDP_STATIC_GRAPH is not in this list: static_graph
+    #       assumes one forward and one backward per iteration and
+    #       fails immediately here with an expect_autograd_hooks_ assert
+    for v in ${VARIANTS:-baseline one_bucket bf16 batch32}; do
+        case $v in
+            baseline)   attempt baseline   $i ;;
+            one_bucket) attempt one_bucket $i UVCGAN_S_DDP_BUCKET_MB=512 ;;
+            bf16)       attempt bf16       $i UVCGAN_S_DDP_COMPRESS=bf16 ;;
+            batch32)    attempt batch32    $i BENCH_BATCH=32 ;;
+            manual)     attempt manual     $i UVCGAN_S_DDP_MODE=manual ;;
+            manual32)   attempt manual32   $i UVCGAN_S_DDP_MODE=manual BENCH_BATCH=32 ;;
+            *) echo "unknown variant '$v'" >&2 ;;
+        esac
+    done
 done
 
 echo "[$(date +%T)] summary"
-grep -oE "(baseline|one_bucket|static|bf16) #[0-9]+ (OK|HUNG)" "slurm_logs/hang_stats_${SLURM_JOB_ID}.out" \
+grep -oE "(baseline|one_bucket|bf16|batch32|manual|manual32) #[0-9]+ (OK|HUNG)" "slurm_logs/hang_stats_${SLURM_JOB_ID}.out" \
     | awk '{n[$1"_"$3]++} END {for (k in n) print "  ", k, n[k]}' | sort
 echo "[$(date +%T)] all done"
