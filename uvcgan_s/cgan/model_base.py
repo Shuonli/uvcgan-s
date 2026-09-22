@@ -31,8 +31,25 @@ class ModelBase:
         self.optimizers = NamedDict()
         self.schedulers = NamedDict()
 
+        self._config_lrs = {}
+
         if is_train:
             self.optimizers = self._setup_optimizers(config)
+
+            # NOTE: loading an optimizer restores the learning rate it
+            #       was saved with. Remember the configured rates so
+            #       that `load` can put them back: the configuration,
+            #       not the checkpoint, decides the rate. This matters
+            #       when a checkpoint is continued with a different
+            #       configuration, and is a no-op for a plain resume.
+            #       They are read before the schedulers are built, as a
+            #       warm-up scales the optimizer's rate down on the spot.
+            self._config_lrs = {
+                name : [ g['lr'] for g in opt.param_groups ]
+                    for (name, opt) in self.optimizers.items()
+                        if opt is not None
+            }
+
             self.schedulers = self._setup_schedulers(config)
 
     def set_input(self, inputs, domain = None):
@@ -108,9 +125,29 @@ class ModelBase:
         load(self.optimizers, self.savedir, PREFIX_OPT,   epoch, self.device)
         load(self.schedulers, self.savedir, PREFIX_SCHED, epoch, self.device)
 
+        self._restore_configured_lr()
+
         self.epoch = epoch
         self._load_model_state(epoch)
         self._handle_epoch_end()
+
+    def _restore_configured_lr(self):
+        for (name, lrs) in self._config_lrs.items():
+            optimizer = self.optimizers[name]
+
+            for (group, lr) in zip(optimizer.param_groups, lrs):
+                if group['lr'] != lr:
+                    LOGGER.warning(
+                        "Optimizer '%s': keeping the configured learning"
+                        " rate %g instead of the checkpoint's %g",
+                        name, lr, group['lr']
+                    )
+                group['lr']         = lr
+                group['initial_lr'] = lr
+
+            scheduler = self.schedulers.get(name, None)
+            if scheduler is not None:
+                scheduler.base_lrs = list(lrs)
 
     def save(self, epoch = None):
         if not is_main_process():

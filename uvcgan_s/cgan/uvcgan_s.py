@@ -144,6 +144,11 @@ class UVCGAN_S(ModelBase):
         if config.gradient_penalty is not None:
             losses += [ 'gp_a0', 'gp_a1', 'gp_b' ]
 
+        if self._grad_clip.get('norm', None) is not None:
+            # the gradient norm before clipping shows whether the clip
+            # is active, which depends on how noisy the gradients are
+            losses += [ 'gnorm_gen', 'gnorm_disc' ]
+
         return NamedDict(*losses)
 
     def _setup_optimizers(self, config):
@@ -608,7 +613,11 @@ class UVCGAN_S(ModelBase):
                 self.backward_gen(direction)
 
         all_reduce_gradients(self.optimizers.gen)
-        clip_gradients(self.optimizers.gen, **self._grad_clip)
+        gnorm = clip_gradients(self.optimizers.gen, **self._grad_clip)
+
+        if gnorm is not None:
+            self.losses.gnorm_gen = gnorm
+
         self.optimizers.gen.step()
 
     def optimization_step_disc(self):
@@ -621,7 +630,11 @@ class UVCGAN_S(ModelBase):
         self.backward_discriminators()
 
         all_reduce_gradients(self.optimizers.disc)
-        clip_gradients(self.optimizers.disc, **self._grad_clip)
+        gnorm = clip_gradients(self.optimizers.disc, **self._grad_clip)
+
+        if gnorm is not None:
+            self.losses.gnorm_disc = gnorm
+
         self.optimizers.disc.step()
 
     def _accumulate_averages(self):

@@ -45,8 +45,9 @@ def update_average_model(average_model, model, momentum):
             v.lerp_(online_bufs[k], (1 - momentum))
 
 def clip_gradients(optimizer, norm = None, value = None):
+    """Clip gradients in place, returning the norm before clipping."""
     if (norm is None) and (value is None):
-        return
+        return None
 
     params = [
         param
@@ -54,8 +55,14 @@ def clip_gradients(optimizer, norm = None, value = None):
                 for param in param_group['params']
     ]
 
+    total_norm = None
+
     if norm is not None:
-        torch.nn.utils.clip_grad_norm_(params, max_norm = norm)
+        total_norm = float(
+            torch.nn.utils.clip_grad_norm_(params, max_norm = norm)
+        )
 
     if value is not None:
         torch.nn.utils.clip_grad_value_(params, clip_value = value)
+
+    return total_norm
