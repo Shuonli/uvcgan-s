@@ -434,6 +434,41 @@ nodes each process has to bind NCCL to an interface the other nodes can
 reach, c.f. `scripts/slurm/with_subnet_iface.sh`; otherwise the process
 group hangs while initializing.
 
+## Cost of a step
+
+A step of this configuration issues about 33000 CUDA kernels of 7 us each:
+on 24x64 images almost none of them is limited by arithmetic, so most of
+the cost is per-kernel overhead. At `batch_size` 4 the GPU is idle for
+about half of the step waiting for kernels to be launched; at 32 the same
+number of kernels simply do more work each, which is why a larger batch is
+nearly free until the GPU saturates.
+
+Two changes reduce the cost of a step without touching the batch size,
+measured on one RTX A6000:
+
+| | batch 4 | batch 32 |
+| :--- | ---: | ---: |
+| as configured | 467 ms | 593 ms |
+| `gp_cache_period` 4 | 371 ms (1.26x) | 443 ms (1.34x) |
+| `torch.compile` on the generators | 405 ms (1.15x) | 552 ms (1.07x) |
+| both | 330 ms (1.41x) | 399 ms (1.48x) |
+
+The gradient penalty takes a second backward pass through all three
+discriminators and accounts for 38% of the step; `gp_cache_period` reuses
+its gradient for several steps, which the model already supports. Removing
+the penalty entirely would give 1.38x, so caching recovers most of what it
+costs. Whether a stale penalty gradient harms the result is not measured
+here and should be checked before relying on it.
+
+`torch.compile` helps less at the larger batch because the GPU is busy
+anyway. CUDA graphs (`mode='reduce-overhead'`) would address the idle half
+of the small-batch step, but the step keeps tensors between its several
+backward passes and did not capture; it would need the training step
+restructured.
+
+Unlike a larger batch, neither change alters the optimization, so the
+speedup is not paid for in convergence.
+
 ## Benchmarks
 
 `scripts/slurm/bench_pack.sbatch` runs a scaling benchmark inside a single

@@ -154,11 +154,21 @@ def barrier():
         dist.barrier()
 
 def unwrap_model(model):
-    """Strip DDP / DataParallel wrappers."""
-    while isinstance(model, WRAPPER_TYPES):
-        model = model.module
+    """Strip DDP / DataParallel / torch.compile wrappers."""
+    while True:
+        if isinstance(model, WRAPPER_TYPES):
+            model = model.module
+            continue
 
-    return model
+        # torch.compile returns a wrapper whose parameters are named
+        # with an `_orig_mod.` prefix, which would leak into
+        # checkpoints and break lookups by parameter name
+        original = getattr(model, '_orig_mod', None)
+        if original is not None:
+            model = original
+            continue
+
+        return model
 
 def wrap_model(model):
     """Wrap `model` for multi-GPU training.
