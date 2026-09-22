@@ -282,6 +282,43 @@ its speed: a larger batch means fewer, better gradient estimates per
 sample, so the learning rate and the length of the run have to be revised
 along with it.
 
+## Does a larger batch shorten training?
+
+Higher throughput only shortens training if the extra samples reduce the
+number of updates needed. `scripts/slurm/diag_batch_size.sbatch` trains
+batch 4, 32 and 128 concurrently on identical GPUs and
+`scripts/slurm/plot_batch_diag.py` draws the quality metrics against both
+axes. On the sPHENIX configuration the curves of every batch size fall on
+top of each other against the number of **updates**, and are separated by
+exactly the batch ratio against the number of **samples**: progress is
+limited by the updates, not by the data.
+
+Updates needed to reach a given value of `idt_aa_a1`, relative to batch 4
+(1.0 would mean the larger batch saves nothing; 8 and 32 would mean it
+saves in proportion to its size):
+
+| target | batch 4 | batch 32 | batch 128 |
+| ---: | ---: | ---: | ---: |
+| 0.045 | 1.00 | 1.09 | 0.92 |
+| 0.040 | 1.00 | 1.29 | 1.06 |
+| 0.036 | 1.00 | 1.35 | 1.07 |
+| 0.034 | 1.00 | 1.75 | not reached |
+
+Batch 128 needs as many updates as batch 4 while reading 32 times the
+data, so its 10x higher throughput is spent entirely on samples that do
+not help. In wall clock, reaching 0.034 took 1.49 h at batch 4, 1.07 h at
+batch 32 and more than 4.5 h at batch 128. Batch 128 also diverged at a
+learning rate of 2e-4, while 1e-4 was stable.
+
+The consequence for several GPUs is that they pay off only by splitting a
+fixed batch, not by enlarging it, and splitting is worth about 1.1x here
+(c.f. the strong scaling rows above). These runs cover the first few
+percent of a full training; the batch size that a run can profit from is
+known to grow as training proceeds, so the measurement should be repeated
+later in training before drawing conclusions about the whole run.
+
+The figure is written to `OUTDIR/sphenix/diag/batch_diag.png`.
+
 
 # Distributed Training
 
