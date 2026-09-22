@@ -9,6 +9,8 @@ whether a larger batch (or more GPUs) shortens training:
     DIAG_STEPS   updates per epoch, i.e. per row of history.csv (default 200)
     DIAG_EPOCHS  epochs; the run is normally stopped by its time limit
     DIAG_LABEL   model label
+    DIAG_SUBDIR  directory under OUTDIR/sphenix (default 'diag')
+    DIAG_CHECKPOINT  epochs between checkpoints (default: never)
 
 Relative to `train_uvcgan-s.py` only the run length and the warm-up are
 different: epochs are short so that `history.csv` is sampled finely, and
@@ -31,6 +33,8 @@ LR     = float(os.environ.get('DIAG_LR', 5e-5))
 STEPS  = int(os.environ.get('DIAG_STEPS', 200))
 EPOCHS = int(os.environ.get('DIAG_EPOCHS', 2000))
 LABEL  = os.environ.get('DIAG_LABEL', f'diag_b{BATCH}_lr{LR:g}')
+SUBDIR = os.environ.get('DIAG_SUBDIR', 'diag')
+CKPT   = int(os.environ.get('DIAG_CHECKPOINT', 1000000))
 
 DISC_BLOCKS = [
     # (1, 24, 64)
@@ -177,10 +181,12 @@ args_dict = {
     },
 # args
     'label'  : LABEL,
-    'outdir' : os.path.join(ROOT_OUTDIR, 'sphenix', 'diag'),
+    'outdir' : os.path.join(ROOT_OUTDIR, 'sphenix', SUBDIR),
     'log_level'  : 'INFO',
-    # the run is stopped by its time limit; history.csv is written each epoch
-    'checkpoint' : 1000000,
+    # the run is normally stopped by its time limit, and history.csv is
+    # written every epoch; checkpoints are only needed by the base run that
+    # the mid-training measurement branches off
+    'checkpoint' : CKPT,
 }
 
 train(args_dict)
