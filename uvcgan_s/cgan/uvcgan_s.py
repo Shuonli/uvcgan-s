@@ -10,7 +10,8 @@ from uvcgan_s.torch.gan_losses        import select_gan_loss
 from uvcgan_s.torch.select            import select_optimizer
 from uvcgan_s.torch.queue             import FastQueue
 from uvcgan_s.torch.funcs             import (
-    update_average_model, clip_gradients
+    update_average_model, clip_gradients, autocast, get_amp_dtype,
+    lazy_metrics
 )
 from uvcgan_s.torch.distributed       import (
     all_reduce_gradients, is_distributed, no_sync, wrap_model
@@ -219,6 +220,10 @@ class UVCGAN_S(ModelBase):
         self._c_a1 = config.data.datasets[1].shape[0]
 
         self._grad_clip = grad_clip or {}
+
+        # c.f. UVCGAN_S_AMP and UVCGAN_S_LAZY_METRICS
+        self._amp_dtype    = get_amp_dtype()
+        self._lazy_metrics = lazy_metrics()
 
         self._norm_loss_a0 = norm_loss_a0
         self._norm_loss_a1 = norm_loss_a1
@@ -477,23 +482,26 @@ class UVCGAN_S(ModelBase):
             + self.lambda_cyc_a1 * self.losses.idt_aa_a1
         )
 
-    def backward_gen(self, direction):
+    def eval_loss_gen(self, direction):
         if direction == 'cyc-aba':
-            loss = self.eval_loss_of_cycle_forward_aba()
+            return self.eval_loss_of_cycle_forward_aba()
 
-        elif direction == 'cyc-bab':
-            loss = self.eval_loss_of_cycle_forward_bab()
+        if direction == 'cyc-bab':
+            return self.eval_loss_of_cycle_forward_bab()
 
-        elif direction == 'idt-bb':
-            loss = self.eval_loss_of_idt_forward_bb()
+        if direction == 'idt-bb':
+            return self.eval_loss_of_idt_forward_bb()
 
-        elif direction == 'idt-aa':
-            loss = self.eval_loss_of_idt_forward_aa()
+        if direction == 'idt-aa':
+            return self.eval_loss_of_idt_forward_aa()
 
-        else:
-            raise ValueError(f"Unknown forward direction: '{direction}'")
+        raise ValueError(f"Unknown forward direction: '{direction}'")
 
-        loss.backward()
+    def backward_gen(self, direction):
+        self.eval_loss_gen(direction).backward()
+
+    def _autocast(self):
+        return autocast(self.device, self._amp_dtype)
 
     def backward_discriminator_base(
         self, model, real, fake, queue_real, queue_fake, gp_cacher, scale,
@@ -506,7 +514,7 @@ class UVCGAN_S(ModelBase):
             # DDP: the double backward of the gradient penalty does not
             # reach every parameter, so its gradient is accumulated locally
             # and all-reduced by the synchronized backward below.
-            with no_sync(model):
+            with no_sync(model), self._autocast():
                 loss_gp = gp_cacher(
                     model, fake, real,
                     model_kwargs_fake = {
@@ -517,23 +525,25 @@ class UVCGAN_S(ModelBase):
                     },
                 )
 
-        pred_real = queued_forward(
-            model, real, queue_real, self.data_norm, normalize,
-            update_queue = True
-        )
-        loss_real = self.criterion_gan(
-            pred_real, is_real = True, is_generator = False
-        )
+        with self._autocast():
+            pred_real = queued_forward(
+                model, real, queue_real, self.data_norm, normalize,
+                update_queue = True
+            )
+            loss_real = self.criterion_gan(
+                pred_real, is_real = True, is_generator = False
+            )
 
-        pred_fake = queued_forward(
-            model, fake, queue_fake, self.data_norm, normalize,
-            update_queue = True
-        )
-        loss_fake = self.criterion_gan(
-            pred_fake, is_real = False, is_generator = False
-        )
+            pred_fake = queued_forward(
+                model, fake, queue_fake, self.data_norm, normalize,
+                update_queue = True
+            )
+            loss_fake = self.criterion_gan(
+                pred_fake, is_real = False, is_generator = False
+            )
 
-        loss = (loss_real + loss_fake) * 0.5 * scale
+            loss = (loss_real + loss_fake) * 0.5 * scale
+
         loss.backward()
 
         return (loss_gp, loss)
@@ -609,11 +619,17 @@ class UVCGAN_S(ModelBase):
             ]
 
             with no_sync(*unsynced):
-                self.forward_dispatch(direction)
-                self.backward_gen(direction)
+                with self._autocast():
+                    self.forward_dispatch(direction)
+                    loss = self.eval_loss_gen(direction)
+
+                loss.backward()
 
         all_reduce_gradients(self.optimizers.gen)
-        gnorm = clip_gradients(self.optimizers.gen, **self._grad_clip)
+        gnorm = clip_gradients(
+            self.optimizers.gen, **self._grad_clip,
+            as_tensor = self._lazy_metrics
+        )
 
         if gnorm is not None:
             self.losses.gnorm_gen = gnorm
@@ -630,7 +646,10 @@ class UVCGAN_S(ModelBase):
         self.backward_discriminators()
 
         all_reduce_gradients(self.optimizers.disc)
-        gnorm = clip_gradients(self.optimizers.disc, **self._grad_clip)
+        gnorm = clip_gradients(
+            self.optimizers.disc, **self._grad_clip,
+            as_tensor = self._lazy_metrics
+        )
 
         if gnorm is not None:
             self.losses.gnorm_disc = gnorm

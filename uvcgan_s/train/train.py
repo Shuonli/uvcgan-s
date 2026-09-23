@@ -7,7 +7,9 @@ import tqdm
 from uvcgan_s.config            import Args
 from uvcgan_s.data              import construct_data_loaders
 from uvcgan_s.data.data         import set_loader_epoch
-from uvcgan_s.torch.funcs       import get_torch_device_smart, seed_everything
+from uvcgan_s.torch.funcs       import (
+    get_torch_device_smart, seed_everything, lazy_metrics
+)
 from uvcgan_s.torch.distributed import (
     init_distributed, cleanup_distributed, barrier, is_main_process,
     get_world_size, reduce_dict
@@ -20,6 +22,13 @@ from .callbacks import TrainingHistory
 from .transfer  import transfer
 
 LOGGER = logging.getLogger('uvcgan_s.train')
+
+# steps between updates of the progress bar when the losses stay on the
+# device, c.f. `lazy_metrics`
+LAZY_DISPLAY_PERIOD = 50
+
+def to_host(values):
+    return { k : float(v) for (k, v) in values.items() }
 
 def training_epoch(
     it_train, model, title, steps_per_epoch, show_progress = True
@@ -35,17 +44,27 @@ def training_epoch(
         disable = not show_progress
     )
     metrics = LossMetrics()
+    lazy    = lazy_metrics()
 
-    for batch in islice(it_train, steps):
+    for (step, batch) in enumerate(islice(it_train, steps)):
         model.set_input(batch)
         model.optimization_step()
 
-        metrics.update(model.get_current_losses())
+        metrics.update(model.get_current_losses(lazy = lazy))
 
-        progbar.set_postfix(metrics.values, refresh = False)
+        if not lazy:
+            progbar.set_postfix(metrics.values, refresh = False)
+        elif step % LAZY_DISPLAY_PERIOD == 0:
+            progbar.set_postfix(to_host(metrics.values), refresh = False)
+
         progbar.update()
 
     progbar.close()
+
+    if lazy and (metrics.values is not None):
+        # the only read back of the epoch
+        metrics = LossMetrics(to_host(metrics.values), n = 1)
+
     return (metrics, steps)
 
 def try_continue_training(args, model):

@@ -9,6 +9,12 @@ point of the scaling benchmark (c.f. `scripts/slurm/submit_bench.sh`):
     BENCH_EPOCHS  epochs; the first one is warm-up (default 3)
     BENCH_WORKERS data loader workers per process (default 4)
     BENCH_LABEL   model label                     (default 'bench')
+    BENCH_TF32    1: matrix products in TF32 instead of float32 (default 0)
+    BENCH_FUSED   1: fused Adam kernels (default 0)
+
+Two more switches act inside the library: UVCGAN_S_AMP=bf16 runs the
+forward passes under bfloat16 autocast, UVCGAN_S_LAZY_METRICS=1 keeps the
+losses on the device until the end of an epoch.
 
 Timing of every epoch is recorded in `history.csv` (`epoch_time`,
 `samples_per_sec`); `scripts/slurm/collect_bench.py` tabulates the results.
@@ -30,6 +36,14 @@ STEPS   = int(os.environ.get('BENCH_STEPS',   400))
 EPOCHS  = int(os.environ.get('BENCH_EPOCHS',  3))
 WORKERS = int(os.environ.get('BENCH_WORKERS', 4))
 LABEL   = os.environ.get('BENCH_LABEL', 'bench')
+TF32    = os.environ.get('BENCH_TF32', '0') == '1'
+FUSED   = os.environ.get('BENCH_FUSED', '0') == '1'
+
+if TF32:
+    # convolutions use TF32 by default already, matrix products do not
+    torch.set_float32_matmul_precision('high')
+
+OPTIM_EXTRA = { 'fused' : True } if FUSED else {}
 
 DISC_BLOCKS = [
     # (1, 24, 64)
@@ -94,6 +108,7 @@ args_dict = {
             'name'  : 'Adam',
             'lr'    : LR,
             'betas' : (0.5, 0.99),
+            **OPTIM_EXTRA,
         },
         'weight_init' : {
             'name'      : 'normal',
@@ -127,6 +142,7 @@ args_dict = {
             'name'  : 'Adam',
             'lr'    : LR,
             'betas' : (0.5, 0.99),
+            **OPTIM_EXTRA,
         },
         'weight_init' : {
             'name' : 'kaiming',

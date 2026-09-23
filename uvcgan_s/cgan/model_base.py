@@ -204,11 +204,16 @@ class ModelBase:
             for param in model.parameters():
                 param.requires_grad = requires_grad
 
-    def get_current_losses(self):
+    def get_current_losses(self, lazy = False):
+        """Losses of the last step: floats, or with `lazy` float32 tensors
+        that stay on the device (reading a float waits for the device)."""
         result = {}
 
         for (k,v) in self.losses.items():
-            result[k] = float(v)
+            if lazy and torch.is_tensor(v):
+                result[k] = v.detach().float()
+            else:
+                result[k] = float(v)
 
         return result
 
