@@ -1,6 +1,6 @@
 # Scaling and speed of uvcgan-s on the sPHENIX configuration
 
-Session notes, 2026-09-15 .. 2026-09-22. Branch `ddp` of
+Session notes, 2026-09-15 .. 2026-09-23. Branch `ddp` of
 `github.com/Shuonli/uvcgan-s`, environment `fm4npp`
 (`/home/shuhang/miniconda3/envs/fm4npp/bin/python`, torch 2.7.1+cu118,
 python 3.12). Data: `data/sphenix/2025-06-05_jet_bkg_sub` (23 GB, untracked,
@@ -29,6 +29,10 @@ stated otherwise. The README carries the same tables in a shorter form.
 
 Items 1-3 together are roughly 2.5x over the configuration as it stands,
 all on one GPU.
+
+**Items 1 and 2 rest on training losses** (item 1 partly on `cycle_b`,
+which turned out not to track the extraction, c.f. "Held-out quality
+against truth"). Job 20016 re-checks both against held-out truth.
 
 ## Throughput against batch size
 
@@ -85,11 +89,13 @@ optimizer state) the ordering holds. Hours to reach a `cycle_b` target:
 | 0.026 | never | 3.83 | never |
 | best in 4.5 h | 0.0265 | 0.0247 | 0.0311 |
 
-**Metric caveat.** `idt_aa_a1` saturates by ~20k updates and stops
-discriminating; `cycle_b`, `idt_bb` and `cycle_a1` keep moving and should
-be used for any comparison at depth. All of these are training losses:
-the val and test splits hold only the `embed` domain, so the separation
-metric cannot be computed on held-out data without re-splitting the inputs.
+**Metric caveat.** `idt_aa_a1` saturates by ~20k updates, while
+`cycle_b`, `idt_bb` and `cycle_a1` keep moving, so the comparison above
+and the learning rate sweep below used `cycle_b` at depth. All of these
+are training losses, and the held-out scores (next sections) show that
+`cycle_b` does **not** track the extraction: `idt_aa_a1` does. The
+conclusions drawn from `cycle_b` are being re-checked against held-out
+truth (job 20016).
 
 ## Can the learning rate be raised with the batch?
 
@@ -109,6 +115,80 @@ initialization:
 ceiling is a property of the model, not of the batch. Square-root scaling
 would want ~2.8e-4 at batch 128, which is far past where this GAN breaks:
 the larger batch can never be cashed in.
+
+## Held-out quality against truth
+
+**The val split does carry truth.** Every val `embed` event is an event of
+the PYTHIA production in `train/signal.h5` embedded into HIJING: the index
+files name the same `(file, event)` -- all 200k val and 633k train mixed
+events have their counterpart, and the keys are unique in the signal
+file -- and the mixed image contains the signal image tower by tower
+(embed >= signal in every tower for all 20k sampled val pairs and 2k
+sampled train pairs; for shuffled pairs half the signal energy is
+missing). The background truth is `embed - signal`, there is no noise.
+So the training data are paired too; the model is trained unpaired and
+never uses it. Caveat: the val events' signal images are among the 2.6M
+unpaired training images of the signal domain -- the mixed events and the
+pairing are held out, the signal images are not.
+
+`scripts/slurm/eval_val_truth.py` scores checkpoints on a fixed random
+sample of 20k val events (cached under `OUTDIR/sphenix/val_truth/`,
+~5 s per network on a GPU):
+
+- `l1_sig`, `l1_bkg`: per-tower L1 error of the extracted signal and
+  background, GeV -- the held-out counterparts of `idt_aa_a1`, `idt_aa_a0`;
+- jet energy in a R=0.4 cone around the leading truth jet (|eta| < 0.7 and
+  >= 10 GeV: 17.5k of the 20k events), extracted against truth: `jes`
+  (mean ratio), `bias` (mean difference) and resolutions `jer` (standard
+  deviation of the difference) and **`jer_cal`** (spread around a linear
+  fit of extracted against true energy, divided by its slope, i.e. the
+  resolution after an offset and scale calibration). Use `jer_cal`: the
+  networks' energy scales differ (0.75 to 1.0), and an energy scale below
+  one shrinks `jer` without making the extraction any better.
+
+Truth cone energies: median 32 GeV (5-95%: 23-44); the HIJING background
+in the same cone is 40 +- 10 GeV. Reference points for `jer_cal`: a
+per-eta-row median-rho subtraction of the mixed event gives 5.28 GeV
+(`bias` +4.4: the median under-estimates the skewed background);
+subtracting the *true* background's per-row mean -- the best any per-row
+rho can do -- 5.09 GeV.
+
+Base run (batch 32 at 5e-5, job 19989), one row per checkpoint:
+
+| updates | raw `l1_sig` | raw `jes` | raw `jer_cal` | ema `l1_sig` | ema `jes` | ema `jer_cal` | init share of EMA |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 10k | 0.0365 | 0.87 | 4.12 | 0.272 | 0.75 | 9.25 | 37% |
+| 20k | 0.0304 | 0.81 | 3.92 | 0.097 | 0.84 | 5.77 | 14% |
+| 30k | 0.0412 | 0.93 | 3.86 | 0.049 | 0.95 | 4.04 | 5% |
+| 40k | 0.0361 | 0.99 | 3.77 | 0.0375 | 0.98 | 3.74 | 1.8% |
+| 50k | 0.0296 | 0.92 | 3.70 | 0.0339 | 0.98 | 3.68 | 0.7% |
+| 60k | 0.0295 | 0.90 | 3.69 | 0.0327 | 0.97 | 3.65 | 0.2% |
+| 70k | 0.0294 | 0.91 | 3.70 | 0.0324 | 0.96 | 3.64 | 0.1% |
+| 80k | 0.0305 | 0.90 | 3.67 | 0.0329 | 0.96 | 3.63 | 0.03% |
+
+1. The model resolves the jet energy ~30% better than either reference
+   (3.6 against 5.1-5.3 GeV), and it keeps improving slowly with
+   training: `jer_cal` is still falling at 80k updates.
+2. **The EMA generator -- the one inference uses -- starts as a copy of
+   the random initialization and keeps a share `0.9999^updates` of it**:
+   37% at 10k updates, 14% at 20k. It is useless before ~30k updates, and
+   from ~40k on it is ahead of the raw generator on `jer_cal`, by a few
+   hundredths of a GeV (not on `l1_sig`, where averaging costs a little).
+   Runs shorter than ~50k
+   updates have to be judged on the raw generator; for the configured
+   800k updates it does not matter.
+3. The raw generator's energy scale wanders from checkpoint to checkpoint
+   (`jes` 0.81 to 0.99), and so does its `l1_sig` (0.029 to 0.041); its
+   calibrated resolution is much steadier.
+4. **`idt_aa_a1` tracks held-out `l1_sig`** (Spearman 0.93 over the
+   seven checkpoints to 70k, the bump at 30k included). **`cycle_b` does
+   not**: it drops by 40% from 20k to 70k updates while the held-out
+   `l1_sig` stays flat.
+5. The gradient clip (`grad_clip` 0.5) binds on every step, by a lot: in
+   the first hours of the runs of job 20016 the pre-clip norm is
+   ~150-190 for the generators and ~20-110 for the discriminators, at
+   batch 4 and 32 alike. Adam therefore runs on normalized gradients; the
+   clip is a normalization, not a safeguard.
 
 ## What a step costs, and how to shorten it
 
@@ -209,23 +289,33 @@ Knobs: `UVCGAN_S_DDP_MODE`, `UVCGAN_S_DDP_COMPRESS` (fp16/bf16, worth
   reported the exit status of `date`; a deadlocked run looked successful.
 - `clip_gradients` now returns the pre-clip gradient norm, logged as
   `gnorm_gen` / `gnorm_disc`: the same nominal learning rate is not the same
-  step once `grad_clip` binds, and whether it binds was never measured.
+  step once `grad_clip` binds. It binds on every step (see above).
 
 ## Still open
 
-- **Job 19989** (base run, ceres) was still training when these notes were
-  written: batch 32 at 5e-5, ~76k updates and 7 checkpoints so far, 26 h
-  limit. It exists to allow a *deeper* repeat of the batch size measurement
-  (`BRANCH_EPOCH=<epoch> sbatch scripts/slurm/diag_mid_training.sbatch`).
-  Given the measurement already agrees from scratch and from 20k updates,
-  a third point has low marginal value -- but the checkpoints are the
-  furthest-trained model available.
+- **Job 20016** (dahlia, 6 GPUs, 7 h from 2026-09-22 23:55): the
+  configured batch 4 at 5e-5 against batch 32 at 1e-4 with
+  `gp_cache_period` 0 and 4, two seeds each, scored on held-out truth
+  every epoch (`MODEL/val_truth_history.csv`) and checkpointed every 10k
+  updates. Analyse with `python scripts/slurm/plot_heldout.py --job 20016`
+  and score the checkpoints with `eval_val_truth.sbatch` for `jer_cal`,
+  which the inline scores lack (they were started before it existed).
+  Its seed-0 runs of batch 4 and batch 32 at 1e-4 repeat the runs of job
+  19988 (identical losses to 4-5 digits in the first epoch).
+- **Job 19989** (base run, ceres, batch 32 at 5e-5, 26 h limit, ends
+  ~2026-09-23 12:30): checkpoints every 10k updates, the furthest-trained
+  model available; its held-out scores are in `MODEL/evals/val_truth.csv`
+  (rerun `eval_val_truth.sbatch` on it to add new checkpoints). A deeper
+  repeat of the batch size measurement from it has low value now that
+  `cycle_b` is known not to track the extraction.
 - The mid-training branches all ran at 5e-5 because resuming pinned the
   rate; now that the configuration wins, a deep branch can include rate
   variants.
-- Whether a stale gradient penalty (`gp_cache_period`) costs quality.
-- A held-out quality metric. Everything here is a training loss, and the
-  data layout offers no paired ground truth outside the training split.
+- The EMA carries the random initialization for tens of thousands of
+  updates. A warm-up of its momentum (e.g. `min(m, (1 + t) / (10 + t))`)
+  would make short runs usable at inference; it does not change the
+  training.
+- The test split (JEWEL) has no truth in these files.
 - The 8-process deadlock is worked around, not understood.
 
 ## Scripts
@@ -244,6 +334,10 @@ Knobs: `UVCGAN_S_DDP_MODE`, `UVCGAN_S_DDP_COMPRESS` (fp16/bf16, worth
 | `scripts/slurm/diag_mid_training.sbatch` | repeat the above from a checkpoint |
 | `scripts/slurm/branch_from_checkpoint.sh` | copy a checkpoint into a new model dir |
 | `scripts/slurm/plot_batch_diag.py` | updates-vs-samples figure and crossings |
+| `scripts/slurm/eval_val_truth.py` | score checkpoints against the val truth |
+| `scripts/slurm/eval_val_truth.sbatch` | the above on a GPU node |
+| `scripts/slurm/diag_heldout.sbatch` | recommended settings, scored on truth every epoch |
+| `scripts/slurm/plot_heldout.py` | held-out scores against time and updates |
 | `tests/test_ddp.py` | two-process gloo test, weights must stay identical |
 
 ## How far to trust this
@@ -253,6 +347,10 @@ are compared always shared a node. The convergence conclusions rest on
 training losses over the first few percent of a full-length run (the
 configured run is 400 x 2000 = 800k updates; these experiments reach 10-80k),
 measured on one configuration and one dataset. The throughput and deadlock
-numbers are solid; the batch size and learning rate conclusions are well
-supported but were not verified against a physics metric, which is the
-obvious next step before committing to a long run.
+numbers are solid. The batch size and learning rate conclusions were
+drawn from training losses, partly from `cycle_b`, which the held-out
+scores show does not track the extraction; they are being re-checked
+against held-out truth (job 20016). The held-out scores are a proxy for
+the physics as well -- the energy in a fixed cone around the true jet
+axis, not jets found in the extracted image -- but they are measured
+against truth on events the model never saw.

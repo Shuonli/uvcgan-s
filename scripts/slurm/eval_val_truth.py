@@ -21,7 +21,10 @@ events, and the result is scored on
                     `bias` (mean difference, GeV) and resolution `jer`
                     (standard deviation of the difference, GeV; `jer_iqr`
                     is the same from the interquartile range, which
-                    ignores the tails). Only events whose leading jet
+                    ignores the tails; `jer_cal` is the spread around a
+                    linear fit of the extracted against the true energy,
+                    divided by its slope: the resolution after an offset
+                    and scale calibration). Only events whose leading jet
                     lies inside |eta| < 0.7 and holds at least --min-jet
                     enter these.
 
@@ -73,7 +76,7 @@ NETS = {
 
 COLUMNS = [
     'label', 'epoch', 'updates', 'net', 'n_events', 'n_jets',
-    'l1_sig', 'l1_bkg', 'jes', 'bias', 'jer', 'jer_iqr',
+    'l1_sig', 'l1_bkg', 'jes', 'bias', 'jer', 'jer_iqr', 'jer_cal',
 ]
 
 def parse_cmdargs():
@@ -230,12 +233,20 @@ def jet_scores(e_fake, truth):
         [ 0.25, 0.75 ], dtype = diff.dtype, device = diff.device
     ))
 
+    # calibrated resolution: the spread around the linear response
+    # e_fake = a + b * e_true, in units of e_true
+    x = e_true.double()
+    y = e_fake.double()
+    b = ((x - x.mean()) * (y - y.mean())).mean() / x.var(unbiased = False)
+    a = y.mean() - b * x.mean()
+
     return {
         'n_jets'  : int(truth.jets.sum()),
-        'jes'     : float((e_fake / e_true).mean()),
+        'jes'     : float((y / x).mean()),
         'bias'    : float(diff.mean()),
         'jer'     : float(diff.std()),
         'jer_iqr' : float((q75 - q25) / 1.349),
+        'jer_cal' : float((y - a - b * x).std() / b),
     }
 
 @torch.no_grad()
@@ -457,7 +468,8 @@ def format_row(row):
         f" {row['net']:>3s}  l1_sig {row['l1_sig']:.4f}"
         f"  l1_bkg {row['l1_bkg']:.4f}  jes {row['jes']:.3f}"
         f"  bias {row['bias']:+6.2f}  jer {row['jer']:5.2f}"
-        f"  jer_iqr {row['jer_iqr']:5.2f}  ({row['n_jets']} jets)"
+        f"  jer_iqr {row['jer_iqr']:5.2f}  jer_cal {row['jer_cal']:5.2f}"
+        f"  ({row['n_jets']} jets)"
     )
 
 def main():

@@ -129,11 +129,35 @@ def main():
               f" (rolling mean of {cmdargs.smooth} epochs):")
         print(f"  {'run':28s}" + ''.join(f'{h:>9d}' for h in HOURS))
 
+        per_arm = {}
+
         for (label, r) in sorted(runs.items()):
             (x, y) = smoothed(r['scores'], net, metric, cmdargs.smooth)
             cells  = [ value_at(x, y, 'hours', h) for h in HOURS ]
+            per_arm.setdefault(r['arm'], []).append(cells)
+
             print(f"  {r['arm'] + ' s' + str(r['seed']):28s}" + ''.join(
                 '        -' if c is None else f'{c:9.4f}' for c in cells
+            ))
+
+        # mean over seeds, and half their range as a measure of the spread
+        for (arm, seeds) in sorted(per_arm.items()):
+            means  = []
+            spread = []
+
+            for cells in zip(*seeds):
+                if (len(cells) < 2) or any(c is None for c in cells):
+                    means.append(None)
+                    spread.append(None)
+                else:
+                    means.append(np.mean(cells))
+                    spread.append((max(cells) - min(cells)) / 2)
+
+            print(f"  {arm + ' mean':28s}" + ''.join(
+                '        -' if m is None else f'{m:9.4f}' for m in means
+            ))
+            print(f"  {arm + ' +-':28s}" + ''.join(
+                '        -' if s is None else f'{s:9.4f}' for s in spread
             ))
 
     print(f"\n{'run':28s} {'epochs':>6s} {'updates':>8s} {'hours':>6s}"
