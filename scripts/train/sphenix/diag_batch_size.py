@@ -11,6 +11,11 @@ whether a larger batch (or more GPUs) shortens training:
     DIAG_LABEL   model label
     DIAG_SUBDIR  directory under OUTDIR/sphenix (default 'diag')
     DIAG_CHECKPOINT  epochs between checkpoints (default: never)
+    DIAG_GP_CACHE    `gp_cache_period` (default 0, as configured)
+    DIAG_SEED        seed of the initialization and data order (default 0)
+    DIAG_EVAL_EVENTS val events to score the generators on at the end of
+                     epochs (default 0: never), c.f. eval_val_truth.py
+    DIAG_EVAL_EVERY  epochs between these scores (default 1)
 
 Relative to `train_uvcgan-s.py` only the run length and the warm-up are
 different: epochs are short so that `history.csv` is sampled finely, and
@@ -19,6 +24,7 @@ samples that the batch sizes have in common.
 """
 
 import os
+import sys
 import torch
 
 from uvcgan_s import ROOT_OUTDIR, train
@@ -35,6 +41,10 @@ EPOCHS = int(os.environ.get('DIAG_EPOCHS', 2000))
 LABEL  = os.environ.get('DIAG_LABEL', f'diag_b{BATCH}_lr{LR:g}')
 SUBDIR = os.environ.get('DIAG_SUBDIR', 'diag')
 CKPT   = int(os.environ.get('DIAG_CHECKPOINT', 1000000))
+GPC    = int(os.environ.get('DIAG_GP_CACHE', 0))
+SEED   = int(os.environ.get('DIAG_SEED', 0))
+EVAL_N = int(os.environ.get('DIAG_EVAL_EVENTS', 0))
+EVAL_K = int(os.environ.get('DIAG_EVAL_EVERY', 1))
 
 DISC_BLOCKS = [
     # (1, 24, 64)
@@ -152,7 +162,7 @@ args_dict = {
             'name' : 'log',
             'bias' : 0.1,
         },
-        'gp_cache_period' : 0,
+        'gp_cache_period' : GPC,
         'grad_clip'       : { 'norm' : 0.5 },
         'norm_loss_a0'    : False,
         'norm_loss_a1'    : False,
@@ -163,7 +173,7 @@ args_dict = {
         'head_queue_size' : 0,
         'head_config'     : 'idt'
     },
-    'seed'  : 0,
+    'seed'  : SEED,
     'scheduler' : {
         'name' : 'linear-v2',
         'start_factor' : 0.01,
@@ -189,4 +199,14 @@ args_dict = {
     'checkpoint' : CKPT,
 }
 
-train(args_dict)
+scorer = None
+
+if EVAL_N > 0:
+    sys.path.insert(0, os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), '..', '..', 'slurm'
+    ))
+    # pylint: disable=import-error,wrong-import-position
+    from eval_val_truth import EpochScorer
+    scorer = EpochScorer(n_events = EVAL_N, every = EVAL_K)
+
+train(args_dict, epoch_callback = scorer)

@@ -91,7 +91,13 @@ def reduce_metrics(metrics, epoch_time, steps, batch_size):
 
     return LossMetrics(values, n = 1)
 
-def train(args_dict):
+def train(args_dict, epoch_callback = None):
+    """Train a model described by `args_dict`.
+
+    `epoch_callback(model, epoch)`, if given, is called by the main process
+    at the end of every epoch, e.g. to score the model on held-out data.
+    Its run time is not part of the recorded `epoch_time`.
+    """
     # pylint: disable=too-many-locals
     distributed = init_distributed()
 
@@ -147,6 +153,9 @@ def train(args_dict):
             history.end_epoch(epoch, metrics)
 
         model.end_epoch(epoch)
+
+        if (epoch_callback is not None) and is_main_process():
+            epoch_callback(model, epoch)
 
         if epoch % args.checkpoint == 0:
             model.save(epoch)
