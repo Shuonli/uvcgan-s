@@ -13,26 +13,43 @@ stated otherwise. The README carries the same tables in a shorter form.
 
 ## What to do
 
-1. **`batch_size` 32 with learning rate 1e-4** on a single GPU. Best of
-   everything measured: it was the only setting to reach the hardest
-   quality targets, roughly 1.7x faster to a given quality than the
-   configured batch 4 at 5e-5.
-2. **`gp_cache_period` 4** (currently 0). 1.34x shorter steps at batch 32,
-   no effect on the optimization other than a gradient penalty that is a
-   few steps stale. Validate the quality before trusting it.
-3. **`torch.compile` on the two generators** if convenient: a further 1.07x
-   at batch 32, 1.15x at batch 4.
-4. Multi-GPU is worth little here (~1.12x for two GPUs at a fixed batch);
+Revised on 2026-09-23 against held-out truth (see "Held-out quality
+against truth"). The first version of this list rested on training losses
+and recommended batch 32 at 1e-4 and `gp_cache_period` 4; neither holds up.
+
+1. **Train ~100k updates, not the configured 800k.** The published model
+   (800k updates at batch 4, five days) resolves the held-out jet energy
+   to 3.59 GeV. The base run (batch 32 at 5e-5) reaches 3.62-3.63 GeV
+   from 80k updates on, 14-19 h on one A6000, with per-tower errors as
+   small or smaller. That is 6-8x less training for <1% in resolution. The warm-up
+   has to shrink with the run: the configured one lasts 64k updates, the
+   base run used 200. One run each, and only the val PYTHIA embedding and
+   a cone energy were measured: confirm with two seeds and the JEWEL test
+   before relying on it.
+2. **Batch 32 at 5e-5**, the base run's setting. Batch 32 at 1e-4 gets the
+   raw generator to a given held-out quality faster during the first ~4 h,
+   but the EMA generator, which inference uses, is never better at equal
+   time than the configured batch 4 at 5e-5, and at 40k updates both of
+   its seeds are behind the (single) batch 32 at 5e-5 run. The "1.7x
+   faster" of the first version came from training losses, partly
+   `cycle_b`, which does not track the extraction.
+3. **Leave `gp_cache_period` at 0.** Caching the gradient penalty for 4
+   steps shortens the steps by 1.32x, but the trained generator's held-out
+   extraction is worse at every point of a 7 h run (per-tower error +20%,
+   jet resolution +0.13-0.20 GeV against the same batch without it), and
+   its EMA stays behind that of the configured batch 4 at 5e-5.
+4. **`torch.compile` on the two generators** if convenient: 1.07x at batch
+   32, 1.15x at batch 4, no effect on the optimization.
+5. Judge models with `scripts/slurm/eval_val_truth.py` (`jer_cal`,
+   `l1_sig`). Among the training losses `idt_aa_a1` tracks the extraction;
+   `cycle_b` does not.
+6. Multi-GPU is worth little here (~1.12x for two GPUs at a fixed batch);
    use extra GPUs to run several experiments at once instead.
-5. Never train across two nodes on this cluster: it is several times slower
+7. Never train across two nodes on this cluster: it is several times slower
    than one GPU.
 
-Items 1-3 together are roughly 2.5x over the configuration as it stands,
-all on one GPU.
-
-**Items 1 and 2 rest on training losses** (item 1 partly on `cycle_b`,
-which turned out not to track the extraction, c.f. "Held-out quality
-against truth"). Job 20016 re-checks both against held-out truth.
+Item 1 is worth 6-8x on its own and item 4 another ~1.1x; items 2 and 3
+are about not losing quality.
 
 ## Throughput against batch size
 
@@ -92,10 +109,11 @@ optimizer state) the ordering holds. Hours to reach a `cycle_b` target:
 **Metric caveat.** `idt_aa_a1` saturates by ~20k updates, while
 `cycle_b`, `idt_bb` and `cycle_a1` keep moving, so the comparison above
 and the learning rate sweep below used `cycle_b` at depth. All of these
-are training losses, and the held-out scores (next sections) show that
-`cycle_b` does **not** track the extraction: `idt_aa_a1` does. The
-conclusions drawn from `cycle_b` are being re-checked against held-out
-truth (job 20016).
+are training losses, and the held-out scores show that `cycle_b` does
+**not** track the extraction, while `idt_aa_a1` does. Against held-out
+truth batch 32 at 1e-4 is not faster where it matters, c.f. "The
+recommended settings against held-out truth". The throughput numbers and
+the "progress is limited by updates" observation stand.
 
 ## Can the learning rate be raised with the batch?
 
@@ -114,7 +132,9 @@ initialization:
 1e-4 is stable and 1.5e-4 diverges at batch 32 *and* at batch 64, so the
 ceiling is a property of the model, not of the batch. Square-root scaling
 would want ~2.8e-4 at batch 128, which is far past where this GAN breaks:
-the larger batch can never be cashed in.
+the larger batch can never be cashed in. (The divergences stand; that 1e-4
+beats 5e-5 at batch 32 was measured on `cycle_b` and is not borne out by
+the held-out scores at 40k updates.)
 
 ## Held-out quality against truth
 
@@ -165,18 +185,21 @@ Base run (batch 32 at 5e-5, job 19989), one row per checkpoint:
 | 60k | 0.0295 | 0.90 | 3.69 | 0.0327 | 0.97 | 3.65 | 0.2% |
 | 70k | 0.0294 | 0.91 | 3.70 | 0.0324 | 0.96 | 3.64 | 0.1% |
 | 80k | 0.0305 | 0.90 | 3.67 | 0.0329 | 0.96 | 3.63 | 0.03% |
+| 90k | 0.0293 | 0.91 | 3.59 | 0.0338 | 0.96 | 3.63 | 0.01% |
+| 100k | 0.0304 | 0.97 | 3.60 | 0.0352 | 0.96 | 3.63 | <0.01% |
+| 110k | 0.0305 | 0.89 | 3.73 | 0.0357 | 0.96 | 3.62 | <0.01% |
 
 1. The model resolves the jet energy ~30% better than either reference
-   (3.6 against 5.1-5.3 GeV), and it keeps improving slowly with
-   training: `jer_cal` is still falling at 80k updates.
+   (3.6 against 5.1-5.3 GeV). The EMA's `jer_cal` flattens at 3.62-3.63
+   GeV from 80k updates on (13.7 training hours).
 2. **The EMA generator -- the one inference uses -- starts as a copy of
    the random initialization and keeps a share `0.9999^updates` of it**:
-   37% at 10k updates, 14% at 20k. It is useless before ~30k updates, and
-   from ~40k on it is ahead of the raw generator on `jer_cal`, by a few
-   hundredths of a GeV (not on `l1_sig`, where averaging costs a little).
-   Runs shorter than ~50k
-   updates have to be judged on the raw generator; for the configured
-   800k updates it does not matter.
+   37% at 10k updates, 14% at 20k. It is useless before ~30k updates.
+   From ~40k on it matches the raw generator on `jer_cal` and is much
+   steadier (3.62-3.63 from 80k on, against 3.59-3.73 for the raw one);
+   on `l1_sig` averaging costs a little. Runs shorter than ~50k updates
+   have to be judged on the raw generator; for runs of 100k updates and
+   more it does not matter.
 3. The raw generator's energy scale wanders from checkpoint to checkpoint
    (`jes` 0.81 to 0.99), and so does its `l1_sig` (0.029 to 0.041); its
    calibrated resolution is much steadier.
@@ -184,11 +207,82 @@ Base run (batch 32 at 5e-5, job 19989), one row per checkpoint:
    seven checkpoints to 70k, the bump at 30k included). **`cycle_b` does
    not**: it drops by 40% from 20k to 70k updates while the held-out
    `l1_sig` stays flat.
-5. The gradient clip (`grad_clip` 0.5) binds on every step, by a lot: in
-   the first hours of the runs of job 20016 the pre-clip norm is
-   ~150-190 for the generators and ~20-110 for the discriminators, at
-   batch 4 and 32 alike. Adam therefore runs on normalized gradients; the
-   clip is a normalization, not a safeguard.
+5. The gradient clip (`grad_clip` 0.5) binds on every step, by a lot. Over
+   the 7 h runs of job 20016 the pre-clip norm (epoch means) never drops
+   below 120 for the generators (medians 136-251) and grows over training
+   for the discriminators (medians 156-1834; below 1 only in the first
+   epoch), at batch 4 and 32 alike. Adam therefore runs on normalized
+   gradients; the clip is a normalization, not a safeguard.
+
+### The recommended settings against held-out truth (job 20016)
+
+`scripts/slurm/diag_heldout.sbatch`: the configured batch 4 at 5e-5 and
+batch 32 at 1e-4 with `gp_cache_period` 0 and 4, two seeds each, 7 h from
+initialization on one A6000 each (dahlia, all at once), scored every epoch
+on 5k val events (`MODEL/val_truth_history.csv`; figure
+`OUTDIR/sphenix/heldout/heldout_20016.png` from `plot_heldout.py`) and at
+every 10k-update checkpoint on the 20k (`MODEL/evals/val_truth.csv`, for
+`jer_cal`). Calibrated jet resolution in GeV at equal training time,
+interpolated between checkpoints, mean of the two seeds [half their
+difference]:
+
+| net, training hours | batch 32, 1e-4 | + `gp_cache_period` 4 | batch 4, 5e-5 |
+| :--- | ---: | ---: | ---: |
+| raw, 2.5 h | **3.89** [0.02] | 4.09 [0.26] | 4.03 [0.08] |
+| raw, 3.5 h | **3.79** [0.04] | 3.94 [0.12] | 3.96 [0.06] |
+| raw, 4.5 h | 3.84 [0.06] | 3.97 [0.06] | 3.90 [0.06] |
+| raw, 5.5 h | 3.86 [0.05] | 4.01 [0.04] | 3.84 [0.04] |
+| raw, 6.25 h | 3.85 [0.02] | | 3.85 [0.02] |
+| ema, 4.5 h | 4.60 [0.13] | 4.17 [0.27] | **4.05** [0.17] |
+| ema, 5.5 h | 4.02 [0.07] | 3.98 [0.16] | **3.86** [0.07] |
+| ema, 6.25 h | 3.90 [0.06] | | **3.81** [0.05] |
+
+Raw per-tower error `l1_sig` after 5 h (rolling mean of 10 epochs):
+0.0308 [0.0008] at batch 32, 1e-4; 0.0380 [0.0002] with the cache; 0.0347
+[0.0007] at batch 4. By updates, at 40k: raw `jer_cal` 3.84 / 3.84 (batch
+32, 1e-4), 4.07 / 3.98 (cache), 3.88 / 3.79 (batch 4), and 3.77 for the
+base run (batch 32, 5e-5, one seed). Updates in 7 h: 41k at batch 32,
+54k with the cache, 51k at batch 4.
+
+- Batch 32 at 1e-4 leads early on the raw generator, by 0.14-0.17 GeV at
+  2.5-3.5 h; batch 4 catches up by ~5 h. On the EMA, which inference
+  uses, batch 4 is ahead throughout: it makes 25% more updates per hour,
+  and the EMA sheds the initialization by updates, not by hours.
+- The cached gradient penalty is worse throughout on the raw generator,
+  most clearly in the per-tower error. On the EMA its 1.32x more updates
+  put it ahead of batch 32 without it (less initialization left), but
+  never ahead of batch 4.
+- The seed-0 runs of batch 4 and of batch 32 at 1e-4 repeat those of job
+  19988 (identical losses to 4-5 digits in the first epoch), and the
+  scoring does not perturb the training.
+
+### The published model
+
+The pre-trained model of the paper (Zenodo record 17809156, 1.7 GB, md5
+checked, in `OUTDIR/sphenix/pretrained/`) was trained as configured:
+batch 4 at 5e-5, 400 x 2000 = 800k updates with a 64k-update warm-up; its
+history spans 5 days 3.5 hours at 557 ms per update (~105 h on an A6000
+at the 470 ms measured here). Scored the same way:
+
+| | `l1_sig` | `l1_bkg` | `jes` | `jer_cal` |
+| :--- | ---: | ---: | ---: | ---: |
+| published, 800k updates, ema | 0.0334 | 0.0735 | 0.94 | 3.59 |
+| published, 800k updates, raw | 0.0335 | 0.0530 | 0.90 | 3.59 |
+| base run, 80k updates, ema | 0.0329 | 0.0438 | 0.96 | 3.63 |
+| base run, 100k updates, ema | 0.0352 | 0.0442 | 0.96 | 3.63 |
+| base run, 100k updates, raw | 0.0304 | 0.0498 | 0.97 | 3.60 |
+| median-rho | 0.2822 | 0.2822 | 1.14 | 5.28 |
+
+The base run matches the published jet resolution to within 1% after
+80k updates (13.7 training hours), with per-tower errors as small or
+smaller (`l1_bkg` of both networks, `l1_sig` of the raw one; the EMA's
+`l1_sig` is 0.0329-0.0357 against 0.0334).
+The published run's own history agrees: its `idt_aa_a1` was lowest around
+120k updates (0.0314, rolling mean of 10 epochs) and ended at 0.0334,
+while `cycle_b` kept falling to the end. What the remaining 700k updates
+do buy is not visible here: the signal discriminator is fooled more and
+more (`disc_a1` 0.02 -> 0.19, `gen_ba1` 1.19 -> 0.65), which may matter
+for jet shapes or for the JEWEL test, neither of which is measured.
 
 ## What a step costs, and how to shorten it
 
@@ -210,8 +304,11 @@ Measured on one A6000:
 | no gradient penalty at all | 334 ms (1.38x) | |
 
 The gradient penalty's second backward through all three discriminators is
-38% of the step. `torch.compile` helps less at batch 32 because the GPU is
-busy anyway. CUDA graphs (`mode='reduce-overhead'`) would address the idle
+38% of the step, **but caching it costs quality** (job 20016: the
+trained generator's held-out extraction is worse at every point of a 7 h
+run), so leave it at 0.
+`torch.compile` does not change the optimization and helps less at batch
+32 because the GPU is busy anyway. CUDA graphs (`mode='reduce-overhead'`) would address the idle
 half of the small-batch step but never finished capture in 25 minutes: the
 step keeps tensors across its several backward passes and would have to be
 restructured.
@@ -293,28 +390,22 @@ Knobs: `UVCGAN_S_DDP_MODE`, `UVCGAN_S_DDP_COMPRESS` (fp16/bf16, worth
 
 ## Still open
 
-- **Job 20016** (dahlia, 6 GPUs, 7 h from 2026-09-22 23:55): the
-  configured batch 4 at 5e-5 against batch 32 at 1e-4 with
-  `gp_cache_period` 0 and 4, two seeds each, scored on held-out truth
-  every epoch (`MODEL/val_truth_history.csv`) and checkpointed every 10k
-  updates. Analyse with `python scripts/slurm/plot_heldout.py --job 20016`
-  and score the checkpoints with `eval_val_truth.sbatch` for `jer_cal`,
-  which the inline scores lack (they were started before it existed).
-  Its seed-0 runs of batch 4 and batch 32 at 1e-4 repeat the runs of job
-  19988 (identical losses to 4-5 digits in the first epoch).
-- **Job 19989** (base run, ceres, batch 32 at 5e-5, 26 h limit, ends
-  ~2026-09-23 12:30): checkpoints every 10k updates, the furthest-trained
-  model available; its held-out scores are in `MODEL/evals/val_truth.csv`
-  (rerun `eval_val_truth.sbatch` on it to add new checkpoints). A deeper
-  repeat of the batch size measurement from it has low value now that
-  `cycle_b` is known not to track the extraction.
-- The mid-training branches all ran at 5e-5 because resuming pinned the
-  rate; now that the configuration wins, a deep branch can include rate
-  variants.
+- **Confirm the short run** before switching to it: batch 32 at 5e-5 with
+  a short warm-up for ~100k updates, two more seeds (two GPUs for ~17 h:
+  `DIAG_SEED=1 DIAG_LABEL=base_b32_lr5e-5_s1 sbatch
+  scripts/slurm/diag_base_run.sbatch`, likewise seed 2; the base run is
+  seed 0), scored with `eval_val_truth.sbatch`; and compare the
+  short model with the published one on the JEWEL test split and on the
+  physics the paper uses (jets found in the extracted image, shapes),
+  which the cone energy here does not capture.
+- **Job 19989** (base run, ceres, 26 h limit, ends ~2026-09-23 12:30) keeps
+  writing a checkpoint every 10k updates; rerun `eval_val_truth.sbatch` on
+  it to extend its table (scored rows are skipped).
+- Whether 5e-5 beats 1e-4 at batch 32 at depth rests on one seed of 5e-5.
 - The EMA carries the random initialization for tens of thousands of
   updates. A warm-up of its momentum (e.g. `min(m, (1 + t) / (10 + t))`)
   would make short runs usable at inference; it does not change the
-  training.
+  training. Not needed for runs of 100k updates.
 - The test split (JEWEL) has no truth in these files.
 - The 8-process deadlock is worked around, not understood.
 
@@ -347,10 +438,11 @@ are compared always shared a node. The convergence conclusions rest on
 training losses over the first few percent of a full-length run (the
 configured run is 400 x 2000 = 800k updates; these experiments reach 10-80k),
 measured on one configuration and one dataset. The throughput and deadlock
-numbers are solid. The batch size and learning rate conclusions were
-drawn from training losses, partly from `cycle_b`, which the held-out
-scores show does not track the extraction; they are being re-checked
-against held-out truth (job 20016). The held-out scores are a proxy for
-the physics as well -- the energy in a fixed cone around the true jet
-axis, not jets found in the extracted image -- but they are measured
-against truth on events the model never saw.
+numbers are solid. The recommendations now rest on held-out truth:
+two seeds per setting for the 7 h comparison (seed spreads are given
+with the numbers), but a single run each for the long base run and the
+published model, on which the "train ~100k updates" advice rests. The
+held-out scores are a proxy for the physics -- the energy in a fixed cone
+around the true jet axis on PYTHIA-in-HIJING val events, not jets found in
+the extracted image, and not the JEWEL test -- but they are measured
+against truth on mixed events the model never saw.

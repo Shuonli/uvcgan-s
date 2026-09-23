@@ -319,6 +319,61 @@ later in training before drawing conclusions about the whole run.
 
 The figure is written to `OUTDIR/sphenix/diag/batch_diag.png`.
 
+These are training losses. Scored against held-out truth (next section),
+batch 32 at 1e-4 gets the raw generator to a given quality faster only in
+the first few hours, and the moving-average generator used for inference
+is never better at equal time than batch 4 at 5e-5.
+
+## Held-out quality
+
+The val split holds only mixed events, but each of them is a PYTHIA event
+of `train/signal.h5` embedded into HIJING: the index files name the same
+`(file, event)`, and the mixed image contains the signal image tower by
+tower. So the val events come with their signal truth, and the background
+truth is the difference. `scripts/slurm/eval_val_truth.py` scores
+checkpoints against it:
+
+```bash
+python scripts/slurm/eval_val_truth.py MODEL_DIR [--epochs 350,400]
+# or on a GPU node
+sbatch scripts/slurm/eval_val_truth.sbatch MODEL_DIR
+```
+
+It reports the per-tower L1 error of the extracted signal and background
+and the scale and resolution of the energy in a R = 0.4 cone around the
+leading truth jet, for both the moving-average generator (`ema`, used for
+inference) and the trained one (`raw`), in `MODEL_DIR/evals/val_truth.csv`.
+`jer_cal` is the jet energy resolution after an offset and scale
+calibration; a per-row median subtraction is scored alongside as a
+reference. The val events' signal images are also (unpaired) training
+images of the signal domain; the mixed events and the pairing are held
+out. `train(args_dict, epoch_callback = ...)` can score a model every
+epoch instead, c.f. `DIAG_EVAL_EVENTS` of
+`scripts/train/sphenix/diag_batch_size.py`.
+
+On this measure the pre-trained model of the paper (800k updates at batch
+4, five days of training) and a run of 80-100k updates at batch 32 are
+equally good (`ema` networks):
+
+| | `l1_sig` | `jer_cal` |
+| :--- | ---: | ---: |
+| median-rho subtraction | 0.282 | 5.28 GeV |
+| pre-trained model, 800k updates | 0.0334 | 3.59 GeV |
+| batch 32 at 5e-5, 80k updates (14 h on an A6000) | 0.0329 | 3.63 GeV |
+| batch 32 at 5e-5, 100k updates (17 h) | 0.0352 | 3.63 GeV |
+
+Most of the configured training therefore does not improve these scores.
+Whether it improves what they do not measure -- jets found in the
+extracted image, their shapes, the JEWEL test set -- remains to be checked
+before the configuration is shortened. Two caveats for short runs:
+
+ - The moving average starts as a copy of the random initialization and
+   keeps a share `ema_momentum ** updates` of it: 37% after 10k updates at
+   the configured 0.9999. The `ema` network is only meaningful after
+   several 10k updates; judge short runs by `raw`.
+ - Of the training losses, `idt_aa_a1` tracks the held-out extraction;
+   `cycle_b` keeps improving long after the extraction has stopped.
+
 
 # Distributed Training
 
@@ -457,8 +512,9 @@ The gradient penalty takes a second backward pass through all three
 discriminators and accounts for 38% of the step; `gp_cache_period` reuses
 its gradient for several steps, which the model already supports. Removing
 the penalty entirely would give 1.38x, so caching recovers most of what it
-costs. Whether a stale penalty gradient harms the result is not measured
-here and should be checked before relying on it.
+costs -- **but the stale penalty costs quality**: over a 7 h run the
+trained generator's held-out extraction was worse at every point (c.f.
+[Held-out quality](#held-out-quality)), so keep `gp_cache_period` at 0.
 
 `torch.compile` helps less at the larger batch because the GPU is busy
 anyway. CUDA graphs (`mode='reduce-overhead'`) would address the idle half
@@ -466,8 +522,8 @@ of the small-batch step, but the step keeps tensors between its several
 backward passes and did not capture; it would need the training step
 restructured.
 
-Unlike a larger batch, neither change alters the optimization, so the
-speedup is not paid for in convergence.
+`torch.compile` does not alter the optimization, so its speedup is not
+paid for in convergence.
 
 ## Benchmarks
 
