@@ -525,6 +525,17 @@ restructured.
 `torch.compile` does not alter the optimization, so its speedup is not
 paid for in convergence.
 
+Cheaper arithmetic does not help, because the kernels are too small to be
+limited by it (`scripts/slurm/bench_tricks.sbatch`, one RTX A6000):
+
+| ms / step | batch 4 | batch 32 |
+| :--- | ---: | ---: |
+| as configured | 479 | 599 |
+| TF32 matrix products | 479 (1.00x) | 581 (1.03x) |
+| bf16 autocast, `UVCGAN_S_AMP=bf16` | 575 (0.83x) | 604 (0.99x) |
+| losses read back once per epoch, `UVCGAN_S_LAZY_METRICS=1` | 475 (1.01x) | 590 (1.02x) |
+| fused Adam, `'fused' : True` in the optimizer config | 473 (1.01x) | 601 (1.00x) |
+
 ## Benchmarks
 
 `scripts/slurm/bench_pack.sbatch` runs a scaling benchmark inside a single

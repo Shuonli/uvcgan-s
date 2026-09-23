@@ -19,9 +19,9 @@ and recommended batch 32 at 1e-4 and `gp_cache_period` 4; neither holds up.
 
 1. **Train ~100k updates, not the configured 800k.** The published model
    (800k updates at batch 4, five days) resolves the held-out jet energy
-   to 3.59 GeV. The base run (batch 32 at 5e-5) reaches 3.62-3.63 GeV
-   from 80k updates on, 14-19 h on one A6000, with per-tower errors as
-   small or smaller. That is 6-8x less training for <1% in resolution. The warm-up
+   to 3.59 GeV. The base run (batch 32 at 5e-5) reaches 3.63 GeV at 80k
+   updates and 3.60 at 130k, 14 and 23 h on one A6000, with per-tower
+   errors as small or smaller. That is 6-8x less training for <1% in resolution. The warm-up
    has to shrink with the run: the configured one lasts 64k updates, the
    base run used 200. One run each, and only the val PYTHIA embedding and
    a cone energy were measured: confirm with two seeds and the JEWEL test
@@ -39,7 +39,11 @@ and recommended batch 32 at 1e-4 and `gp_cache_period` 4; neither holds up.
    jet resolution +0.13-0.20 GeV against the same batch without it), and
    its EMA stays behind that of the configured batch 4 at 5e-5.
 4. **`torch.compile` on the two generators** if convenient: 1.07x at batch
-   32, 1.15x at batch 4, no effect on the optimization.
+   32, 1.15x at batch 4, no effect on the optimization. Precision and
+   optimizer switches do not pay (TF32 1.03x at batch 32 only, bf16
+   autocast slower, fused Adam nothing; c.f. "Cheap tricks that do not
+   pay"): a step is bound by the number of small kernels, not by their
+   arithmetic, so only fewer kernels (compile, merged passes) shorten it.
 5. Judge models with `scripts/slurm/eval_val_truth.py` (`jer_cal`,
    `l1_sig`). Among the training losses `idt_aa_a1` tracks the extraction;
    `cycle_b` does not.
@@ -188,10 +192,14 @@ Base run (batch 32 at 5e-5, job 19989), one row per checkpoint:
 | 90k | 0.0293 | 0.91 | 3.59 | 0.0338 | 0.96 | 3.63 | 0.01% |
 | 100k | 0.0304 | 0.97 | 3.60 | 0.0352 | 0.96 | 3.63 | <0.01% |
 | 110k | 0.0305 | 0.89 | 3.73 | 0.0357 | 0.96 | 3.62 | <0.01% |
+| 120k | 0.0305 | 0.95 | 3.66 | 0.0341 | 0.95 | 3.61 | <0.01% |
+| 130k | 0.0380 | 0.91 | 3.65 | 0.0331 | 0.95 | 3.60 | <0.01% |
+| 140k | 0.0307 | 0.92 | 3.64 | 0.0332 | 0.94 | 3.60 | <0.01% |
 
 1. The model resolves the jet energy ~30% better than either reference
-   (3.6 against 5.1-5.3 GeV). The EMA's `jer_cal` flattens at 3.62-3.63
-   GeV from 80k updates on (13.7 training hours).
+   (3.6 against 5.1-5.3 GeV). The EMA's `jer_cal` is 3.63 GeV at 80k
+   updates (13.7 training hours) and creeps down to 3.60 at 130-140k
+   (23-25 h); the job ended there, at its 26 h limit.
 2. **The EMA generator -- the one inference uses -- starts as a copy of
    the random initialization and keeps a share `0.9999^updates` of it**:
    37% at 10k updates, 14% at 20k. It is useless before ~30k updates.
@@ -271,10 +279,12 @@ at the 470 ms measured here). Scored the same way:
 | base run, 80k updates, ema | 0.0329 | 0.0438 | 0.96 | 3.63 |
 | base run, 100k updates, ema | 0.0352 | 0.0442 | 0.96 | 3.63 |
 | base run, 100k updates, raw | 0.0304 | 0.0498 | 0.97 | 3.60 |
+| base run, 140k updates, ema | 0.0332 | 0.0474 | 0.94 | 3.60 |
 | median-rho | 0.2822 | 0.2822 | 1.14 | 5.28 |
 
 The base run matches the published jet resolution to within 1% after
-80k updates (13.7 training hours), with per-tower errors as small or
+80k updates (13.7 training hours) and to 0.3% after 130k (23 h), with
+per-tower errors as small or
 smaller (`l1_bkg` of both networks, `l1_sig` of the raw one; the EMA's
 `l1_sig` is 0.0329-0.0357 against 0.0334).
 The published run's own history agrees: its `idt_aa_a1` was lowest around
@@ -312,6 +322,33 @@ run), so leave it at 0.
 half of the small-batch step but never finished capture in 25 minutes: the
 step keeps tensors across its several backward passes and would have to be
 restructured.
+
+### Cheap tricks that do not pay
+
+`scripts/slurm/bench_tricks.sbatch` (job 20024, one A6000 per stream, two
+repeats of 200 timed steps, each setting on the same GPU as its baseline):
+
+| ms/step | base | TF32 | bf16 autocast | lazy losses | fused Adam | all four |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| batch 4 | 479 | 479 (1.00x) | 575 (0.83x) | 475 (1.01x) | 473 (1.01x) | 568 (0.84x) |
+| batch 32 | 599 | 581 (1.03x) | 604 (0.99x) | 590 (1.02x) | 601 (1.00x) | 592 (1.01x) |
+
+- **TF32** matrix products (`torch.set_float32_matmul_precision('high')`;
+  PyTorch keeps them in float32 by default, convolutions already use
+  TF32): 2-4% at batch 32, nothing at batch 4.
+- **bf16 autocast** of the forward passes (`UVCGAN_S_AMP=bf16`): 17%
+  *slower* at batch 4, where the casts add kernels to a launch-bound
+  step, and no faster at batch 32. It works with the spectral norm and
+  the double backward of the gradient penalty.
+- **Lazy losses** (`UVCGAN_S_LAZY_METRICS=1`: the losses and the clipped
+  gradient norms stay on the device and are read back once per epoch
+  instead of three times per step): 1-2%. Numerically identical.
+- **Fused Adam** (`'fused' : True` in the optimizer config): nothing.
+
+Even at batch 32, where the GPU is ~98% busy, the ~33000 kernels of a step
+are too small to be limited by arithmetic, so cheaper arithmetic does not
+shorten them. After 300 steps every setting has the losses of the
+baseline, so none of them breaks the training.
 
 ## Multi-GPU
 
@@ -398,9 +435,6 @@ Knobs: `UVCGAN_S_DDP_MODE`, `UVCGAN_S_DDP_COMPRESS` (fp16/bf16, worth
   short model with the published one on the JEWEL test split and on the
   physics the paper uses (jets found in the extracted image, shapes),
   which the cone energy here does not capture.
-- **Job 19989** (base run, ceres, 26 h limit, ends ~2026-09-23 12:30) keeps
-  writing a checkpoint every 10k updates; rerun `eval_val_truth.sbatch` on
-  it to extend its table (scored rows are skipped).
 - Whether 5e-5 beats 1e-4 at batch 32 at depth rests on one seed of 5e-5.
 - The EMA carries the random initialization for tens of thousands of
   updates. A warm-up of its momentum (e.g. `min(m, (1 + t) / (10 + t))`)
@@ -429,6 +463,7 @@ Knobs: `UVCGAN_S_DDP_MODE`, `UVCGAN_S_DDP_COMPRESS` (fp16/bf16, worth
 | `scripts/slurm/eval_val_truth.sbatch` | the above on a GPU node |
 | `scripts/slurm/diag_heldout.sbatch` | recommended settings, scored on truth every epoch |
 | `scripts/slurm/plot_heldout.py` | held-out scores against time and updates |
+| `scripts/slurm/bench_tricks.sbatch` | step time with TF32, bf16, lazy losses, fused Adam |
 | `tests/test_ddp.py` | two-process gloo test, weights must stay identical |
 
 ## How far to trust this
