@@ -36,9 +36,16 @@ NOTE: the truth signals of the val events are also training samples of the
 signal domain, shown to the model unpaired among 2.6M others: the mixed
 events and the pairing are held out, the signal images are not.
 
-    eval_val_truth.py MODEL_DIR [MODEL_DIR ...] [--epochs 50,100] [--nets ema]
+With `--truth jewel` the same scores are computed on the test split, JEWEL
+jets embedded into HIJING, against the JEWEL jets without background of
+Zenodo record 17594612 (`jewel_jet30.tar.gz`, unpacked under
+DATA/sphenix/jewel_jet30/), matched by (file, event) the same way. These
+jets are quenched and never seen in training: an out-of-distribution test.
 
-Results are appended to MODEL_DIR/evals/val_truth.csv, one row per
+    eval_val_truth.py MODEL_DIR [MODEL_DIR ...] [--epochs 50,100] [--nets ema]
+                      [--truth val|jewel]
+
+Results are appended to MODEL_DIR/evals/{val,jewel}_truth.csv, one row per
 (epoch, net); rows already present are skipped, so rerunning the script
 only evaluates new checkpoints.
 """
@@ -62,6 +69,14 @@ from uvcgan_s.torch.distributed import unwrap_model
 DATA_PATH  = 'sphenix/2025-06-05_jet_bkg_sub'
 PYTHIA_IDX = 'type11_run19_jet30_pythia_noNoise_allCentrality.h5_index.csv'
 EMBED_IDX  = 'type11plus4_run19_jet30_hijing_noNoise_cent0.h5_index.csv'
+TEST_IDX   = 'type4_hijing_plus_jewel_jet30_40_50_noNoise_cent0.h5_index.csv'
+JEWEL_DIR  = 'sphenix/jewel_jet30/jewel_jet30'
+
+# split and index file of the mixed events of each truth set
+TRUTH_SETS = {
+    'val'   : ('val',  EMBED_IDX),
+    'jewel' : ('test', TEST_IDX),
+}
 
 # 24 x 64 towers over |eta| < 1.1 and the full azimuth
 DETA  = 2.2 / 24
@@ -91,10 +106,13 @@ def parse_cmdargs():
     parser.add_argument('--batch', type = int, default = 500)
     parser.add_argument('--min-jet', type = float, default = 10.0,
         help = 'minimal truth cone energy (GeV) of the jet metrics')
+    parser.add_argument('--truth', default = 'val',
+        choices = list(TRUTH_SETS),
+        help = 'PYTHIA val events, or JEWEL test events')
     parser.add_argument('--data', default = os.environ.get(
         'UVCGAN_S_DATA', 'data'))
     parser.add_argument('--cache', default = None,
-        help = 'paired val events, built on first use')
+        help = 'paired events, built on first use')
     parser.add_argument('--force', action = 'store_true',
         help = 'evaluate rows that are already present')
     return parser.parse_args()
@@ -107,57 +125,97 @@ def read_keys(path):
     assert (df['sample'].values == np.arange(len(df))).all()
     return m[0].values * 1_000_000 + m[1].values
 
-def build_pairs(root, n_events, seed, path):
-    """Pick val events and read them with their signal truth."""
-    embed_keys  = read_keys(os.path.join(root, 'val',   EMBED_IDX))
+def read_pythia_truth(root, keys):
+    """PYTHIA signals of the (file, event) keys, from train/signal.h5."""
     pythia_keys = read_keys(os.path.join(root, 'train', PYTHIA_IDX))
+
+    order = np.argsort(pythia_keys)
+    pos   = np.searchsorted(pythia_keys, keys, sorter = order)
+    match = order[np.minimum(pos, len(order) - 1)]
+
+    if not (pythia_keys[match] == keys).all():
+        raise RuntimeError('some events have no PYTHIA counterpart')
+
+    # h5py wants increasing indices
+    sig_order = np.argsort(match)
+
+    with h5py.File(os.path.join(root, 'train', 'signal.h5'), 'r') as f:
+        signal = np.empty((len(keys), *f['data'].shape[1:]), np.float32)
+        signal[sig_order] = f['data'][match[sig_order]]
+
+    return signal
+
+def read_jewel_truth(jewel_dir, keys, shape):
+    """JEWEL jets of the (file, event) keys, from their ROOT files."""
+    # pylint: disable=import-outside-toplevel
+    import uproot
+
+    signal = np.empty((len(keys), *shape), np.float32)
+    files  = keys // 1_000_000
+    events = keys %  1_000_000
+
+    for fileno in np.unique(files):
+        path = os.path.join(jewel_dir, f'jewel_jet30_file{fileno}.root')
+
+        with uproot.open(path) as f:
+            for i in np.nonzero(files == fileno)[0]:
+                name = f'h_eta_phi_cent0_file{fileno}_evt{events[i]}'
+                signal[i] = f[name].values()
+
+    return signal
+
+def build_pairs(truth, data, n_events, seed, path):
+    """Pick mixed events and read them with their signal truth."""
+    root = os.path.join(data, DATA_PATH)
+    (split, index) = TRUTH_SETS[truth]
+
+    embed_keys = read_keys(os.path.join(root, split, index))
 
     rng  = np.random.default_rng(seed)
     pick = np.sort(rng.choice(len(embed_keys), n_events, replace = False))
 
-    order = np.argsort(pythia_keys)
-    pos   = np.searchsorted(pythia_keys, embed_keys[pick], sorter = order)
-    match = order[np.minimum(pos, len(order) - 1)]
-
-    if not (pythia_keys[match] == embed_keys[pick]).all():
-        raise RuntimeError('some val events have no PYTHIA counterpart')
-
-    with h5py.File(os.path.join(root, 'val', 'embed.h5'), 'r') as f:
+    with h5py.File(os.path.join(root, split, 'embed.h5'), 'r') as f:
         embed = f['data'][pick]
 
-    # h5py wants increasing indices
-    sig_order = np.argsort(match)
-    signal    = np.empty_like(embed)
-
-    with h5py.File(os.path.join(root, 'train', 'signal.h5'), 'r') as f:
-        signal[sig_order] = f['data'][match[sig_order]]
+    if truth == 'val':
+        signal = read_pythia_truth(root, embed_keys[pick])
+    else:
+        signal = read_jewel_truth(
+            os.path.join(data, JEWEL_DIR), embed_keys[pick], embed.shape[1:]
+        )
 
     # a true pair has embed >= signal in every tower; a wrong match
     # misses the signal's jet
-    deficit = (signal.astype(np.float32) - embed).max(axis = (1, 2))
+    deficit = (signal - embed.astype(np.float32)).max(axis = (1, 2))
     n_bad   = int((deficit > 0.05).sum())
 
     if n_bad > 0:
-        raise RuntimeError(f'{n_bad} val events do not contain their signal')
+        raise RuntimeError(
+            f'{n_bad} {truth} events do not contain their signal'
+        )
 
     os.makedirs(os.path.dirname(path), exist_ok = True)
     np.savez(
-        path, val_index = pick, signal_index = match,
+        path, index = pick, keys = embed_keys[pick],
         embed = embed, signal = signal
     )
 
-def load_pairs(data, n_events, seed, cache = None):
-    """Paired val events (embed, signal), built on first use."""
+def load_pairs(data, n_events, seed, cache = None, truth = 'val'):
+    """Paired mixed events (embed, signal), built on first use."""
+    name = f'pairs_n{n_events}_seed{seed}.npz'
+    if truth != 'val':
+        name = f'pairs_{truth}_n{n_events}_seed{seed}.npz'
+
     path = cache or os.path.join(
         os.environ.get('UVCGAN_S_OUTDIR', 'outdir'), 'sphenix', 'val_truth',
-        f'pairs_n{n_events}_seed{seed}.npz'
+        name
     )
 
     if not os.path.exists(path):
         t0  = time.time()
         tmp = f'{path}.{os.getpid()}.npz'
 
-        build_pairs(os.path.join(data, DATA_PATH), n_events, seed, tmp)
+        build_pairs(truth, data, n_events, seed, tmp)
         os.replace(tmp, path)
 
         print(f"built '{path}' in {time.time() - t0:.0f} s")
@@ -339,7 +397,7 @@ def evaluate_model(model_dir, cmdargs, truth, device):
     )
     model.eval()
 
-    csv  = os.path.join(model_dir, 'evals', 'val_truth.csv')
+    csv  = os.path.join(model_dir, 'evals', f'{cmdargs.truth}_truth.csv')
     done = set()
 
     if os.path.exists(csv) and not cmdargs.force:
@@ -384,7 +442,9 @@ def evaluate_model(model_dir, cmdargs, truth, device):
             }
             rows.append(row)
 
-            outdir = os.path.join(model_dir, 'evals', 'val_truth')
+            outdir = os.path.join(
+                model_dir, 'evals', f'{cmdargs.truth}_truth'
+            )
             os.makedirs(outdir, exist_ok = True)
             np.save(os.path.join(outdir, f'e{tag:04d}_{net}.npy'), e_fake)
 
@@ -477,7 +537,8 @@ def main():
     device  = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     (embed, signal) = load_pairs(
-        cmdargs.data, cmdargs.n_events, cmdargs.seed, cmdargs.cache
+        cmdargs.data, cmdargs.n_events, cmdargs.seed, cmdargs.cache,
+        cmdargs.truth
     )
     truth = Truth(
         embed, signal, cone_kernel(R_JET), cmdargs.min_jet, device
