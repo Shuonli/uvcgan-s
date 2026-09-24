@@ -21,11 +21,13 @@ and recommended batch 32 at 1e-4 and `gp_cache_period` 4; neither holds up.
    (800k updates at batch 4, five days) resolves the held-out jet energy
    to 3.59 GeV. The base run (batch 32 at 5e-5) reaches 3.63 GeV at 80k
    updates and 3.60 at 130k, 14 and 23 h on one A6000, with per-tower
-   errors as small or smaller. That is 6-8x less training for <1% in resolution. The warm-up
-   has to shrink with the run: the configured one lasts 64k updates, the
-   base run used 200. One run each, and only the val PYTHIA embedding and
-   a cone energy were measured: confirm with two seeds and the JEWEL test
-   before relying on it.
+   errors as small or smaller: 5-7x less training for <1% in resolution
+   on the in-distribution val events. **On the JEWEL test the published
+   model stays 3-5% better** (3.99 against 4.1-4.2 GeV), so the long
+   training buys some robustness to out-of-distribution jets (or batch 4
+   and its long warm-up do; jobs 20040-20044 tell). The warm-up has to
+   shrink with the run: the configured one lasts 64k updates, the base
+   run used 200. One run each so far; more seeds are running.
 2. **Batch 32 at 5e-5**, the base run's setting. Batch 32 at 1e-4 gets the
    raw generator to a given held-out quality faster during the first ~4 h,
    but the EMA generator, which inference uses, is never better at equal
@@ -290,9 +292,39 @@ smaller (`l1_bkg` of both networks, `l1_sig` of the raw one; the EMA's
 The published run's own history agrees: its `idt_aa_a1` was lowest around
 120k updates (0.0314, rolling mean of 10 epochs) and ended at 0.0334,
 while `cycle_b` kept falling to the end. What the remaining 700k updates
-do buy is not visible here: the signal discriminator is fooled more and
-more (`disc_a1` 0.02 -> 0.19, `gen_ba1` 1.19 -> 0.65), which may matter
-for jet shapes or for the JEWEL test, neither of which is measured.
+buy on these events is not visible; the signal discriminator is fooled
+more and more (`disc_a1` 0.02 -> 0.19, `gen_ba1` 1.19 -> 0.65). They do
+buy something on the JEWEL test (next section).
+
+### The JEWEL test (out of distribution)
+
+The source ROOT dataset (Zenodo record 17594612) also has the JEWEL jets
+*without* background (`jewel_jet30.tar.gz`, 1.1 GB, md5 checked, unpacked
+to `DATA/sphenix/jewel_jet30/`), whose histogram names match the test
+split's JEWEL-in-HIJING events by (file, event); the record describes this
+pairing as the intended test. Every one of the 20k sampled test events
+contains its JEWEL jet tower by tower (298 of 300 shuffled pairs do not).
+`eval_val_truth.py --truth jewel` scores against it (`evals/jewel_truth.csv`,
+cache `OUTDIR/sphenix/val_truth/pairs_jewel_n20000_seed0.npz`). The JEWEL
+jets are quenched (median total energy 47 GeV against 75 for PYTHIA) and
+never seen in training.
+
+| `jer_cal`, GeV | JEWEL test | PYTHIA val |
+| :--- | ---: | ---: |
+| median-rho | 5.34 | 5.28 |
+| published model, 800k updates, ema | **3.99** | 3.59 |
+| published model, 800k updates, raw | 4.10 | 3.59 |
+| base run, 40k updates, ema | 4.08 | 3.74 |
+| base run, 80k updates, ema | 4.15 | 3.63 |
+| base run, 130k updates, ema | 4.19 | 3.60 |
+| base run, 140k updates, ema | 4.12 | 3.60 |
+| base run, 40-140k updates, raw | 3.86-4.44 | 3.59-3.77 |
+
+On the JEWEL test the base run's EMA stops improving at ~40k updates and
+stays 3-5% behind the published model, while it catches up with it on the
+val events. So the long configured training buys some robustness to
+out-of-distribution jets -- or batch 4 and its long warm-up do; the runs
+of jobs 20040-20044 separate the two.
 
 ## What a step costs, and how to shorten it
 
@@ -427,14 +459,19 @@ Knobs: `UVCGAN_S_DDP_MODE`, `UVCGAN_S_DDP_COMPRESS` (fp16/bf16, worth
 
 ## Still open
 
-- **Confirm the short run** before switching to it: batch 32 at 5e-5 with
-  a short warm-up for ~100k updates, two more seeds (two GPUs for ~17 h:
-  `DIAG_SEED=1 DIAG_LABEL=base_b32_lr5e-5_s1 sbatch
-  scripts/slurm/diag_base_run.sbatch`, likewise seed 2; the base run is
-  seed 0), scored with `eval_val_truth.sbatch`; and compare the
-  short model with the published one on the JEWEL test split and on the
-  physics the paper uses (jets found in the extracted image, shapes),
-  which the cone energy here does not capture.
+- **Jobs 20040-20044** (dahlia, one A6000 each, 26 h from 2026-09-23
+  21:26, until ~2026-09-24 23:30): the short recipe of the base run
+  (warm-up of one 200-update epoch, 5e-5, checkpoint every 10k updates,
+  held-out val scores every epoch in `val_truth_history.csv`) at batch
+  32 with seeds 1 and 2 (`OUTDIR/sphenix/base/*_base_b32_lr5e-5_s{1,2}`;
+  the base run is seed 0) and at batch 4 with seeds 0, 1, 2
+  (`*_base_b4_lr5e-5_s{0,1,2}`; seed 0 starts from the same weights as the
+  base run). They confirm the short run and compare batch 32 with batch 4
+  at equal updates and equal hours, on val and JEWEL truth. When they
+  end, score the six run directories with `eval_val_truth.sbatch`, once
+  with `EVAL_ARGS="--truth val"` and once with `"--truth jewel"`.
+- The physics the paper uses (jets found in the extracted image, their
+  shapes) is not captured by the cone energy.
 - Whether 5e-5 beats 1e-4 at batch 32 at depth rests on one seed of 5e-5.
 - The EMA carries the random initialization for tens of thousands of
   updates. A warm-up of its momentum (e.g. `min(m, (1 + t) / (10 + t))`)
