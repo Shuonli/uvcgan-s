@@ -653,6 +653,99 @@ Three seeds each (seed 0 at 180 min, seeds 1-2 at 120 min):
   the cone energy is right, the pattern of towers inside the jet less so --
   which matters for jet shapes, not for jet energies.
 
+### Why OT-CFM's signal channel carries nothing (checked 2026-09-25)
+
+Training is unpaired: each batch draws 256 mixtures, 256 HIJING events and
+256 PYTHIA events independently; the index files that record which events
+make up a mixture are read only by the evaluator. The only pairing is the
+OT plan inside a batch. Its cost splits into a background part, |psi(m) -
+psi(b)|^2, and a signal part, |psi(0) - psi(s)|^2. The signal part does not
+depend on the mixture (the start's signal channel is the same empty image
+for every mixture): it is constant down each column of the cost matrix
+(to 1e-14 relative, 8 batches of 256), and a constant per column cannot
+change a one-to-one assignment. **The plan with and without the signal
+channel is the same permutation in 8 of 8 batches**, although the signal
+part is large (mean 1675 against 2887 for the background part). So each
+mixture is paired with a background resembling it and with whichever
+PYTHIA event was drawn next to that background (jet at the right place
+3-4.5% of the time, as for random pairs). Flow matching then regresses the
+signal channel onto random jets: it learns their average, the same for
+every mixture, and ends at 4-5% of the true cone energy, uncorrelated with
+the event. The background channel's targets were chosen to resemble the
+mixture, so it learns "the nearest background", which removes the jet.
+
+### Jet substructure (`scripts/flow/substructure.py`, 2026-09-25)
+
+R = 0.4 cone around the true leading-jet axis, towers as constituents
+(transverse energy = tower value, negative towers dropped), 10k events of
+val and of JEWEL (8.8k / 8.4k jets). Observables: cone E_T, mass, girth,
+p_T^D, core fraction, leading-tower fraction, soft drop z_g and R_g
+(C/A, z_cut 0.1, beta 0). Tables: `docs/flow/substructure.csv`
+(W1 / sigma and per-jet resolution per model and observable),
+`substructure_modification.csv`; figure `docs/flow/substructure.png`.
+
+- **Seeding changes nothing inside the jet** (identical numbers), unless
+  the seeded region misses or cuts a jet (JEWEL at 10 GeV seeds: per-jet
+  girth resolution 0.31 -> 0.44).
+- **The threshold redefines the observables** (drops constituents below
+  0.5-0.7 GeV). Against truth with the same threshold -- what a
+  detector-level analysis would measure -- the thresholded OT-CFM
+  distributions match closely: W1 / sigma 0.01 (girth), 0.02 (p_T^D), 0.02
+  (core), 0.03 (z_lead), 0.05 (z_g), 0.08 (R_g) on val, 0.04-0.12 on JEWEL;
+  UVCGAN-S against the full truth: 0.06-0.23. Per-jet resolutions are
+  UVCGAN-S's (girth 0.27, p_T^D 0.37 of the true spread on val).
+- The plain 4-step read-out's noise broadens the jets (girth up, R_g
+  pushed to large angles).
+- Nobody measures z_g or R_g jet by jet at this granularity and background
+  (per-jet resolution 0.8-1.2 of the true spread), nor the mass (~0.8);
+  their distributions and means are measurable.
+- Conditional CFM: single samples reproduce the distributions (like
+  UVCGAN-S) but are noisy per jet; the 16-sample mean is best per jet but
+  too narrow in places (the average of plausible jets is smoother than a
+  jet).
+
+The quenching signal: JEWEL minus PYTHIA of the mean, jets of true cone
+energy 20-30 GeV (3.1k each). In truth JEWEL jets are narrower and harder:
+p_T^D +0.049 +- 0.002, z_lead +0.057 +- 0.003, R_g -0.027 +- 0.003, mass
+-0.69 +- 0.02 GeV. Fraction of it each extraction keeps (+- 0.05-0.10):
+
+| | p_T^D | z_lead | R_g | mass |
+| :--- | ---: | ---: | ---: | ---: |
+| OT-CFM, 4 Euler steps, m - b | 0.63 | 0.68 | 0.23 | 0.38 |
+| OT-CFM, seeds 8 GeV + 0.5 GeV threshold | 0.82 | 0.86 | 0.68 | 0.40 |
+| OT-CFM, seeds 10 GeV + 0.7 GeV threshold | 0.88 | 0.93 | 0.79 | 0.39 |
+| OT-CFM, converged | 0.77 | 0.79 | 0.65 | 0.38 |
+| UVCGAN-S published | 0.81 | 0.84 | 0.74 | 0.64 |
+| conditional CFM, mean of 16 / 1 sample | 0.73 / 0.70 | 0.75 / 0.75 | 0.77 / 0.62 | 0.49 / 0.50 |
+| L1 regression | 0.77 | 0.81 | 0.79 | 0.50 |
+| truth with 0.5 / 0.7 GeV threshold | 1.04 / 1.05 | 1.06 / 1.08 | 1.08 / 1.05 | 0.88 / 0.84 |
+
+The threshold is what makes OT-CFM's substructure usable: the plain
+read-out's noise, identical for PYTHIA and JEWEL, dilutes the difference;
+thresholded, OT-CFM keeps as much of it as UVCGAN-S or more, except the
+mass (40% against 64%: partly the lower energy scale, mass scales with it,
+partly wide-angle residuals). Every extraction dilutes the quenching
+signal (keeps 64-93% in the shapes): an analysis must correct for it.
+
+### Vacuum -> medium: what an unpaired OT coupling would pair (`vac_med_coupling.py`)
+
+Exact minibatch OT between PYTHIA val truth jets (median cone E_T 32 GeV)
+and JEWEL truth jets (26 GeV), 4 batches each:
+
+| representation | batch | axis distance of pairs | E_T rank corr. | girth corr. |
+| :--- | ---: | ---: | ---: | ---: |
+| random pairs | 1024 | 1.69 | -0.01 | 0.01 |
+| full 24 x 64 images, log | 256 / 1024 | 1.45 / 1.37 | 0.07 / 0.11 | 0.01 / 0.00 |
+| jet-centred 9 x 9, log | 256 / 1024 | | 0.13 / 0.21 | 0.70 / 0.78 |
+| jet-centred 9 x 9, GeV | 256 / 1024 | | 0.44 / 0.56 | 0.78 / 0.85 |
+
+On full images OT pairs jets by where they are; on centred log images by
+shape, hardly by energy; in GeV partly by energy. The monotone (quantile)
+coupling of cone energies, which larger batches approach in 1-D, maps
+23 -> 13, 30 -> 22, 39 -> 37, 44 -> 44 GeV. The "modification" an
+unpaired OT-CFM learns is the least change in whatever metric is chosen --
+a modelling assumption that unpaired data cannot test.
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything
