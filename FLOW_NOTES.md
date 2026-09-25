@@ -8,6 +8,86 @@ Questions: can a flow-based model reach the current UVCGAN-S physics
 performance in fewer GPU-hours; is it more stable across seeds; how do final
 quality and inference cost compare. Treated as hypotheses.
 
+## Answer (2026-09-25; seeds 1-2 of the flows being added)
+
+**Yes, in fewer GPU-hours -- by two different flows, each with a catch.
+The published minibatch-OT recipes do not work as written for this task;
+what works is an adaptation of each.** Everything below is on one RTX
+A6000, val `jer_cal` of the 20k held-out mixtures (lower is better),
+JEWEL at the val-selected checkpoint; the full tables are under "Results".
+
+| | trained on | best val `jer_cal`, GeV | hours to 3.70 GeV (T_acc) | JEWEL `jer_cal` | per-tower `l1_sig` | inference, ms/event |
+| :--- | :--- | ---: | ---: | ---: | ---: | ---: |
+| UVCGAN-S batch 32, 3 seeds | unpaired + synthetic mixtures | 3.62 +- 0.03 (24 h) | 8.4 / 8.6 / 15.2 | 4.00-4.15 | 0.032-0.034 | 0.27 |
+| UVCGAN-S batch 4, 3 seeds | same | 3.64 +- 0.02 (21-23 h) | 14.7 / 16.5 / 16.7 | 3.91-4.03 | 0.032-0.033 | 0.27 |
+| UVCGAN-S published, 800k updates | same | 3.59 (~105 h) | | 3.99 | 0.033 | 0.27 |
+| **conditional CFM**, mean of 16 samples | synthetic mixtures (as `idt-aa`) | **3.60** (3 h) | **<= 1.0** | 4.27 | 0.036 | 65 |
+| conditional CFM, mean of 4 samples | same | 3.89 (3 h) | not in 3 h | 4.53 | 0.037 | 16 |
+| **OT-CFM**, unpaired, m - b, 4 Euler steps | real mixtures, backgrounds, signals, unpaired | 3.67 (2.5-3 h) | **1.25** | **3.55** | 0.150 | 2.0 |
+| SB-CFM, unpaired, m - b | same | 6.69 (20-min pilot) | - | - | 0.060 | 8.1 |
+| regression, baseline's L1 loss, 3 seeds (control) | synthetic mixtures | 3.80 +- 0.01 (1 h) | not in 1 h (plateau) | 4.29-4.35 | 0.026 | 0.5 |
+| regression, log-space MSE (control) | synthetic mixtures | 4.12 (1 h) | - | 4.17 | 0.032 | 0.5 |
+
+1. **The published unpaired recipes fail on the signal they produce.**
+   Minibatch OT (exact or entropic) between real mixtures and independent
+   (background, signal) pairs pairs a mixture with a signal whose jet is
+   where its own jet is no more often than chance (3-4.5%, batch 256-2048):
+   the correspondence the flow would have to learn is not in its training
+   pairs. OT-CFM's and SB-CFM's signal channel are useless.
+2. **OT-CFM's background channel does learn it.** It becomes a
+   least-change map from mixtures to backgrounds, i.e. it removes the jet;
+   reading the signal as mixture minus background, with 4 coarse Euler
+   steps (an averaging solve, chosen on val), it reaches T_acc after 75
+   min and 3.67 GeV after 2.5 h, with no synthetic pairs and no mixing in
+   training -- and it is **the best model on JEWEL by 0.35-0.45 GeV**,
+   having no PYTHIA signal prior to be misled by. Its catch: a coarse
+   image (`l1_sig` 4.5x the baseline's); only its cone energies are sharp.
+   The converged solve (16 NFE) gives better towers (`l1_sig` 0.05) and a
+   worse val resolution (4.08; JEWEL 3.66).
+3. **Conditional CFM on synthetic mixtures is the best in distribution.**
+   A single posterior sample is poor (5.0 GeV: it carries the posterior's
+   spread), but the mean of K samples improves as sigma^2 = a + b / K:
+   16 samples give 3.66 GeV after 1 h of training and 3.60 after 3 h --
+   the published model's resolution, 10x sooner than the baseline reaches
+   3.70. Its catches: 240x the baseline's inference cost (128 network
+   evaluations per event, 65 ms) and a PYTHIA prior that costs it on
+   JEWEL (4.27 against the baseline's 3.91-4.03).
+4. **Much of the speed comes from supervised training on synthetic
+   mixtures, which the baseline already contains.** A plain U-Net
+   regression with the baseline's own `idt-aa` loss reaches 3.92 GeV in 15
+   minutes and 3.80 +- 0.01 (3 seeds) in 40-60, with the smallest per-tower
+   errors of all, at 0.5 ms/event -- but it plateaus above T_acc and is the
+   worst on JEWEL. The flows' advantage over it is the posterior mean
+   (conditional CFM) and the absence of a signal prior (OT-CFM).
+5. **Seeds.** The regression's seeds agree to +-0.01 GeV; the baseline's
+   final resolution to +-0.02-0.03 but its time to T_acc varies from 8.4
+   to 15.2 h at batch 32. The flows' curves are smooth and monotone
+   (no adversarial oscillation of the raw network, which moves by 0.1-0.3
+   GeV between the baseline's checkpoints). Seeds 1-2 of the two flows:
+   see "Seeds" below.
+
+**Recommendation.** Continue with flow matching, in two modified forms,
+and keep UVCGAN-S (batch 4, 20-24 h, c.f. SCALING_NOTES.md) as the
+reference until the flows pass the analysis the paper uses (jets found
+in the extracted image), which the cone energy does not test:
+
+- For robustness and cheap inference: **OT-CFM, unpaired, read as
+  mixture minus background.** Next: improve its per-tower image (e.g. a
+  1-channel embed -> background flow instead of the augmented state, whose
+  signal channel is dead weight; or a per-tower readout between the coarse
+  and the converged solve), and confirm on seeds and on the jet-level
+  analysis.
+- For the best in-distribution resolution per training hour:
+  **conditional CFM on synthetic mixtures with a posterior-mean readout.**
+  Next: cut the inference cost (distil the posterior mean into one
+  network; fewer samples with coarse solves already give 3.84 GeV for 16
+  evaluations), and address its JEWEL deficit (e.g. train with more
+  varied signal shapes).
+- Do not pursue SB-CFM here (worse than OT-CFM at equal time, its
+  entropic plan costs 11% of the step and is still a near-permutation at
+  the conventional sigma); UOT-FM (population imbalance) is not indicated
+  -- the synthetic and real mixtures match to 0.1% in mean energy.
+
 ## Pre-registration (written before any flow model was trained)
 
 ### The task, as it actually is
@@ -442,6 +522,35 @@ regressions): 4.18 / 4.02 (120 min).
 `regress_l1` with a cosine-decaying rate (job 20091): 3.82 GeV after 60
 min, level with the constant rate (3.79-3.81): its plateau is the
 estimator, not the schedule.
+
+### JEWEL: the out-of-distribution test (jobs 20079, 20094, 20096, 20098)
+
+JEWEL (quenched jets in HIJING, never seen in training) at each run's
+val-selected checkpoint, EMA network, `jer_cal` in GeV:
+
+| model | selection setting | val | JEWEL |
+| :--- | :--- | ---: | ---: |
+| UVCGAN-S batch 32 (3 seeds) | | 3.60 / 3.60 / 3.65 | 4.12 / 4.15 / 4.00 |
+| UVCGAN-S batch 4 (3 seeds) | | 3.63 / 3.62 / 3.66 | 3.91 / 3.99 / 4.03 |
+| UVCGAN-S published, 800k updates | | 3.59 | 3.99 |
+| median-rho | | 5.28 | 5.34 |
+| **A. OT-CFM, unpaired, m - b** (180 min) | 4 Euler steps | 3.67 | **3.55** |
+| same checkpoint, other solves | Euler 16 / midpoint 4 / midpoint 16 | | 3.52 / 4.03 / 3.66 |
+| C. conditional CFM (180 min) | mean of 4, 8 NFE | 3.89 | 4.53 |
+| same, mean of 16 | 8 NFE | 3.60 | 4.27 |
+| same, one sample | 8 NFE | 4.99 | 5.50 |
+| `regress_l1` (3 seeds, 45-60 min) | | 3.79 / 3.81 / 3.80 | 4.31 / 4.35 / 4.29 |
+| D. regression, log space (60 min) | | 4.12 | 4.17 |
+
+- The models that learn a signal prior from PYTHIA (conditional CFM, both
+  regressions, and UVCGAN-S through `idt-aa`) lose 0.3-0.7 GeV on the
+  quenched JEWEL jets; the more supervised, the more they lose (the L1
+  regression and conditional CFM, which fit PYTHIA best, lose most).
+- **The unpaired OT-CFM gains**: it only learns what background looks
+  like and reads the signal off as the remainder, so the jet's shape
+  cannot mislead it. It is the best model on JEWEL by 0.35-0.45 GeV.
+- Conditional CFM's 16-sample mean, the best model on val, is 0.28 GeV
+  behind the baseline on JEWEL.
 
 ## Commands
 

@@ -272,6 +272,100 @@ def plot_nfe(runs, out):
     fig.tight_layout()
     fig.savefig(out, dpi = 110)
 
+ARM_STYLE = {
+    'uvcgan-s batch 32'    : ('#7f7f7f', '-'),
+    'uvcgan-s batch 4'     : ('#000000', '-'),
+    'otcfm (m - b)'        : ('#2ca02c', '-'),
+    'condcfm (mean of 4)'  : ('#ff7f0e', '-'),
+    'condcfm (mean of 16)' : ('#d62728', '-'),
+    'regress_l1'           : ('#9467bd', '--'),
+    'regress'              : ('#8c564b', '--'),
+    'sbcfm (m - b)'        : ('#17becf', ':'),
+}
+
+def plot_report(curves, table, reference, out):
+    """Three panels: val jer_cal and l1_sig against training hours (mean
+    of the seeds, band = their range, EMA network at each arm's selection
+    setting), and JEWEL against val at each run's selected checkpoint."""
+    # pylint: disable=too-many-locals
+    (fig, axes) = plt.subplots(1, 3, figsize = (19, 6))
+    ema = curves[curves.net == 'ema']
+    lat = table.set_index('run').ms_per_event.to_dict()
+
+    for (arm, x) in ema.groupby('arm'):
+        (color, ls) = ARM_STYLE.get(arm, (None, '-'))
+        runs = x.run.unique()
+        ms   = np.nanmedian([ lat.get(r, np.nan) for r in runs ])
+        label = f'{arm} ({len(runs)} seed{"s" if len(runs) > 1 else ""}'
+        label += f', {ms:.2g} ms/event)' if np.isfinite(ms) else ')'
+
+        for (col, metric) in enumerate([ 'jer_cal', 'l1_sig' ]):
+            ax = axes[col]
+            # a common grid of times over which every seed has a value
+            grid = np.unique(np.round(x.hours, 3))
+            vals = []
+            for r in runs:
+                xr = x[x.run == r].sort_values('hours')
+                v  = np.interp(grid, xr.hours, xr[metric], left = np.nan,
+                               right = np.nan)
+                vals.append(v)
+            vals = np.array(vals)
+            mean = np.nanmean(vals, axis = 0)
+            ax.plot(grid, mean, color = color, ls = ls, lw = 1.6,
+                    marker = 'o', ms = 2.5, label = label)
+            if len(runs) > 1:
+                ax.fill_between(grid, np.nanmin(vals, axis = 0),
+                                np.nanmax(vals, axis = 0), color = color,
+                                alpha = 0.2, lw = 0)
+
+    ax = axes[0]
+    for (name, target) in TARGETS.items():
+        ax.axhline(target, color = 'grey', ls = ':', lw = 0.8)
+        ax.annotate(f'{name} {target:.2f}', (1.0, target),
+                    xycoords = ('axes fraction', 'data'), fontsize = 7,
+                    color = 'grey', ha = 'right', va = 'bottom')
+    ax.axhline(5.28, color = 'k', ls = '-.', lw = 0.8)
+    ax.annotate('median-rho 5.28', (1.0, 5.28), xycoords = ('axes fraction',
+                'data'), fontsize = 7, ha = 'right', va = 'bottom')
+    ref = reference.get('ema')
+    if ref is not None:
+        for (col, metric) in enumerate([ 'jer_cal', 'l1_sig' ]):
+            axes[col].axhline(ref[metric], color = 'k', ls = '--', lw = 1)
+            axes[col].annotate('published, 800k updates',
+                (0.0, ref[metric]), xycoords = ('axes fraction', 'data'),
+                fontsize = 7, va = 'top')
+    ax.set_ylim(3.45, 5.5)
+    axes[1].set_ylim(0.02, 0.2)
+    axes[1].set_yscale('log')
+
+    for (col, label) in enumerate([ 'val jer_cal, GeV', 'val l1_sig, GeV' ]):
+        axes[col].set_xscale('log')
+        axes[col].set_xlabel('training time on one RTX A6000, hours')
+        axes[col].set_ylabel(label)
+        axes[col].grid(alpha = 0.3, which = 'both')
+    axes[0].legend(fontsize = 7, loc = 'upper right',
+                   bbox_to_anchor = (1.0, 0.93))
+
+    ax = axes[2]
+    t = table[(table.net == 'ema') & table.jewel_jer_cal.notna()]
+    for (arm, x) in t.groupby('arm'):
+        (color, _) = ARM_STYLE.get(arm, (None, '-'))
+        ax.scatter(x.best_jer_cal, x.jewel_jer_cal, color = color, s = 30,
+                   label = arm, zorder = 3)
+    lo, hi = 3.4, 4.7
+    ax.plot([ lo, hi ], [ lo, hi ], color = 'grey', lw = 0.8, ls = ':')
+    ax.scatter([ 3.588 ], [ 3.992 ], marker = '*', s = 120, color = 'k',
+               label = 'published, 800k updates', zorder = 3)
+    ax.set_xlim(3.5, 3.95)
+    ax.set_ylim(3.45, 4.6)
+    ax.set_xlabel('val jer_cal at the val-selected checkpoint, GeV')
+    ax.set_ylabel('JEWEL jer_cal (out of distribution), GeV')
+    ax.grid(alpha = 0.3)
+    ax.legend(fontsize = 7, loc = 'upper left')
+
+    fig.tight_layout()
+    fig.savefig(out, dpi = 120)
+
 def plot(curves, reference, out):
     arms   = sorted(curves.arm.unique())
     colors = dict(zip(arms, plt.cm.tab10(np.arange(len(arms)))))
@@ -373,6 +467,7 @@ def main():
         print(arms.round(3).to_string(index = False))
 
     plot(curves, reference, f'{cmdargs.out}.png')
+    plot_report(curves, table, reference, f'{cmdargs.out}_report.png')
     plot_nfe(runs, f'{cmdargs.out}_nfe.png')
     print(f'wrote {cmdargs.out}.csv, {cmdargs.out}_arms.csv,'
           f' {cmdargs.out}_curves.csv, {cmdargs.out}.png, {cmdargs.out}_nfe.png')
