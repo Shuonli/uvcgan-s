@@ -601,6 +601,58 @@ seeds 1-2 every 30 min.) The baseline EMA at 8 / 16 / 24 h: 3.74 / 3.65 /
   and settle at 3.68 by 2 h; the confirmation rule places the crossing at
   45-75 min. Their JEWEL scores agree to 0.01 GeV.
 
+### A clean image from the unpaired OT-CFM, without retraining (2026-09-25)
+
+`scripts/flow/readout_test.py` (tables `docs/flow/readout_final.csv`,
+event display `docs/flow/readout_events_val.png`). The 4-step read-out's
+noise is almost all away from the jet: summed |error| of the signal image
+outside the true leading-jet cone is 216 GeV per event (val), against 40
+for UVCGAN-S and 42 for an empty image (the other PYTHIA particles). The
+converged solve is clean (61 GeV/event) but loses 30% of the jet (`jes`
+0.69, `jer_cal` 4.1).
+
+Read-outs from the same trained flow (none uses the truth; thresholds
+first chosen on val, the seed threshold then set below the analysis'
+10 GeV jet threshold after JEWEL showed why, see below):
+
+- **tower threshold**: keep m - b only where it exceeds t GeV. It cleans
+  the image *and* improves the jet energy (val 3.665 -> 3.604 at 0.5 GeV):
+  the dropped towers are mostly noise, and the lost soft jet constituents
+  only lower the scale (`jes` 0.77), which the calibration absorbs.
+- **jet-seeded subtraction** (as the iterative subtraction of heavy-ion
+  jet analyses): towers whose coarse cone energy (R = 0.4) exceeds E GeV
+  seed a region of all towers within R = 0.4; inside it the coarse
+  subtraction (thresholded), outside it nothing. It leaves the jet energy
+  exactly as it was, as long as the region covers the jet.
+
+Three seeds each (seed 0 at 180 min, seeds 1-2 at 120 min):
+
+| read-out | val `jer_cal` | JEWEL `jer_cal` | `l1_sig` val / JEWEL | off-jet error, GeV/event, val / JEWEL | jets in region, val / JEWEL | `jes` val / JEWEL |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 4 Euler steps, m - b (before) | 3.67-3.68 | 3.55-3.56 | 0.150 / 0.150 | 216-221 / 216-221 | | 0.93 / 0.98 |
+| converged, m - b | 4.06-4.14 | 3.60-3.66 | 0.051-0.054 / 0.047-0.050 | 61-67 / 58-64 | | 0.69-0.70 / 0.69-0.71 |
+| threshold 0.5 GeV | 3.60-3.62 | 3.48-3.49 | 0.062-0.064 / 0.057-0.058 | 82-84 / 76-78 | | 0.77 / 0.77 |
+| seeds 8 GeV, threshold 0.5 | 3.60-3.62 | 3.48-3.50 | 0.051-0.052 / 0.045-0.047 | 65-67 / 59-61 | 100% / 99.9% | 0.77 / 0.77 |
+| **seeds 10 GeV, threshold 0.7** | 3.64-3.65 | 3.48-3.49 | **0.037-0.038 / 0.030-0.031** | **44-45 / 35-36** | 100% / 99.3-99.4% | 0.71 / 0.70 |
+| seeds 12 GeV, threshold 0.5 | 3.60-3.62 | 3.62-3.63 | 0.037-0.038 / 0.029-0.030 | 44-45 / 34-35 | 100% / 97.5-97.8% | 0.77 / 0.76 |
+| UVCGAN-S published | 3.59 | 3.99 | 0.033 / 0.028 | 40 / 34 | | 0.94 / 0.95 |
+| L1 regression | 3.79 | 4.31 | 0.026 / 0.019 | 30 / 20 | | 0.86 / 0.87 |
+
+- **With a jet-seeded, thresholded read-out the unpaired OT-CFM (2-3 h of
+  training) has an image about as clean as UVCGAN-S's, the same jet
+  resolution on val and a better one on JEWEL by ~0.5 GeV.**
+- The seed threshold is a physics setting, not a tuning knob: it must sit
+  below the lowest jet energy kept (10 GeV here) times the read-out's scale.
+  12 GeV, the first val choice, covers every PYTHIA jet but misses 2.4% of
+  the softer quenched JEWEL jets, and each missed jet reads as zero energy
+  (JEWEL 3.62 instead of 3.48). 8-10 GeV covers 99.3-99.9%.
+- Costs: the thresholds lower the jet energy scale to 0.70-0.77 (UVCGAN-S
+  0.94), so it has to be calibrated; the scale moves by <= 1.5% between
+  PYTHIA and JEWEL (the 4-step read-out's by 5%). Inside the jet cone the
+  per-tower error is ~20% above UVCGAN-S's (val 0.254 against 0.209):
+  the cone energy is right, the pattern of towers inside the jet less so --
+  which matters for jet shapes, not for jet energies.
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything
@@ -667,6 +719,9 @@ rescored (`fm_eval.py`, rows already present are skipped).
   scoring jobs. Tell the admins if it persists.
 - Open: the jet-level physics (jets found in the extracted image, their
   shapes) for the two flows; OT-CFM as a 1-channel embed -> background
-  flow; a one-network distillation of the conditional-CFM posterior mean;
-  why OT-CFM is better on JEWEL than on val (quenched jets are softer and
-  broader: a background model may simply find them easier to separate).
+  flow, trained in a less compressive energy scale (so that the least-change
+  map leaves soft towers alone) -- the seeded read-out above does that job
+  after the fact; a one-network distillation of the conditional-CFM
+  posterior mean; why OT-CFM is better on JEWEL than on val (quenched jets
+  are softer and broader: a background model may simply find them easier
+  to separate).
