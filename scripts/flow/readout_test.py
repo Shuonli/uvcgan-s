@@ -131,6 +131,7 @@ def score_images(images, truth, batch, device, kernel, regions = None):
     # pylint: disable=too-many-locals
     n = len(images)
     (l1, l1_in, l1_out, n_in, n_out, covered) = (0.0, 0.0, 0.0, 0, 0, 0)
+    (se, se_in, se_out) = (0.0, 0.0, 0.0)
     e_fake = []
 
     for start in range(0, n, batch):
@@ -143,6 +144,9 @@ def score_images(images, truth, batch, device, kernel, regions = None):
         l1     += float(err.sum())
         l1_in  += float(err[mask].sum())
         l1_out += float(err[~mask].sum())
+        se     += float((err**2).sum())
+        se_in  += float((err[mask]**2).sum())
+        se_out += float((err[~mask]**2).sum())
         n_in   += int(mask.sum())
         n_out  += int((~mask).sum())
 
@@ -163,6 +167,9 @@ def score_images(images, truth, batch, device, kernel, regions = None):
         'l1_in'  : l1_in / n_in,
         'l1_out' : l1_out / n_out,
         'abs_err_out_gev' : l1_out / n,
+        'mse_sig' : se / (n * images[0].numel()),
+        'mse_in'  : se_in / n_in,
+        'mse_out' : se_out / n_out,
         **ev.jet_scores(e_fake, truth),
     }
     if regions is not None:
@@ -363,7 +370,8 @@ def format_row(r):
         if 'jet_in_region' in r and pd.notna(r.get('jet_in_region')) else ''
     return (f"{r['model']:>20s} {r['readout']:>16s}  l1_sig {r['l1_sig']:.4f}"
             f"  in {r['l1_in']:.3f}  out {r['l1_out']:.4f}"
-            f" ({r['abs_err_out_gev']:5.1f} GeV/event)  jes {r['jes']:.3f}"
+            f" ({r['abs_err_out_gev']:5.1f} GeV/event)"
+            f"  mse in {r['mse_in']:.3f} out {r['mse_out']:.4f}  jes {r['jes']:.3f}"
             f"  jer_cal {r['jer_cal']:.3f}{extra}")
 
 if __name__ == '__main__':

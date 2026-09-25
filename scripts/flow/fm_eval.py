@@ -57,6 +57,8 @@ def parse_cmdargs():
     parser.add_argument('--n-events', type = int, default = 20000)
     parser.add_argument('--batch', type = int, default = 500)
     parser.add_argument('--latency', action = 'store_true')
+    parser.add_argument('--force', action = 'store_true',
+        help = 'score settings already present again (e.g. for new columns)')
     return parser.parse_args()
 
 def ckpt_step(path):
@@ -122,7 +124,7 @@ def evaluate_run(run_dir, cmdargs, truth, device):
     csv  = os.path.join(run_dir, 'evals', f'{cmdargs.truth}_truth.csv')
     done = set()
 
-    if os.path.exists(csv):
+    if os.path.exists(csv) and not cmdargs.force:
         old  = pd.read_csv(csv)
         done = set(map(tuple, old[KEY].astype(str).values))
 
@@ -186,7 +188,8 @@ def evaluate_run(run_dir, cmdargs, truth, device):
                     f" {state['stats']['train_time'] / 60:6.1f} min"
                     f" {net_name} {solver:>8s} {nfe:3d} {decode:>7s}"
                     f" x{samples}  l1_sig {scores['l1_sig']:.4f}"
-                    f"  l1_bkg {scores['l1_bkg']:.4f}  jes {scores['jes']:.3f}"
+                    f"  l1_bkg {scores['l1_bkg']:.4f}"
+                    f"  mse_sig {scores['mse_sig']:.4f}  jes {scores['jes']:.3f}"
                     f"  jer_cal {scores['jer_cal']:5.2f}  ({dt:.1f} s)",
                     flush = True
                 )

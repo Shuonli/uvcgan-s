@@ -16,6 +16,8 @@ events, and the result is scored on
 
     l1_sig, l1_bkg  mean |extracted - truth| per tower, GeV: the held-out
                     counterparts of `idt_aa_a1` and `idt_aa_a0`
+    mse_sig, mse_bkg  mean (extracted - truth)^2 per tower, GeV^2: weighs
+                    the large misses (jet cores) that l1 counts little
     jet energy      energy in a R = 0.4 cone around the leading truth jet,
                     extracted against truth: scale `jes` (mean ratio),
                     `bias` (mean difference, GeV) and resolution `jer`
@@ -91,7 +93,8 @@ NETS = {
 
 COLUMNS = [
     'label', 'epoch', 'updates', 'net', 'n_events', 'n_jets',
-    'l1_sig', 'l1_bkg', 'jes', 'bias', 'jer', 'jer_iqr', 'jer_cal',
+    'l1_sig', 'l1_bkg', 'mse_sig', 'mse_bkg',
+    'jes', 'bias', 'jer', 'jer_iqr', 'jer_cal',
 ]
 
 def parse_cmdargs():
@@ -312,6 +315,8 @@ def score_generator(gen, data_norm, truth, batch, device):
     n      = len(truth.embed)
     l1_sig = 0.0
     l1_bkg = 0.0
+    se_sig = 0.0
+    se_bkg = 0.0
     e_fake = []
 
     for start in range(0, n, batch):
@@ -334,6 +339,8 @@ def score_generator(gen, data_norm, truth, batch, device):
 
         l1_sig += float((fake_sig - s).abs().sum())
         l1_bkg += float((fake_bkg - (e - s)).abs().sum())
+        se_sig += float(((fake_sig - s)**2).sum())
+        se_bkg += float(((fake_bkg - (e - s))**2).sum())
 
         e_fake.append(truth.at_axis(fake_sig, start))
 
@@ -344,6 +351,8 @@ def score_generator(gen, data_norm, truth, batch, device):
         'n_events' : n,
         'l1_sig'   : l1_sig / (n * n_towers),
         'l1_bkg'   : l1_bkg / (n * n_towers),
+        'mse_sig'  : se_sig / (n * n_towers),
+        'mse_bkg'  : se_bkg / (n * n_towers),
         **jet_scores(e_fake, truth),
     }
 
@@ -370,6 +379,8 @@ def reference_scores(truth, device):
         'n_events' : len(e),
         'l1_sig'   : float((fake - s).abs().mean()),
         'l1_bkg'   : float(((e - fake) - (e - s)).abs().mean()),
+        'mse_sig'  : float(((fake - s)**2).mean()),
+        'mse_bkg'  : float((((e - fake) - (e - s))**2).mean()),
         **jet_scores(truth.at_axis(e - rho), truth),
     }
 
@@ -517,7 +528,11 @@ class EpochScorer:
             })
 
         path = os.path.join(model.savedir, 'val_truth_history.csv')
-        pd.DataFrame(rows).to_csv(
+        df   = pd.DataFrame(rows)
+        if os.path.exists(path):
+            # a file begun before a column was added keeps its layout
+            df = df.reindex(columns = pd.read_csv(path, nrows = 0).columns)
+        df.to_csv(
             path, mode = 'a', header = not os.path.exists(path),
             index = False
         )
@@ -526,7 +541,8 @@ def format_row(row):
     return (
         f"{row['label']:>28s} {row['epoch']:5d} {row['updates']:7d}"
         f" {row['net']:>3s}  l1_sig {row['l1_sig']:.4f}"
-        f"  l1_bkg {row['l1_bkg']:.4f}  jes {row['jes']:.3f}"
+        f"  l1_bkg {row['l1_bkg']:.4f}  mse_sig {row['mse_sig']:.4f}"
+        f"  jes {row['jes']:.3f}"
         f"  bias {row['bias']:+6.2f}  jer {row['jer']:5.2f}"
         f"  jer_iqr {row['jer_iqr']:5.2f}  jer_cal {row['jer_cal']:5.2f}"
         f"  ({row['n_jets']} jets)"

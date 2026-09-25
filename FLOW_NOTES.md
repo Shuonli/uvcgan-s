@@ -862,9 +862,14 @@ checkpoint every 15 min, scored on val when training ends (~14:40):
   `ext_otcfm1_bias1_s0/`: tests the claim that a gentler scale cleans the
   image at the source.
 
-Then: JEWEL at the val-selected checkpoints, the image read-outs
-(`readout_test.py`), substructure (`substructure.py --extra`), and
-`fm_compare.py` with the earlier runs. All earlier jobs have ended.
+Then (queued behind them, start by themselves): JEWEL at the val-selected
+checkpoints, solver sweeps, the image read-outs (`readout_test.py`),
+substructure (`substructure.py --extra`) -- jobs 20127-20130 -- and the
+per-tower **MSE** (added to the evaluator on 2026-09-25 at the user's
+request, next to the mean absolute error `l1_sig`): the new runs get it at
+every checkpoint; jobs 20131-20133 rescore UVCGAN-S (all checkpoints) and
+the earlier flows (their curves or selected checkpoints) with it. Then
+`fm_compare.py` over everything.
 
 - Open: the jet-level physics (jets found in the extracted image) for the
   flows; a one-network distillation of the conditional-CFM posterior mean;

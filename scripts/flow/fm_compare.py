@@ -185,7 +185,7 @@ def summarize(curves, summaries, runs):
             'final_jer_cal' : last.jer_cal, 'final_l1_sig' : last.l1_sig,
             'best_jer_cal' : best.jer_cal, 'best_hours' : best.hours,
             'best_step' : best.step, 'best_l1_sig' : best.l1_sig,
-            'best_jes' : best.jes,
+            'best_mse_sig' : best.get('mse_sig'), 'best_jes' : best.jes,
             'jewel_jer_cal' : jewel if net == 'ema' else None,
             'jewel_l1_sig' : jewel_l1 if net == 'ema' else None,
             'ms_per_event' : latency(method, samples),
@@ -211,7 +211,8 @@ def arms_table(table):
     rows = []
     cols = [ 'best_jer_cal', 'final_jer_cal', 'hours_trained', 'best_hours',
              'h_T_useful', 'h_T_acc', 'h_T_match', 'h_T_acc_interp',
-             'jewel_jer_cal', 'best_l1_sig', 'best_jes', 'ms_per_event',
+             'jewel_jer_cal', 'best_l1_sig', 'best_mse_sig', 'best_jes',
+             'ms_per_event',
              'train_steps_per_s', 'train_samples_per_s', 'train_peak_mem_gb',
              'train_n_params', 'train_coupling_frac' ]
 
@@ -321,7 +322,7 @@ def plot_report(curves, table, reference, out):
     of the seeds, band = their range, EMA network at each arm's selection
     setting), and JEWEL against val at each run's selected checkpoint."""
     # pylint: disable=too-many-locals
-    (fig, axes) = plt.subplots(1, 3, figsize = (19, 6))
+    (fig, axes) = plt.subplots(1, 4, figsize = (25, 6))
     ema = curves[curves.net == 'ema']
     lat = table.set_index('run').ms_per_event.to_dict()
 
@@ -332,16 +333,22 @@ def plot_report(curves, table, reference, out):
         label = f'{arm} ({len(runs)} seed{"s" if len(runs) > 1 else ""}'
         label += f', {ms:.2g} ms/event)' if np.isfinite(ms) else ')'
 
-        for (col, metric) in enumerate([ 'jer_cal', 'l1_sig' ]):
+        for (col, metric) in enumerate([ 'jer_cal', 'l1_sig', 'mse_sig' ]):
+            if x[metric].notna().sum() == 0:
+                continue
             ax = axes[col]
             # a common grid of times over which every seed has a value
             grid = np.unique(np.round(x.hours, 3))
             vals = []
             for r in runs:
-                xr = x[x.run == r].sort_values('hours')
+                xr = x[(x.run == r) & x[metric].notna()].sort_values('hours')
+                if len(xr) == 0:
+                    continue
                 v  = np.interp(grid, xr.hours, xr[metric], left = np.nan,
                                right = np.nan)
                 vals.append(v)
+            if not vals:
+                continue
             vals = np.array(vals)
             mean = np.nanmean(vals, axis = 0)
             ax.plot(grid, mean, color = color, ls = ls, lw = 1.6,
@@ -362,7 +369,9 @@ def plot_report(curves, table, reference, out):
                 'data'), fontsize = 7, ha = 'right', va = 'bottom')
     ref = reference.get('ema')
     if ref is not None:
-        for (col, metric) in enumerate([ 'jer_cal', 'l1_sig' ]):
+        for (col, metric) in enumerate([ 'jer_cal', 'l1_sig', 'mse_sig' ]):
+            if pd.isna(ref.get(metric)):
+                continue
             axes[col].axhline(ref[metric], color = 'k', ls = '--', lw = 1)
             axes[col].annotate('published, 800k updates',
                 (0.0, ref[metric]), xycoords = ('axes fraction', 'data'),
@@ -370,8 +379,11 @@ def plot_report(curves, table, reference, out):
     ax.set_ylim(3.45, 5.5)
     axes[1].set_ylim(0.02, 0.2)
     axes[1].set_yscale('log')
+    axes[2].set_yscale('log')
 
-    for (col, label) in enumerate([ 'val jer_cal, GeV', 'val l1_sig, GeV' ]):
+    for (col, label) in enumerate([ 'val jer_cal, GeV',
+                                    'val l1_sig (mean |error| per tower), GeV',
+                                    'val mse_sig (mean error^2 per tower), GeV^2' ]):
         axes[col].set_xscale('log')
         axes[col].set_xlabel('training time on one RTX A6000, hours')
         axes[col].set_ylabel(label)
@@ -379,7 +391,7 @@ def plot_report(curves, table, reference, out):
     axes[0].legend(fontsize = 7, loc = 'upper right',
                    bbox_to_anchor = (1.0, 0.93))
 
-    ax = axes[2]
+    ax = axes[3]
     t = table[(table.net == 'ema') & table.jewel_jer_cal.notna()]
     for (arm, x) in t.groupby('arm'):
         (color, _) = ARM_STYLE.get(arm, (None, '-'))
@@ -472,8 +484,10 @@ def main():
         runs[label] = (run_dir.rstrip('/'), None, None)
 
     cols   = [ 'family', 'arm', 'seed', 'run', 'net', 'step', 'hours',
-               'jer_cal', 'l1_sig', 'l1_bkg', 'jes', 'bias' ]
-    curves = pd.concat([ c[cols] for c in curves ], ignore_index = True)
+               'jer_cal', 'l1_sig', 'l1_bkg', 'mse_sig', 'mse_bkg', 'jes',
+               'bias' ]
+    curves = pd.concat([ c.reindex(columns = cols) for c in curves ],
+                       ignore_index = True)
 
     reference = {}
     if cmdargs.reference:
