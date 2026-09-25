@@ -259,15 +259,22 @@ D were launched on this evidence, before the A and B pilots finished.
 
 ## Running (keep current)
 
-- Pilot (saturn, A6000, seed 0), `OUTDIR/sphenix/flow/pilot_<method>_s0/`:
-  OT-CFM (job 20062) and SB-CFM (job 20063), 20 min of training;
-  conditional CFM (job 20064), 25 min; regression (job 20065, done), 10 min.
-  Each scores its checkpoints on the 20k val events when training ends.
-- Extension of the regression (dahlia, jobs 20066-20068, from 21:04):
-  seeds 0-2, 180 min of training each, checkpoint every 5 min,
-  `OUTDIR/sphenix/flow/ext_regress_s{0,1,2}/`.
-- Next: extend conditional CFM the same way when its pilot is in; mixture
-  decoding of the A/B pilots; `fm_compare.py` against the baseline runs of
-  jobs 20040-20044 (they end ~23:35 and need their final checkpoints
-  scored, c.f. SCALING_NOTES.md); JEWEL, NFE curve and latency of the
-  selected checkpoints.
+**Resource cap (user, 2026-09-24): at most 8 GPUs in use in total,
+baseline runs included.** Runs resume from their checkpoints, so extra
+seeds wait in line instead of running at once.
+
+- Pilots (saturn, seed 0), `OUTDIR/sphenix/flow/pilot_<method>_s0/`: done
+  for OT-CFM (job 20062), SB-CFM (20063), regression (20065), plus the
+  mixture reading of the first two (job 20073); conditional CFM (job
+  20064) scoring its checkpoints.
+- Extension, seed 0, 180 min of training each: regression (dahlia, job
+  20066, from 21:04, checkpoint every 5 min, `ext_regress_s0/`) and
+  conditional CFM (saturn, job 20074, from 21:24, every 15 min,
+  `ext_condcfm_s0/`). OT-CFM seed 0 (read as m - b) resumes the pilot run
+  `pilot_otcfm_s0/` to 180 min when the conditional-CFM pilot frees its GPU.
+- Paused: regression seeds 1 and 2 (`ext_regress_s{1,2}/`, 15 min trained,
+  resume with the same command); conditional-CFM seeds 1 and 2 not started.
+  They run when the baseline jobs 20040-20044 end (~23:35), whose final
+  checkpoints must be scored first (c.f. SCALING_NOTES.md).
+- Then: `fm_compare.py` against the baseline; JEWEL, NFE curve and latency
+  of the selected checkpoints.

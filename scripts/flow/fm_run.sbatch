@@ -33,6 +33,9 @@ echo "[$(date +%T)] $LABEL on $(hostname), $(nvidia-smi --query-gpu=name --forma
     --minutes "$MINUTES" --seed "${SEED:-0}" "$@" || exit 1
 
 echo "[$(date +%T)] scoring the checkpoints on val"
-"$PYTHON" -u scripts/flow/fm_eval.py "$RUN" --truth val --nets ema
-"$PYTHON" -u scripts/flow/fm_eval.py "$RUN" --truth val --nets raw --steps last
+# EVAL_DECODE: 'mixture' for the unpaired flows (c.f. fm_eval.SELECTION)
+"$PYTHON" -u scripts/flow/fm_eval.py "$RUN" --truth val --nets ema \
+    --decode "${EVAL_DECODE:-direct}"
+"$PYTHON" -u scripts/flow/fm_eval.py "$RUN" --truth val --nets raw \
+    --steps last --decode "${EVAL_DECODE:-direct}"
 echo "[$(date +%T)] done"

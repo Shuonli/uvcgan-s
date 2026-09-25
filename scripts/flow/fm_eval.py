@@ -11,7 +11,8 @@ same columns. The flow is wrapped as a generator (fm_common.Decomposer).
 
 Rows go to RUN_DIR/evals/{truth}_truth.csv, keyed by (step, net, nfe,
 solver, decode, samples); rows already present are skipped. `--steps best`
-takes the checkpoint of lowest val jer_cal (ema, midpoint, 16 NFE, direct):
+takes the checkpoint of lowest val jer_cal of the EMA network at the
+method's selection setting (`SELECTION`):
 checkpoints are selected on val, JEWEL only scores the selected one.
 
 --latency times the decomposition of 500 events (GPU-synchronised, after a
@@ -33,6 +34,17 @@ import torch
 import fm_common as fc
 
 KEY = [ 'step', 'net', 'nfe', 'solver', 'decode', 'samples' ]
+
+# the setting checkpoints are selected (and time curves drawn) with: the
+# regression takes one evaluation and no solver; the unpaired flows are
+# read as mixture - background channel, their signal channel carries no
+# event information (FLOW_NOTES.md)
+SELECTION = {
+    'regress' : (1, 'none', 'direct'),
+    'condcfm' : (16, 'midpoint', 'direct'),
+    'otcfm'   : (16, 'midpoint', 'mixture'),
+    'sbcfm'   : (16, 'midpoint', 'mixture'),
+}
 
 PUBLISHED = os.path.join(
     'sphenix', 'pretrained',
@@ -63,21 +75,20 @@ def best_step(run_dir):
     if not os.path.exists(csv):
         raise RuntimeError(f"'{run_dir}': score the val events first")
 
-    (nfe, solver) = default_setting(run_dir)
+    (nfe, solver, decode) = default_setting(run_dir)
 
     v = pd.read_csv(csv)
     v = v[(v.net == 'ema') & (v.nfe == nfe) & (v.solver == solver)
-          & (v.decode == 'direct') & (v.samples == 1)]
+          & (v.decode == decode) & (v.samples == 1)]
 
     return int(v.sort_values('jer_cal').step.iloc[0])
 
 def default_setting(run_dir):
-    """(nfe, solver) that checkpoints are selected with."""
+    """(nfe, solver, decode) that checkpoints are selected with."""
     with open(os.path.join(run_dir, 'config.json'), 'r', encoding = 'utf-8') as f:
         method = json.load(f)['method']
 
-    # the regression takes one network evaluation and no solver
-    return (1, 'none') if method == 'regress' else (16, 'midpoint')
+    return SELECTION[method]
 
 def select_checkpoints(run_dir, spec):
     ckpts = fc.list_checkpoints(run_dir)

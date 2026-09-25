@@ -5,8 +5,8 @@
                   [--reference PUBLISHED_DIR] [--out PREFIX]
 
 Flow runs: `evals/val_truth.csv` of fm_eval.py (checkpoints scored at the
-selection setting: EMA or raw network, midpoint 16 NFE, direct decoding;
-the regression at its one evaluation) against their training time.
+method's selection setting, `fm_eval.SELECTION`) against their training
+time.
 Baseline runs: `evals/val_truth.csv` of eval_val_truth.py against the
 cumulative `epoch_time` of `history.csv` (the training loop, without the
 held-out scoring of the callback). Both are one GPU (RTX A6000).
@@ -32,6 +32,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from fm_eval import SELECTION
+
 TARGETS = { 'T_useful' : 4.00, 'T_acc' : 3.70, 'T_match' : 3.65 }
 
 def parse_cmdargs():
@@ -47,14 +49,13 @@ def flow_curves(run_dir):
         config = json.load(f)
 
     v = pd.read_csv(os.path.join(run_dir, 'evals', 'val_truth.csv'))
-    (nfe, solver) = (1, 'none') if config['method'] == 'regress' \
-        else (16, 'midpoint')
-    v = v[(v.nfe == nfe) & (v.solver == solver) & (v.decode == 'direct')
+    (nfe, solver, decode) = SELECTION[config['method']]
+    v = v[(v.nfe == nfe) & (v.solver == solver) & (v.decode == decode)
           & (v.samples == 1)].copy()
 
     v['hours']  = v.train_time / 3600
     v['family'] = 'flow'
-    v['arm']    = config['method']
+    v['arm']    = config['method'] + (' (m - b)' if decode == 'mixture' else '')
     v['seed']   = config['seed']
     v['run']    = config['label']
 
