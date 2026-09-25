@@ -35,16 +35,7 @@ import fm_common as fc
 
 KEY = [ 'step', 'net', 'nfe', 'solver', 'decode', 'samples' ]
 
-# the setting checkpoints are selected (and time curves drawn) with: the
-# regression takes one evaluation and no solver; the unpaired flows are
-# read as mixture - background channel, their signal channel carries no
-# event information (FLOW_NOTES.md)
-SELECTION = {
-    'regress' : (1, 'none', 'direct'),
-    'condcfm' : (16, 'midpoint', 'direct'),
-    'otcfm'   : (16, 'midpoint', 'mixture'),
-    'sbcfm'   : (16, 'midpoint', 'mixture'),
-}
+SELECTION = fc.SELECTION
 
 PUBLISHED = os.path.join(
     'sphenix', 'pretrained',
@@ -111,7 +102,7 @@ def settings(cmdargs, method):
         for solver in cmdargs.solver.split(','):
             for decode in cmdargs.decode.split(','):
                 for samples in [ int(x) for x in cmdargs.samples.split(',') ]:
-                    if method == 'regress':
+                    if fc.is_regression(method):
                         # one evaluation, nothing to solve or to sample
                         (nfe, solver, samples) = (1, 'none', 1)
                     elif (solver == 'midpoint') and (nfe % 2):

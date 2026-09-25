@@ -311,18 +311,21 @@ checkpoint and network, which the plan underestimated), pre-pilot checks
 baseline runs included.** Runs resume from their checkpoints, so extra
 seeds wait in line instead of running at once.
 
-- Pilots (saturn, seed 0), `OUTDIR/sphenix/flow/pilot_<method>_s0/`: done
-  for OT-CFM (job 20062), SB-CFM (20063), regression (20065), plus the
-  mixture reading of the first two (job 20073); conditional CFM (job
-  20064) scoring its checkpoints.
-- Extension, seed 0, 180 min of training each: regression (dahlia, job
-  20066, from 21:04, checkpoint every 5 min, `ext_regress_s0/`) and
-  conditional CFM (saturn, job 20074, from 21:24, every 15 min,
-  `ext_condcfm_s0/`). OT-CFM seed 0 (read as m - b) resumes the pilot run
-  `pilot_otcfm_s0/` to 180 min when the conditional-CFM pilot frees its GPU.
-- Paused: regression seeds 1 and 2 (`ext_regress_s{1,2}/`, 15 min trained,
-  resume with the same command); conditional-CFM seeds 1 and 2 not started.
-  They run when the baseline jobs 20040-20044 end (~23:35), whose final
-  checkpoints must be scored first (c.f. SCALING_NOTES.md).
-- Then: `fm_compare.py` against the baseline; JEWEL, NFE curve and latency
-  of the selected checkpoints.
+- Seed 0, 180 min of training each: conditional CFM (saturn, job 20074,
+  `ext_condcfm_s0/`, checkpoint every 15 min) and OT-CFM read as m - b
+  (saturn, job 20075, resumes `pilot_otcfm_s0/` from 20 min). Each scores
+  its checkpoints when it ends (~00:30-01:00).
+- Regression seed 0 (`ext_regress_s0/`, job 20066) **stopped at 60 min of
+  training on a plateau** (monitor, 1000 events: 4.69 at 15 min, 4.50 at
+  40, 4.43 at 60; training loss flat since 10 min). Its checkpoints still
+  need scoring on the 20k events (`fm_eval.sbatch ext_regress_s0 --nets
+  ema`). Seeds 1 and 2 paused at 15 min (4.67, 4.61 on the monitor).
+- Follow-up, job 20076 (dahlia): `regress_l1`, the same regression trained
+  with the baseline's own `idt-aa` loss (L1 in GeV, background : signal
+  1 : 10) instead of squared error in log space, 60 min, `ext_regress_l1_s0/`.
+  Tests whether the loss space, not the model, sets the regression's
+  plateau.
+- When the baseline jobs 20040-20044 end (~23:35): score their final
+  checkpoints (val and JEWEL, c.f. SCALING_NOTES.md), then seeds 1-2 of
+  what is still promising, the K-sample mean of conditional CFM, JEWEL,
+  NFE curve and latency of the selected checkpoints, and `fm_compare.py`.

@@ -19,6 +19,9 @@ Methods (c.f. FLOW_NOTES.md):
              ConditionalFlowMatcher, the pairs are exact by construction)
     regress  the same network mapping psi(b + s) to (psi(b), psi(s)) by mean
              squared error, no flow
+    regress_l1  the same, trained with the baseline's own `idt-aa` loss: L1 of
+             the energies in GeV, background and signal weighted 1 : 10
+             (a follow-up, c.f. FLOW_NOTES.md)
 
 Nothing here reads the index files: the domains are drawn independently.
 """
@@ -46,7 +49,19 @@ import eval_val_truth as ev   # pylint: disable=wrong-import-position
 DATA_PATH = 'sphenix/2025-06-05_jet_bkg_sub'
 BIAS      = 0.1
 SHAPE     = (24, 64)
-METHODS   = [ 'otcfm', 'sbcfm', 'condcfm', 'regress' ]
+METHODS   = [ 'otcfm', 'sbcfm', 'condcfm', 'regress', 'regress_l1' ]
+
+# (nfe, solver, decode) that checkpoints are selected, and time curves
+# drawn, with: the regression takes one evaluation and no solver; the
+# unpaired flows are read as mixture - background channel, their signal
+# channel carries no event information (FLOW_NOTES.md)
+SELECTION = {
+    'regress' : (1, 'none', 'direct'),
+    'regress_l1' : (1, 'none', 'direct'),
+    'condcfm' : (16, 'midpoint', 'direct'),
+    'otcfm'   : (16, 'midpoint', 'mixture'),
+    'sbcfm'   : (16, 'midpoint', 'mixture'),
+}
 
 # domains each method draws from; condcfm and regress build their mixtures
 DOMAINS = {
@@ -54,7 +69,15 @@ DOMAINS = {
     'sbcfm'   : ('embed', 'background', 'signal'),
     'condcfm' : ('background', 'signal'),
     'regress' : ('background', 'signal'),
+    'regress_l1' : ('background', 'signal'),
 }
+
+# weights of the background and signal L1 terms of regress_l1: those of the
+# baseline's idt-aa loss (lambda_cyc_a0 10, lambda_cyc_a1 100)
+L1_WEIGHTS = (1.0, 10.0)
+
+def is_regression(name):
+    return name.startswith('regress')
 
 def data_root():
     return os.path.join(os.environ.get('UVCGAN_S_DATA', 'data'), DATA_PATH)
@@ -185,11 +208,11 @@ def construct_net(method, channels = 96, res_blocks = 2, attn = (4,)):
     downsampled 6 x 16. condcfm and regress see the mixture as an extra
     input channel.
     """
-    cond = 1 if method in ('condcfm', 'regress') else 0
+    cond = 1 if (method == 'condcfm') or is_regression(method) else 0
 
     return UNetModel(
         image_size            = SHAPE[1],
-        in_channels           = 2 + cond if method != 'regress' else 1,
+        in_channels           = 1 if is_regression(method) else 2 + cond,
         model_channels        = channels,
         out_channels          = 2,
         num_res_blocks        = res_blocks,
@@ -364,6 +387,15 @@ class Method:
             t = torch.zeros(x1.shape[0], device = x1.device)
             return torch.mean((net(t, cond) - x1)**2)
 
+        if self.name == 'regress_l1':
+            t = torch.zeros(x1.shape[0], device = x1.device)
+            (bkg, sig)     = self.norm.components(net(t, cond))
+            (bkg_t, sig_t) = self.norm.components(x1)
+            return (
+                  L1_WEIGHTS[0] * torch.mean((bkg - bkg_t).abs())
+                + L1_WEIGHTS[1] * torch.mean((sig - sig_t).abs())
+            )
+
         # the plan is solved by the caller (so that it can be timed), the
         # matcher's own call only samples t and the interpolant
         (t, xt, ut) = ConditionalFlowMatcher.sample_location_and_conditional_flow(
@@ -439,7 +471,7 @@ class Decomposer(torch.nn.Module):
             self.gen = torch.Generator(device = m.device)
             self.gen.manual_seed(self.seed)
 
-        if name == 'regress':
+        if is_regression(name):
             t = torch.zeros(m.shape[0], device = m.device)
             x = self.net(t, self.method.condition(m))
             (bkg, sig) = norm.components(x)

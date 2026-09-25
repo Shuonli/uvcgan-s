@@ -146,7 +146,7 @@ def main():
         dec = fc.Decomposer(method, net, nfe = 8, solver = 'midpoint')
         y   = dec(batch['embed'][:16].unsqueeze(1))
         hook.remove()
-        want = 1 if name == 'regress' else 8
+        want = 1 if fc.is_regression(name) else 8
         check(calls[0] == want, f'decomposition took {calls[0]} evaluations')
         check(y.shape == (16, 2, *fc.SHAPE) and bool(torch.isfinite(y).all()),
               f'decomposition {tuple(y.shape)}, finite')

@@ -12,7 +12,8 @@ Output: OUTDIR/sphenix/flow/NAME/
     checkpoints/step_########.pt   raw and EMA weights, every --ckpt-minutes
                      of training time
     resume.pt        the full state of the last checkpoint (optimizer, RNGs)
-    inline_eval.csv  quick val scores at each checkpoint (--inline-events)
+    inline_eval.csv  quick val scores at each checkpoint (--inline-events),
+                     read as fm_common.SELECTION says
 
 Rerunning the same command resumes from resume.pt until the time budget
 (--minutes of training time in total) is spent. c.f. FLOW_NOTES.md.
@@ -149,7 +150,10 @@ class InlineScorer:
         rows = {}
         for (name, net) in nets.items():
             net.eval()
-            dec = fc.Decomposer(method, net, nfe = self.nfe)
+            dec = fc.Decomposer(
+                method, net, nfe = self.nfe,
+                decode = fc.SELECTION[method.name][2]
+            )
             (scores, _) = fc.ev.score_generator(
                 dec, None, self.truth, 500, device
             )
