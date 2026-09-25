@@ -44,6 +44,11 @@ Methods (c.f. FLOW_NOTES.md):
 The log bias of psi can be changed (`Norm(bias = ...)`, fm_train.py
 --log-bias); 0.1 is the baseline's.
 
+Backbones (`construct_net(backbone = ...)`, fm_train.py --backbone): `unet`,
+the TorchCFM ADM U-Net used throughout; `uvcgan`, the published UVCGAN-S
+generator (ViT-ModNet, sPHENIX configuration) turned into a velocity
+network by adding the time to its style token (`UVCGANVelocity`).
+
 Nothing here reads the index files: the domains are drawn independently.
 """
 
@@ -257,8 +262,95 @@ class Norm:
         """(N, 2, H, W) state -> background, signal energies."""
         return (self.energy(x[:, 0], 'bkg'), self.energy(x[:, 1], 'sig'))
 
-def construct_net(method, channels = 96, res_blocks = 2, attn = (4,)):
-    """The velocity (or regression) network, a compact ADM U-Net.
+# generator of the published UVCGAN-S model (its config.json, `model_args`)
+UVCGAN_GENERATOR = {
+    'features' : 384, 'n_heads' : 6, 'n_blocks' : 12, 'ffn_features' : 1536,
+    'embed_features' : 384, 'activ' : 'gelu', 'norm' : 'layer',
+    'modnet_features_list' : [ 96, 192, 384 ], 'modnet_activ' : 'leakyrelu',
+    'modnet_norm' : None, 'modnet_downsample' : 'conv',
+    'modnet_upsample' : 'upsample-conv', 'modnet_rezero' : False,
+    'rezero' : True, 'activ_output' : None, 'style_rezero' : True,
+    'style_bias' : True, 'n_ext' : 1,
+}
+
+class UVCGANVelocity(torch.nn.Module):
+    """The UVCGAN-S generator as a velocity network v(t, x).
+
+    ViT-ModNet: a convolutional encoder (96, 192, 384 features, no
+    normalisation) down to 3 x 8, a pixel-wise transformer over those 24
+    positions plus one extra token (12 blocks, 384 features), and a decoder
+    of modulated, demodulated convolutions whose style is the extra token's
+    output, with skip connections. The only change: a sinusoidal embedding of
+    t, through a two-layer MLP, is added to the extra token's input, so the
+    style that already modulates every decoder layer (and, through
+    attention, the bottleneck) knows the time. Weights initialised as
+    UVCGAN-S initialises them (Kaiming); the time MLP by PyTorch's default.
+    """
+
+    TIME_FEATURES = 128
+
+    def __init__(self, c_in, c_out, **kwargs):
+        # pylint: disable=import-outside-toplevel
+        super().__init__()
+        from uvcgan_s.base.weight_init import init_weights
+        from uvcgan_s.models.generator.vitmodnet import ViTModNetGenerator
+        from uvcgan_s.torch.layers.transformer import (
+            ExtendedPixelwiseViT, img_to_pixelwise_tokens,
+            img_from_pixelwise_tokens
+        )
+
+        args = { **UVCGAN_GENERATOR, **kwargs }
+        self.gen = ViTModNetGenerator(
+            input_shape = (c_in, *SHAPE), output_shape = (c_out, *SHAPE),
+            **args
+        )
+
+        class TimedPixelwiseViT(ExtendedPixelwiseViT):
+            """ExtendedPixelwiseViT with `time`, (N, n_ext * features), added
+            to its extra tokens."""
+            time = None
+
+            def forward(self, x):
+                itokens = img_to_pixelwise_tokens(x)
+                (n, length, _) = itokens.shape
+                extra = self.extra_tokens.tile(n, 1, 1) \
+                    + self.time.view(n, *self.extra_tokens.shape[1:])
+                y = self.trans_input(itokens)
+                y = self.encoder(torch.cat([ y, extra ], dim = 1))
+                otokens = self.trans_output(y[:, :length, :])
+                return (img_from_pixelwise_tokens(otokens, self.image_shape),
+                        y[:, length:, :].reshape(n, -1))
+
+        # replaces the generator's own (time-blind) bottleneck
+        self.gen.net.set_bottleneck(TimedPixelwiseViT(
+            args['features'], args['n_heads'], args['n_blocks'],
+            args['ffn_features'], args['embed_features'], args['activ'],
+            args['norm'], image_shape = self.gen.net.get_inner_shape(),
+            rezero = args['rezero'], n_ext = args['n_ext'],
+        ))
+        init_weights(self.gen, { 'name' : 'kaiming' })
+
+        width = args['features'] * args['n_ext']
+        self.time_embed = torch.nn.Sequential(
+            torch.nn.Linear(self.TIME_FEATURES, width), torch.nn.SiLU(),
+            torch.nn.Linear(width, width),
+        )
+
+    def forward(self, t, x):
+        # pylint: disable=import-outside-toplevel
+        from torchcfm.models.unet.nn import timestep_embedding
+
+        t = t.reshape(-1).expand(x.shape[0]) if t.numel() == 1 \
+            else t.reshape(-1)
+        self.gen.net.get_bottleneck().time = self.time_embed(
+            timestep_embedding(t, self.TIME_FEATURES)
+        )
+        return self.gen(x)
+
+def construct_net(method, channels = 96, res_blocks = 2, attn = (4,),
+                  backbone = 'unet'):
+    """The velocity (or regression) network: a compact ADM U-Net, or the
+    UVCGAN-S generator (`backbone = 'uvcgan'`, c.f. `UVCGANVelocity`).
 
     24 x 64 is downsampled three times, to 3 x 8; attention runs at the 4x
     downsampled 6 x 16. condcfm and regress see the mixture as an extra
@@ -275,6 +367,10 @@ def construct_net(method, channels = 96, res_blocks = 2, attn = (4,)):
         (c_in, c_out) = (2, 1)          # signal state and the mixture
     else:
         (c_in, c_out) = (2 + cond, 2)
+
+    if backbone == 'uvcgan':
+        return UVCGANVelocity(c_in, c_out)
+    assert backbone == 'unet', backbone
 
     return UNetModel(
         image_size            = SHAPE[1],
@@ -752,7 +848,7 @@ def load_run(run_dir, ckpt, device, which = 'ema'):
 
     net = construct_net(
         config['method'], config['channels'], config['res_blocks'],
-        config['attn']
+        config['attn'], config.get('backbone', 'unet')
     ).to(device)
     net.load_state_dict(state[which])
     net.eval()

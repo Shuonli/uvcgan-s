@@ -69,8 +69,11 @@ def flow_curves(run_dir, samples = None):
     v['hours']  = v.train_time / 3600
     v['family'] = 'flow'
     bias = config.get('log_bias', 0.1)
-    augment = config.get('augment', 'none')
+    augment  = config.get('augment', 'none')
+    backbone = config.get('backbone', 'unet')
     v['arm']    = config['method'] + (
+        f' [{backbone} backbone]' if backbone != 'unet' else ''
+    ) + (
         f' log(E+{bias:g})' if abs(bias - 0.1) > 1e-9 else ''
     ) + (
         f' [{augment}]' if augment != 'none' else ''
@@ -330,6 +333,7 @@ ARM_STYLE = {
     'postflow [jets] (mean of 4)'  : ('#8c564b', '--'),
     'postflow [jets] (mean of 16)' : ('#8c564b', '-'),
     'regress_mse [jets]'           : ('#17becf', '--'),
+    'otcfm1 [uvcgan backbone] (m - b)' : ('#d62728', '-'),
 }
 
 def plot_report(curves, table, reference, out):

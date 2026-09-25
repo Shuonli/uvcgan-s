@@ -56,6 +56,10 @@ def parse_cmdargs():
         help = 'jets: randomised signal shapes (fm_common.JetShapes)')
     parser.add_argument('--sigma', type = float, default = None,
         help = 'path noise: 0 for otcfm and condcfm, 1 for sbcfm')
+    parser.add_argument('--backbone', default = 'unet',
+        choices = [ 'unet', 'uvcgan' ],
+        help = 'velocity network: the ADM U-Net, or the UVCGAN-S generator'
+               ' (fm_common.UVCGANVelocity)')
     parser.add_argument('--channels', type = int, default = 96)
     parser.add_argument('--res-blocks', type = int, default = 2)
     parser.add_argument('--attn', default = '4',
@@ -108,9 +112,10 @@ def write_config(run_dir, cmdargs, n_params):
             old = json.load(f)
 
         old.setdefault('augment', 'none')
+        old.setdefault('backbone', 'unet')
         for key in [ 'method', 'batch', 'lr', 'sigma', 'channels',
                      'res_blocks', 'attn', 'seed', 'ema', 'warmup',
-                     'cosine_steps', 'log_bias', 'augment' ]:
+                     'cosine_steps', 'log_bias', 'augment', 'backbone' ]:
             if old.get(key) != config.get(key):
                 raise RuntimeError(
                     f"resuming '{run_dir}' with {key} = {config.get(key)},"
@@ -193,7 +198,7 @@ def main():
     torch.manual_seed(cmdargs.seed)
     net = fc.construct_net(
         cmdargs.method, cmdargs.channels, cmdargs.res_blocks,
-        [ int(x) for x in cmdargs.attn.split(',') ]
+        [ int(x) for x in cmdargs.attn.split(',') ], cmdargs.backbone
     ).to(device)
     ema = copy.deepcopy(net)
     for p in ema.parameters():
