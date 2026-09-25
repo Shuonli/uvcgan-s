@@ -192,15 +192,82 @@ dominates); the exact OT plan adds 8 ms (CPU network simplex), the
 entropic plan ~0.1 s. Width against step time: 64 channels 9.6M
 parameters 226 ms, 96 channels 21.6M 385 ms, 128 channels 38.3M 523 ms.
 
+## Results
+
+### Pre-pilot checks (jobs 20058, 20061)
+
+`smoke_checks.py` passed for every method: batch shapes (256 x 24 x 64 per
+domain, energies >= 0), standardised state and condition finite (unit
+variance), every parameter receives a finite gradient, the exact plan is a
+permutation, the entropic plan has unit mass and matches POT's converged
+plan (L1 5.5e-3), the solver makes exactly NFE network evaluations, a
+checkpoint round trip reproduces the network bit for bit. Each method was
+trained 40 steps, resumed to 80 (resume restores weights, EMA, optimizer and
+RNG states) and scored through the baseline's evaluator with every solver,
+decoding and sample-count option. Normalisation (fitted on 20k training
+events of each domain): psi of background -0.26 +- 0.70, of signal
+-2.19 +- 0.44, of synthetic mixtures -0.22 +- 0.71.
+
+Evaluation cost: 0.5 ms per event per network evaluation (batch 500), so
+scoring the 20k val events at 16 NFE takes 160 s per checkpoint and
+network, against ~5 s for one forward pass of the UVCGAN-S generator.
+
+### Coupling behaviour: the minibatch plans carry no correspondence
+
+`coupling_diag.py` (40 s on one A6000; `OUTDIR/sphenix/flow/coupling_diag.csv`).
+Real val mixtures m are paired by each plan with independently drawn
+training (background, signal) pairs; the pairing is scored against the
+mixtures' held-out truth. `hit`: the paired signal's leading jet lies
+within dR < 0.4 of the mixture's true jet. `jer_cal (m - b)`: resolution
+of reading the signal as the mixture minus the paired background. Means of
+4 repeats (spread in brackets).
+
+| batch | plan | hit, paired signal | `jer_cal` (m - b), GeV | plan time |
+| ---: | :--- | ---: | ---: | ---: |
+| 256 | random | 3.9% [1.2] | 12.5 [0.9] | - |
+| 256 | exact OT (A) | 3.1% [1.6] | 8.4 [0.9] | 23 ms |
+| 256 | entropic, sigma 1 (B) | 3.0% [1.6] | 8.4 [0.9] | 104 ms |
+| 256 | exact OT, cost on b + s | 9.7% [2.2] | 8.3 [1.1] | 11 ms |
+| 1024 | random | 4.6% [0.1] | 13.3 [0.7] | - |
+| 1024 | exact OT (A) | 4.4% [0.8] | 8.0 [0.2] | 0.27 s |
+| 1024 | entropic, sigma 1 (B) | 4.5% [0.8] | 8.0 [0.1] | 0.14 s |
+| 1024 | exact OT, cost on b + s | 10.8% [0.7] | 8.2 [0.1] | 0.19 s |
+| 2048 | random | 4.0% [0.4] | 12.8 [0.8] | - |
+| 2048 | exact OT (A) | 4.1% [0.4] | 7.8 [0.2] | 1.2 s |
+| 2048 | entropic, sigma 1 (B) | 4.1% [0.3] | 7.7 [0.1] | 0.48 s |
+| 2048 | exact OT, cost on b + s | 12.0% [0.5] | 7.9 [0.2] | 1.1 s |
+
+median-rho on the same val events: 5.28 GeV.
+
+- **The OT and entropic plans pair a mixture with a signal whose jet is
+  where the mixture's jet is no more often than random pairing does**
+  (3-4.5%, the cone's share of the acceptance), and a batch 8 times
+  larger does not change that. The cost is dominated by the 1536
+  background towers; the ~50 towers of the jet hardly move it. Even a cost
+  that knows the mixing (distance of m to b + s) reaches only 10-12%.
+- The plans do pick backgrounds of the right overall level (reading the
+  signal as m - b improves from 12.5-13.3 GeV for random pairs to 7.7-8.4),
+  but that is still far worse than median-rho (5.28), which uses the
+  event's own background.
+- At sigma 1 the entropic plan is nearly a permutation (1.6-1.7 partners
+  per row) and scores like the exact one.
+
+So the training pairs of A and B teach a map with no event-level jet
+information: a flow can only average over couplings like these. This is
+the correspondence failure the conditional follow-up (C) addresses; C and
+D were launched on this evidence, before the A and B pilots finished.
+
 ## Running (keep current)
 
-- 2026-09-24 20:38, saturn (A6000): pilot OT-CFM (job 20062) and SB-CFM
-  (job 20063), seed 0, 20 min of training each, checkpoint every 5 min,
-  then scored on the 20k val events (`fm_run.sbatch`). Outputs
-  `OUTDIR/sphenix/flow/pilot_{otcfm,sbcfm}_s0/`.
-- Job 20061 (saturn): pre-pilot checks (passed), smoke runs of all four
-  methods, then `coupling_diag.py` (-> `OUTDIR/sphenix/flow/coupling_diag.csv`).
-- Next: the conditional-CFM and regression pilots once the coupling
-  diagnostic is in; then `fm_compare.py` against the baseline runs of
+- Pilot (saturn, A6000, seed 0), `OUTDIR/sphenix/flow/pilot_<method>_s0/`:
+  OT-CFM (job 20062) and SB-CFM (job 20063), 20 min of training;
+  conditional CFM (job 20064), 25 min; regression (job 20065, done), 10 min.
+  Each scores its checkpoints on the 20k val events when training ends.
+- Extension of the regression (dahlia, jobs 20066-20068, from 21:04):
+  seeds 0-2, 180 min of training each, checkpoint every 5 min,
+  `OUTDIR/sphenix/flow/ext_regress_s{0,1,2}/`.
+- Next: extend conditional CFM the same way when its pilot is in; mixture
+  decoding of the A/B pilots; `fm_compare.py` against the baseline runs of
   jobs 20040-20044 (they end ~23:35 and need their final checkpoints
-  scored, c.f. SCALING_NOTES.md).
+  scored, c.f. SCALING_NOTES.md); JEWEL, NFE curve and latency of the
+  selected checkpoints.
