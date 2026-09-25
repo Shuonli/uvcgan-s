@@ -26,6 +26,12 @@ And the quenching signal: the JEWEL-minus-PYTHIA difference of each mean
 for jets of true cone energy 20-30 GeV, from the model against from truth.
 
     substructure.py [--n-events 10000] [--condcfm-samples 16]
+                    [--extra LABEL=RUN:READOUT ...] [--skip-condcfm]
+
+`--extra` adds models: RUN is a run directory under OUTDIR/sphenix/flow,
+READOUT either a read-out of readout_test.py (needs its cached backgrounds:
+run readout_test.py on that run first) or `direct` / `mixture`, the run's
+decoding at its selection setting (fm_common.SELECTION).
 """
 
 import argparse
@@ -55,6 +61,9 @@ def parse_cmdargs():
     parser.add_argument('--otcfm', default = 'pilot_otcfm_s0')
     parser.add_argument('--condcfm', default = 'ext_condcfm_s0')
     parser.add_argument('--out', default = None)
+    parser.add_argument('--extra', nargs = '*', default = [],
+        help = 'LABEL=RUN:READOUT models to add')
+    parser.add_argument('--skip-condcfm', action = 'store_true')
     return parser.parse_args()
 
 # --- soft drop: C/A reclustering of up to 53 towers, compiled if possible
@@ -202,21 +211,26 @@ def model_images(cmdargs, embed, truth_name, device):
     for (label, img) in reference_images(embed, cmdargs.batch, device).items():
         images[label] = img
 
-    run  = os.path.join(fc.out_root(), cmdargs.otcfm)
-    step = fc_best_step(run)
-    cache = os.path.join(
-        run, 'evals', f'readout_{truth_name}_s{step:08d}_n20000.pt'
-    )
-    bkg = torch.load(cache)
     for name in OT_READOUTS:
-        out = []
-        for start in range(0, len(embed), cmdargs.batch):
-            m  = torch.from_numpy(embed[start:start + cmdargs.batch])
-            m  = m.to(device).float()
-            b4 = bkg['b4'][start:start + len(m)].to(device)
-            bc = bkg['bc'][start:start + len(m)].to(device)
-            out.append(readout(name, m, b4, bc, kernel)[0].cpu())
-        images[f'OT-CFM {name}'] = torch.cat(out)
+        images[f'OT-CFM {name}'] = readout_images(
+            cmdargs.otcfm, name, embed, truth_name, cmdargs.batch, device,
+            kernel
+        )
+
+    for spec in cmdargs.extra:
+        (label, rest) = spec.split('=', 1)
+        (run, name)   = rest.split(':', 1)
+        if name in ('direct', 'mixture'):
+            images[label] = decoded_images(
+                run, name, embed, cmdargs.batch, device
+            )
+        else:
+            images[label] = readout_images(
+                run, name, embed, truth_name, cmdargs.batch, device, kernel
+            )
+
+    if cmdargs.skip_condcfm:
+        return images
 
     run  = os.path.join(fc.out_root(), cmdargs.condcfm)
     step = fc_best_step(run)
@@ -234,6 +248,39 @@ def model_images(cmdargs, embed, truth_name, device):
         images[f'cond. CFM, {label}'] = torch.cat(out)
 
     return images
+
+def readout_images(run, name, embed, truth_name, batch, device, kernel):
+    """A read-out of readout_test.py from its cached backgrounds."""
+    run  = os.path.join(fc.out_root(), run)
+    step = fc_best_step(run)
+    bkg  = torch.load(os.path.join(
+        run, 'evals', f'readout_{truth_name}_s{step:08d}_n20000.pt'
+    ))
+    out = []
+    for start in range(0, len(embed), batch):
+        m  = torch.from_numpy(embed[start:start + batch]).to(device).float()
+        b4 = bkg['b4'][start:start + len(m)].to(device)
+        bc = bkg['bc'][start:start + len(m)].to(device)
+        out.append(readout(name, m, b4, bc, kernel)[0].cpu())
+    return torch.cat(out)
+
+@torch.no_grad()
+def decoded_images(run, decode, embed, batch, device):
+    """The run's signal at its selection setting, read `direct` or as
+    `mixture` - background."""
+    run  = os.path.join(fc.out_root(), run)
+    step = fc_best_step(run)
+    ckpt = [ c for c in fc.list_checkpoints(run)
+             if c.endswith(f'step_{step:08d}.pt') ][0]
+    (method, net, _, _) = fc.load_run(run, ckpt, device, 'ema')
+    (nfe, solver, _, samples) = fc.SELECTION[method.name]
+    dec = fc.Decomposer(method, net, nfe = nfe, solver = solver,
+                        decode = decode, samples = samples)
+    out = []
+    for start in range(0, len(embed), batch):
+        m = torch.from_numpy(embed[start:start + batch])
+        out.append(dec(m.to(device).float().unsqueeze(1))[:, 1].cpu())
+    return torch.cat(out)
 
 # --- comparison
 

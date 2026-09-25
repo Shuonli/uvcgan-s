@@ -76,7 +76,9 @@ def main():
         print(f'  parameters {fc.count_params(net) / 1e6:.2f} M')
 
         (x0, x1, cond) = method.endpoints(batch)
-        check(x1.shape == (cmdargs.batch, 2, *fc.SHAPE), f'x1 {tuple(x1.shape)}')
+        panels = 1 if name == 'otcfm1' else 2
+        check(x1.shape == (cmdargs.batch, panels, *fc.SHAPE),
+              f'x1 {tuple(x1.shape)}')
         if x0 is not None:
             check(x0.shape == x1.shape, f'x0 {tuple(x0.shape)}')
         if cond is not None:
@@ -95,7 +97,7 @@ def main():
             ent  = -(rowp * np.log(np.clip(rowp, 1e-300, None))).sum(axis = 1)
             print(f'  plan: partners per row {np.exp(ent).mean():.2f}'
                   f' (1 = a permutation), nonzeros per row {nnz.mean():.1f}')
-            if name == 'otcfm':
+            if name in ('otcfm', 'otcfm1', 'otcfm_pieces'):
                 check(bool((nnz == 1).all()), 'exact plan is a permutation')
             else:
                 print(f'  sinkhorn marginal error {method.matcher.ot_sampler.last_err:.1e}')
@@ -116,6 +118,9 @@ def main():
                 method.couple(x0, x1)
             print(f'  coupling {1000 * timed(couple, 10):.1f} ms per batch')
             (x0, x1) = method.couple(x0, x1)
+            if name == 'otcfm_pieces':
+                print(f'  mixtures paired with their own pieces:'
+                      f' {method.pop_recovery():.1%} of the batch')
 
         loss = method.loss(net, x0, x1, cond)
         loss.backward()

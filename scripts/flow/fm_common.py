@@ -22,6 +22,17 @@ Methods (c.f. FLOW_NOTES.md):
     regress_l1  the same, trained with the baseline's own `idt-aa` loss: L1 of
              the energies in GeV, background and signal weighted 1 : 10
              (a follow-up, c.f. FLOW_NOTES.md)
+    otcfm1   one panel: real mixtures -> independently drawn HIJING events,
+             exact minibatch OT; the jet is read as mixture - background
+    otcfm_pieces  the otcfm set-up (mixture, empty) -> (HIJING, PYTHIA), but
+             every batch holds the true pieces of its mixtures: the mixtures
+             are made by adding the batch's HIJING and PYTHIA events, whose
+             order is then shuffled, and the minibatch OT pairs them back
+             (the share it gets right is logged). Synthetic mixtures, so
+             the pairing is known information, as in UVCGAN-S's idt-aa.
+
+The log bias of psi can be changed (`Norm(bias = ...)`, fm_train.py
+--log-bias); 0.1 is the baseline's.
 
 Nothing here reads the index files: the domains are drawn independently.
 """
@@ -49,7 +60,11 @@ import eval_val_truth as ev   # pylint: disable=wrong-import-position
 DATA_PATH = 'sphenix/2025-06-05_jet_bkg_sub'
 BIAS      = 0.1
 SHAPE     = (24, 64)
-METHODS   = [ 'otcfm', 'sbcfm', 'condcfm', 'regress', 'regress_l1' ]
+METHODS   = [ 'otcfm', 'sbcfm', 'condcfm', 'regress', 'regress_l1',
+              'otcfm1', 'otcfm_pieces' ]
+
+# methods whose flow starts from the mixture and uses a minibatch OT plan
+OT_METHODS = ('otcfm', 'sbcfm', 'otcfm1', 'otcfm_pieces')
 
 # (nfe, solver, decode, samples) that checkpoints are selected, and time
 # curves drawn, with -- all chosen on val (FLOW_NOTES.md): the regression
@@ -66,6 +81,9 @@ SELECTION = {
     'condcfm'    : (8, 'midpoint', 'direct', 4),
     'otcfm'      : (4, 'euler', 'mixture', 1),
     'sbcfm'      : (16, 'midpoint', 'mixture', 1),
+    # set before training, as for otcfm; revisited on val afterwards
+    'otcfm1'       : (4, 'euler', 'mixture', 1),
+    'otcfm_pieces' : (16, 'midpoint', 'direct', 1),
 }
 
 # domains each method draws from; condcfm and regress build their mixtures
@@ -75,6 +93,8 @@ DOMAINS = {
     'condcfm' : ('background', 'signal'),
     'regress' : ('background', 'signal'),
     'regress_l1' : ('background', 'signal'),
+    'otcfm1'       : ('embed', 'background'),
+    'otcfm_pieces' : ('background', 'signal'),
 }
 
 # weights of the background and signal L1 terms of regress_l1: those of the
@@ -142,22 +162,27 @@ class GPUData:
         }
 
 class Norm:
-    """psi(E) = log(E + 0.1), standardised per kind of image.
+    """psi(E) = log(E + bias), standardised per kind of image.
 
     Kinds: `bkg` (background domain), `sig` (signal domain), `syn`
-    (synthetic mixtures b + s). Fitted on training events only.
+    (synthetic mixtures b + s). Fitted on training events only. The bias
+    travels with the statistics (key `_bias`; absent means 0.1).
     """
 
     KINDS = ('bkg', 'sig', 'syn')
 
-    def __init__(self, stats):
+    def __init__(self, stats, bias = BIAS):
+        stats = dict(stats)
+        self.bias  = float(stats.pop('_bias', bias))
         self.stats = {
             k : (float(v[0]), float(v[1])) for (k, v) in stats.items()
         }
 
-    @staticmethod
-    def psi(energy):
-        return torch.log(energy + BIAS)
+    def to_dict(self):
+        return { **self.stats, '_bias' : self.bias }
+
+    def psi(self, energy):
+        return torch.log(energy + self.bias)
 
     def z(self, energy, kind):
         (mean, std) = self.stats[kind]
@@ -165,10 +190,10 @@ class Norm:
 
     def energy(self, z, kind):
         (mean, std) = self.stats[kind]
-        return torch.exp(z * std + mean) - BIAS
+        return torch.exp(z * std + mean) - self.bias
 
     @staticmethod
-    def fit(n = 20000, seed = 0):
+    def fit(n = 20000, seed = 0, bias = BIAS):
         rng  = np.random.default_rng(seed)
         imgs = {
             'bkg' : read_random('background', n, rng),
@@ -180,23 +205,29 @@ class Norm:
 
         stats = {}
         for (kind, x) in imgs.items():
-            p = np.log(x.astype(np.float64) + BIAS)
+            p = np.log(x.astype(np.float64) + bias)
             stats[kind] = (p.mean(), p.std())
 
-        return Norm(stats)
+        return Norm(stats, bias)
 
     @staticmethod
-    def load_or_fit(path, n = 20000, seed = 0):
+    def load_or_fit(path, n = 20000, seed = 0, bias = BIAS):
         if os.path.exists(path):
             with open(path, 'r', encoding = 'utf-8') as f:
-                return Norm(json.load(f))
+                return Norm(json.load(f), bias)
 
-        norm = Norm.fit(n, seed)
+        norm = Norm.fit(n, seed, bias)
         os.makedirs(os.path.dirname(path), exist_ok = True)
         with open(path, 'w', encoding = 'utf-8') as f:
-            json.dump(norm.stats, f, indent = 4)
+            json.dump(norm.to_dict(), f, indent = 4)
 
         return norm
+
+    @staticmethod
+    def path(bias = BIAS):
+        name = 'norm_n20000_seed0.json' if bias == BIAS \
+            else f'norm_n20000_seed0_bias{bias:g}.json'
+        return os.path.join(out_root(), name)
 
     def state(self, bkg, sig):
         """(N, H, W) energies -> (N, 2, H, W) standardised state."""
@@ -214,12 +245,18 @@ def construct_net(method, channels = 96, res_blocks = 2, attn = (4,)):
     input channel.
     """
     cond = 1 if (method == 'condcfm') or is_regression(method) else 0
+    if is_regression(method):
+        (c_in, c_out) = (1, 2)
+    elif method == 'otcfm1':
+        (c_in, c_out) = (1, 1)
+    else:
+        (c_in, c_out) = (2 + cond, 2)
 
     return UNetModel(
         image_size            = SHAPE[1],
-        in_channels           = 1 if is_regression(method) else 2 + cond,
+        in_channels           = c_in,
         model_channels        = channels,
-        out_channels          = 2,
+        out_channels          = c_out,
         num_res_blocks        = res_blocks,
         attention_resolutions = tuple(attn),
         dropout               = 0.0,
@@ -332,7 +369,10 @@ class Method:
         self.name = name
         self.norm = norm
 
-        if name == 'otcfm':
+        # otcfm_pieces: share of mixtures the plan pairs with their own pieces
+        self.recovery = []
+
+        if name in ('otcfm', 'otcfm1', 'otcfm_pieces'):
             self.sigma   = 0.0 if sigma is None else sigma
             self.matcher = ExactOptimalTransportConditionalFlowMatcher(
                 sigma = self.sigma
@@ -359,10 +399,13 @@ class Method:
     @property
     def coupled(self):
         """Whether a minibatch plan is solved for every batch."""
-        return self.name in ('otcfm', 'sbcfm')
+        return self.name in OT_METHODS
 
     def source(self, mixture):
-        """x0 of the augmented state: the mixture, all of it background."""
+        """x0 of the flow: the mixture, all of it background (one panel for
+        otcfm1, with an empty signal panel otherwise)."""
+        if self.name == 'otcfm1':
+            return self.norm.z(mixture, 'bkg').unsqueeze(1)
         return self.norm.state(mixture, torch.zeros_like(mixture))
 
     def condition(self, mixture):
@@ -370,11 +413,23 @@ class Method:
 
     def endpoints(self, batch):
         """(x0, x1, cond) of a batch of energies, before any coupling."""
-        (bkg, sig) = (batch['background'], batch['signal'])
-        x1 = self.norm.state(bkg, sig)
+        bkg = batch['background']
+
+        if self.name == 'otcfm1':
+            return (self.source(batch['embed']),
+                    self.norm.z(bkg, 'bkg').unsqueeze(1), None)
+
+        sig = batch['signal']
+        x1  = self.norm.state(bkg, sig)
 
         if self.name in ('otcfm', 'sbcfm'):
             return (self.source(batch['embed']), x1, None)
+
+        if self.name == 'otcfm_pieces':
+            # the mixtures of the batch are made of its own pieces, whose
+            # order is then hidden
+            self.perm = torch.randperm(len(bkg), device = bkg.device)
+            return (self.source(bkg + sig), x1[self.perm], None)
 
         cond = self.condition(bkg + sig)
 
@@ -385,7 +440,29 @@ class Method:
 
     def couple(self, x0, x1):
         """Minibatch plan, drawn as TorchCFM draws it (with replacement)."""
-        return self.matcher.ot_sampler.sample_plan(x0, x1)
+        sampler = self.matcher.ot_sampler
+
+        if self.name != 'otcfm_pieces':
+            return sampler.sample_plan(x0, x1)
+
+        # as sample_plan, keeping the plan to see how often it pairs a
+        # mixture with its own pieces (x1[k] is the piece of mixture perm[k])
+        plan = sampler.get_map(x0, x1)
+        best = torch.from_numpy(plan.argmax(axis = 1)).to(self.perm.device)
+        self.recovery.append(float(
+            (self.perm[best] == torch.arange(len(best), device = best.device))
+            .float().mean()
+        ))
+        (i, j) = sampler.sample_map(plan, x0.shape[0])
+        return (x0[i], x1[j])
+
+    def pop_recovery(self):
+        """Mean share of correct pairs since the last call (None if none)."""
+        if not self.recovery:
+            return None
+        value = float(np.mean(self.recovery))
+        self.recovery = []
+        return value
 
     def loss(self, net, x0, x1, cond):
         if self.name == 'regress':
@@ -493,6 +570,13 @@ class Decomposer(torch.nn.Module):
                 x  = integrate(self.net, x0, cond, self.nfe, self.solver)
                 (b, s) = norm.components(x)
                 (bkg, sig) = (bkg + b / self.samples, sig + s / self.samples)
+
+        elif name == 'otcfm1':
+            x   = integrate(
+                self.net, self.method.source(m), None, self.nfe, self.solver
+            )
+            bkg = norm.energy(x[:, 0], 'bkg')
+            sig = m - bkg           # the only reading of a one-panel flow
 
         else:
             x = integrate(

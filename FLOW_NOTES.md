@@ -843,21 +843,29 @@ and end-to-end times), `inline_eval.csv`, `evals/{val,jewel}_truth.csv`
 (one row per checkpoint, network and inference setting) and the per-event
 jet energies `evals/*_truth/*.npy`.
 
-## Status (2026-09-25 04:30)
+## Status (2026-09-25 13:10)
 
-All runs and scoring jobs have ended; nothing of this study is running.
-Every run can be resumed (`fm_run.sbatch` with a larger MINUTES) and
-rescored (`fm_eval.py`, rows already present are skipped).
+Running on dahlia (A6000), jobs 20120-20126, 120 min of training each,
+checkpoint every 15 min, scored on val when training ends (~14:40):
 
-- `sbatch` failed from 03:05 with "I/O error writing script/environment to
-  file" (the controller, `bigbelly`, could not store batch scripts --
-  probably a full disk there); `srun` still worked and ran the last
-  scoring jobs. Tell the admins if it persists.
-- Open: the jet-level physics (jets found in the extracted image, their
-  shapes) for the two flows; OT-CFM as a 1-channel embed -> background
-  flow, trained in a less compressive energy scale (so that the least-change
-  map leaves soft towers alone) -- the seeded read-out above does that job
-  after the fact; a one-network distillation of the conditional-CFM
-  posterior mean; why OT-CFM is better on JEWEL than on val (quenched jets
-  are softer and broader: a background model may simply find them easier
-  to separate).
+- `otcfm_pieces` ("the true pieces in the batch", a different design, not
+  an improvement): each batch makes its 256 mixtures by adding its own 256
+  HIJING and 256 PYTHIA events, shuffles the pieces, and the minibatch OT
+  pairs them back (logged as `plan_recovery`; 100% in the checks). Same
+  two-panel start (mixture, empty) as `otcfm`. Seeds 0-2,
+  `OUTDIR/sphenix/flow/ext_pieces_s{0,1,2}/`, selected on the signal panel
+  read directly (midpoint 16 NFE).
+- `otcfm1`, the single-channel unpaired OT-CFM: real mixtures -> real HIJING
+  events, one panel, jet = mixture - background. Seeds 0-2,
+  `ext_otcfm1_s{0,1,2}/`, selected at 4 Euler steps as `otcfm`.
+- `otcfm1` in log(E + 1) instead of log(E + 0.1) (`--log-bias 1`), seed 0,
+  `ext_otcfm1_bias1_s0/`: tests the claim that a gentler scale cleans the
+  image at the source.
+
+Then: JEWEL at the val-selected checkpoints, the image read-outs
+(`readout_test.py`), substructure (`substructure.py --extra`), and
+`fm_compare.py` with the earlier runs. All earlier jobs have ended.
+
+- Open: the jet-level physics (jets found in the extracted image) for the
+  flows; a one-network distillation of the conditional-CFM posterior mean;
+  why OT-CFM is better on JEWEL than on val.

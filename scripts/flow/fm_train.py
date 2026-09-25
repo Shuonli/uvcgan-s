@@ -49,6 +49,8 @@ def parse_cmdargs():
     parser.add_argument('--ema', type = float, default = 0.9999,
         help = 'EMA momentum, warmed up as min(ema, (1 + t) / (10 + t))')
     parser.add_argument('--grad-clip', type = float, default = 1.0)
+    parser.add_argument('--log-bias', type = float, default = fc.BIAS,
+        help = 'psi(E) = log(E + bias); 0.1 is the baseline data norm')
     parser.add_argument('--sigma', type = float, default = None,
         help = 'path noise: 0 for otcfm and condcfm, 1 for sbcfm')
     parser.add_argument('--channels', type = int, default = 96)
@@ -104,7 +106,7 @@ def write_config(run_dir, cmdargs, n_params):
 
         for key in [ 'method', 'batch', 'lr', 'sigma', 'channels',
                      'res_blocks', 'attn', 'seed', 'ema', 'warmup',
-                     'cosine_steps' ]:
+                     'cosine_steps', 'log_bias' ]:
             if old.get(key) != config.get(key):
                 raise RuntimeError(
                     f"resuming '{run_dir}' with {key} = {config.get(key)},"
@@ -179,7 +181,7 @@ def main():
     t_start = time.perf_counter()
 
     norm   = fc.Norm.load_or_fit(
-        os.path.join(fc.out_root(), 'norm_n20000_seed0.json')
+        fc.Norm.path(cmdargs.log_bias), bias = cmdargs.log_bias
     )
     method = fc.Method(cmdargs.method, norm, cmdargs.sigma)
     cmdargs.sigma = method.sigma
@@ -241,7 +243,7 @@ def main():
 
         common = {
             'raw' : net.state_dict(), 'ema' : ema.state_dict(),
-            'norm' : norm.stats, 'stats' : dict(stats), 'config' : config,
+            'norm' : norm.to_dict(), 'stats' : dict(stats), 'config' : config,
         }
         fc.save_checkpoint(
             os.path.join(run_dir, 'checkpoints', f'step_{step:08d}.pt'),
@@ -364,6 +366,9 @@ def main():
                 'data_time'     : stats['data_time'],
                 'peak_mem_gb'   : torch.cuda.max_memory_allocated() / 2**30,
             }
+            recovery = method.pop_recovery()
+            if recovery is not None:
+                row['plan_recovery'] = recovery
             pd.DataFrame([ row ]).to_csv(
                 history_path, mode = 'a',
                 header = not os.path.exists(history_path), index = False
