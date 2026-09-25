@@ -403,24 +403,20 @@ matter at equal NFE.
 baseline runs included.** Runs resume from their checkpoints, so extra
 seeds wait in line instead of running at once. Timing runs go on A6000
 nodes only (dahlia, ceres, saturn; curvelet and venus are Ada): pin them
-with `-w`.
+with `-w`. Scoring-only jobs may run anywhere.
 
-As of 2026-09-24 23:45:
+As of 2026-09-25 00:55:
 
-- Seed 0, 180 min of training: conditional CFM (saturn, job 20074,
-  `ext_condcfm_s0/`) and OT-CFM read as m - b (saturn, job 20075, resumes
-  `pilot_otcfm_s0/`). They score their checkpoints when they end (~00:45-
-  01:00).
-- `regress_l1` seeds 1 and 2 (dahlia, jobs 20077 and 20083, 60 min,
-  `ext_regress_l1_s{1,2}/`).
-- Job 20085 (dahlia): 20k-event val scores of the log-space regression
-  runs (seed 0 stopped at 60 min, seeds 1-2 paused at 15 min), JEWEL of the
-  regressions' selected checkpoints, then `fm_eval.py --latency`
-  (-> `OUTDIR/sphenix/flow/latency.csv`).
-- Job 20081 (curvelet, quality only): K-sample means of conditional CFM
-  (8 and 16 NFE, 1 and 4 samples) at its 2 h checkpoint (step 18390).
-- Jobs 20078 / 20079: final val / JEWEL scores of the baseline runs of jobs
-  20040-20044 (all ended at their 26 h limit, 23:36).
-- Next: JEWEL, NFE curve of the flows' selected checkpoints; optionally a
-  `regress_l1` run with `--cosine-steps` (does a decaying rate take the
-  3.79 plateau to 3.70?); then `fm_compare.py` over everything.
+- Done: seed 0 of OT-CFM (`pilot_otcfm_s0/`, 180 min) and conditional CFM
+  (`ext_condcfm_s0/`, 180 min) finished training and are scoring their
+  checkpoints (jobs 20075, 20074); `regress_l1` seeds 0-2 (60 min each).
+- Job 20089 (curvelet): conditional CFM seed 0, all checkpoints at 8 NFE,
+  1 and 4 samples. 16 samples measured at 60/90/120 min (jobs 20090, 20086).
+- Conditional CFM seeds 1 and 2 (dahlia, jobs 20087/20088, 180 min,
+  checkpoint every 30 min, scored as 4-sample means at the end, ~03:40).
+- OT-CFM seeds 1 and 2 (saturn, jobs 20092/20093, 60 min, m - b reading).
+- `regress_l1` with a cosine-decaying rate (dahlia, job 20091, 60 min,
+  `ext_regress_l1_cos_s0/`).
+- Next: JEWEL of the val-selected checkpoints (conditional CFM at 4 and 16
+  samples, OT-CFM, `regress_l1`), then `fm_compare.py` over everything and
+  the final report.

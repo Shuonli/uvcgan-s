@@ -21,6 +21,7 @@ of the published UVCGAN-S generator; written to OUTDIR/sphenix/flow/latency.csv.
 """
 
 import argparse
+import fcntl
 import glob
 import json
 import os
@@ -191,11 +192,14 @@ def evaluate_run(run_dir, cmdargs, truth, device):
                 )
 
     if rows:
-        new = pd.DataFrame(rows)
-        if os.path.exists(csv):
-            new = pd.concat([ pd.read_csv(csv), new ])
-        new = new.drop_duplicates(KEY, keep = 'last')
-        new.sort_values(KEY).to_csv(csv, index = False)
+        # several scoring jobs may finish on the same run at once
+        with open(f'{csv}.lock', 'w', encoding = 'utf-8') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            new = pd.DataFrame(rows)
+            if os.path.exists(csv):
+                new = pd.concat([ pd.read_csv(csv), new ])
+            new = new.drop_duplicates(KEY, keep = 'last')
+            new.sort_values(KEY).to_csv(csv, index = False)
 
 @torch.no_grad()
 def time_call(fn, x, repeats = 5):
