@@ -463,7 +463,8 @@ Knobs: `UVCGAN_S_DDP_MODE`, `UVCGAN_S_DDP_COMPRESS` (fp16/bf16, worth
   ids in `FLOW_NOTES.md` (code in `scripts/flow/`, outputs in
   `OUTDIR/sphenix/flow/`). Its baseline numbers come from the runs below.
 - **Jobs 20040-20044** (dahlia, one A6000 each, 26 h from 2026-09-23
-  21:26, until ~2026-09-24 23:30): the short recipe of the base run
+  21:26; ended at their time limit 2026-09-24 23:36; their final
+  checkpoints are being scored by jobs 20078 (val) and 20079 (JEWEL)): the short recipe of the base run
   (warm-up of one 200-update epoch, 5e-5, checkpoint every 10k updates,
   held-out val scores every epoch in `val_truth_history.csv`) at batch
   32 with seeds 1 and 2 (`OUTDIR/sphenix/base/*_base_b32_lr5e-5_s{1,2}`;

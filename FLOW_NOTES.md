@@ -340,23 +340,26 @@ the adversarial and cycle terms, or longer training, buy the baseline.
 
 **Resource cap (user, 2026-09-24): at most 8 GPUs in use in total,
 baseline runs included.** Runs resume from their checkpoints, so extra
-seeds wait in line instead of running at once.
+seeds wait in line instead of running at once. Timing runs go on A6000
+nodes only (dahlia, ceres, saturn; curvelet and venus are Ada): pin them
+with `-w`.
 
-- Seed 0, 180 min of training each: conditional CFM (saturn, job 20074,
-  `ext_condcfm_s0/`, checkpoint every 15 min) and OT-CFM read as m - b
-  (saturn, job 20075, resumes `pilot_otcfm_s0/` from 20 min). Each scores
-  its checkpoints when it ends (~00:30-01:00).
-- Regression seed 0 (`ext_regress_s0/`, job 20066) **stopped at 60 min of
-  training on a plateau** (monitor, 1000 events: 4.69 at 15 min, 4.50 at
-  40, 4.43 at 60; training loss flat since 10 min). Its checkpoints still
-  need scoring on the 20k events (`fm_eval.sbatch ext_regress_s0 --nets
-  ema`). Seeds 1 and 2 paused at 15 min (4.67, 4.61 on the monitor).
-- Follow-up, job 20076 (dahlia): `regress_l1`, the same regression trained
-  with the baseline's own `idt-aa` loss (L1 in GeV, background : signal
-  1 : 10) instead of squared error in log space, 60 min, `ext_regress_l1_s0/`.
-  Tests whether the loss space, not the model, sets the regression's
-  plateau.
-- When the baseline jobs 20040-20044 end (~23:35): score their final
-  checkpoints (val and JEWEL, c.f. SCALING_NOTES.md), then seeds 1-2 of
-  what is still promising, the K-sample mean of conditional CFM, JEWEL,
-  NFE curve and latency of the selected checkpoints, and `fm_compare.py`.
+As of 2026-09-24 23:45:
+
+- Seed 0, 180 min of training: conditional CFM (saturn, job 20074,
+  `ext_condcfm_s0/`) and OT-CFM read as m - b (saturn, job 20075, resumes
+  `pilot_otcfm_s0/`). They score their checkpoints when they end (~00:45-
+  01:00).
+- `regress_l1` seeds 1 and 2 (dahlia, jobs 20077 and 20083, 60 min,
+  `ext_regress_l1_s{1,2}/`).
+- Job 20085 (dahlia): 20k-event val scores of the log-space regression
+  runs (seed 0 stopped at 60 min, seeds 1-2 paused at 15 min), JEWEL of the
+  regressions' selected checkpoints, then `fm_eval.py --latency`
+  (-> `OUTDIR/sphenix/flow/latency.csv`).
+- Job 20081 (curvelet, quality only): K-sample means of conditional CFM
+  (8 and 16 NFE, 1 and 4 samples) at its 2 h checkpoint (step 18390).
+- Jobs 20078 / 20079: final val / JEWEL scores of the baseline runs of jobs
+  20040-20044 (all ended at their 26 h limit, 23:36).
+- Next: JEWEL, NFE curve of the flows' selected checkpoints; optionally a
+  `regress_l1` run with `--cosine-steps` (does a decaying rate take the
+  3.79 plateau to 3.70?); then `fm_compare.py` over everything.

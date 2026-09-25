@@ -43,6 +43,9 @@ def parse_cmdargs():
     parser.add_argument('--lr', type = float, default = 2e-4)
     parser.add_argument('--warmup', type = int, default = 1000,
         help = 'steps of linear learning rate warm-up')
+    parser.add_argument('--cosine-steps', type = int, default = None,
+        help = 'decay the rate to 0 along a cosine ending at this step'
+               ' (default: constant after the warm-up)')
     parser.add_argument('--ema', type = float, default = 0.9999,
         help = 'EMA momentum, warmed up as min(ema, (1 + t) / (10 + t))')
     parser.add_argument('--grad-clip', type = float, default = 1.0)
@@ -100,7 +103,8 @@ def write_config(run_dir, cmdargs, n_params):
             old = json.load(f)
 
         for key in [ 'method', 'batch', 'lr', 'sigma', 'channels',
-                     'res_blocks', 'attn', 'seed', 'ema', 'warmup' ]:
+                     'res_blocks', 'attn', 'seed', 'ema', 'warmup',
+                     'cosine_steps' ]:
             if old.get(key) != config.get(key):
                 raise RuntimeError(
                     f"resuming '{run_dir}' with {key} = {config.get(key)},"
@@ -309,6 +313,9 @@ def main():
             stats['coupling_time'] += time.perf_counter() - t0
 
         lr = cmdargs.lr * min(1.0, (stats['step'] + 1) / cmdargs.warmup)
+        if cmdargs.cosine_steps is not None:
+            frac = min(stats['step'], cmdargs.cosine_steps) / cmdargs.cosine_steps
+            lr  *= 0.5 * (1 + math.cos(math.pi * frac))
         for group in opt.param_groups:
             group['lr'] = lr
 
