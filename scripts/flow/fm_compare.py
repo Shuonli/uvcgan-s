@@ -39,6 +39,7 @@ import numpy as np
 import pandas as pd
 
 from fm_eval import SELECTION
+from fm_common import SAMPLERS
 
 TARGETS = { 'T_useful' : 4.00, 'T_acc' : 3.70, 'T_match' : 3.65 }
 
@@ -68,8 +69,11 @@ def flow_curves(run_dir, samples = None):
     v['hours']  = v.train_time / 3600
     v['family'] = 'flow'
     bias = config.get('log_bias', 0.1)
+    augment = config.get('augment', 'none')
     v['arm']    = config['method'] + (
         f' log(E+{bias:g})' if abs(bias - 0.1) > 1e-9 else ''
+    ) + (
+        f' [{augment}]' if augment != 'none' else ''
     ) + (
         ' (m - b)' if decode == 'mixture' else ''
     ) + (f' (mean of {samples})' if samples > 1 else '')
@@ -321,6 +325,11 @@ ARM_STYLE = {
     'otcfm1 (m - b)'       : ('#1f77b4', '-'),
     'otcfm1 log(E+1) (m - b)' : ('#aec7e8', '-.'),
     'otcfm_pieces'         : ('#e377c2', '-'),
+    'postflow (mean of 4)'         : ('#bcbd22', '--'),
+    'postflow (mean of 16)'        : ('#bcbd22', '-'),
+    'postflow [jets] (mean of 4)'  : ('#8c564b', '--'),
+    'postflow [jets] (mean of 16)' : ('#8c564b', '-'),
+    'regress_mse [jets]'           : ('#17becf', '--'),
 }
 
 def plot_report(curves, table, reference, out):
@@ -474,14 +483,15 @@ def main():
         summaries[config['label']] = summary
         runs[config['label']] = (run_dir.rstrip('/'), config['method'], None)
 
-        if cmdargs.extra_samples and (config['method'] == 'condcfm'):
+        if cmdargs.extra_samples and (config['method'] in SAMPLERS):
             (v, _, _) = flow_curves(run_dir.rstrip('/'), cmdargs.extra_samples)
             if len(v):
                 curves.append(v)
                 label = v.run.iloc[0]
                 summaries[label] = summary
                 runs[label] = (
-                    run_dir.rstrip('/'), 'condcfm', cmdargs.extra_samples
+                    run_dir.rstrip('/'), config['method'],
+                    cmdargs.extra_samples
                 )
 
     for run_dir in cmdargs.baseline:

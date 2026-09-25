@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Train a flow-matching decomposition of the sPHENIX mixed events.
 
-    fm_train.py --method otcfm|sbcfm|condcfm|regress --label NAME
+    fm_train.py --method METHOD --label NAME [--augment none|jets]
                 [--minutes 25] [--ckpt-minutes 2.5] [--batch 256] ...
 
 Output: OUTDIR/sphenix/flow/NAME/
@@ -51,6 +51,9 @@ def parse_cmdargs():
     parser.add_argument('--grad-clip', type = float, default = 1.0)
     parser.add_argument('--log-bias', type = float, default = fc.BIAS,
         help = 'psi(E) = log(E + bias); 0.1 is the baseline data norm')
+    parser.add_argument('--augment', default = 'none',
+        choices = [ 'none', 'jets' ],
+        help = 'jets: randomised signal shapes (fm_common.JetShapes)')
     parser.add_argument('--sigma', type = float, default = None,
         help = 'path noise: 0 for otcfm and condcfm, 1 for sbcfm')
     parser.add_argument('--channels', type = int, default = 96)
@@ -104,9 +107,10 @@ def write_config(run_dir, cmdargs, n_params):
         with open(path, 'r', encoding = 'utf-8') as f:
             old = json.load(f)
 
+        old.setdefault('augment', 'none')
         for key in [ 'method', 'batch', 'lr', 'sigma', 'channels',
                      'res_blocks', 'attn', 'seed', 'ema', 'warmup',
-                     'cosine_steps', 'log_bias' ]:
+                     'cosine_steps', 'log_bias', 'augment' ]:
             if old.get(key) != config.get(key):
                 raise RuntimeError(
                     f"resuming '{run_dir}' with {key} = {config.get(key)},"
@@ -183,7 +187,7 @@ def main():
     norm   = fc.Norm.load_or_fit(
         fc.Norm.path(cmdargs.log_bias), bias = cmdargs.log_bias
     )
-    method = fc.Method(cmdargs.method, norm, cmdargs.sigma)
+    method = fc.Method(cmdargs.method, norm, cmdargs.sigma, cmdargs.augment)
     cmdargs.sigma = method.sigma
 
     torch.manual_seed(cmdargs.seed)

@@ -870,6 +870,98 @@ threshold), val / JEWEL `jer_cal` and val MAE: UVCGAN-S 3.66 / 3.96 /
 - More solver steps never help the jets (c.f. above): OT-CFM is best at 4
   Euler steps; the image is better cleaned afterwards.
 
+## Step 2: a posterior sampler for single-event fidelity (pre-registered 2026-09-25, before training)
+
+The request: a model built on newer methods that best preserves each
+event's jet substructure and energy (single-event fidelity), with stable
+training. What the results so far say:
+
+- For each event, the best estimate of any jet property is its average
+  over the decompositions consistent with the mixture (the posterior
+  mean). A posterior sampler gives it for every observable at once
+  (average the observable over K samples), plus a per-event uncertainty
+  (their spread). Conditional CFM showed this for the cone energy: 3.60 GeV
+  with K = 16 and about 3.48 as K grows, against 3.59 for the published
+  UVCGAN-S.
+- Flow matching trains as a regression: three seeds agree within
+  +-0.01 GeV at every matched time, while the GAN's time to 3.70 GeV spans
+  8-15 h.
+- The sampler's weak point is JEWEL: 4.27 against 3.99 (UVCGAN-S) and 3.55
+  (OT-CFM). Every model that learned the PYTHIA signals loses 0.4-0.7 GeV
+  there; OT-CFM, which never models the signal, does not. The sampler has
+  learned PYTHIA's jets as its prior.
+
+Design, `postflow` (`fm_common.py`):
+
+1. Only the jet image is generated (x1 = psi(s), noise start, conditioned
+   on the mixture). Each sample is clipped to 0 <= s <= m, and the
+   background is m - s, so background and jet add up to the measured energy
+   in every tower (conditional CFM's two channels did not).
+2. Randomised jets (`--augment jets`, `JetShapes`): half of the training
+   jets are replaced by transformed ones:
+   - harder or softer fragmentation at fixed energy (s^g, log g in
+     [-0.38, 0.52]);
+   - up to 40% of each tower's energy spread to its 8 neighbours;
+   - tower-level fluctuations (log-normal, sigma up to 0.3);
+   - the energy scaled by up to +-25%.
+
+   The mixture is made from the transformed jet, so the pairs stay exact.
+   The ranges were set on 8k PYTHIA training signals only. The transformed
+   signals keep PYTHIA's average leading-tower share (+2.5%), p_T^D (-1.1%)
+   and width (+2.5%; spreading alone would soften them by 8-17%), and their
+   event-to-event spread in those grows 1.5x, 1.7x and 1.1x. Nothing was set
+   on JEWEL.
+3. Read-outs:
+   - the K-sample mean energy, for the jet energy (as conditional CFM);
+   - the per-jet mean of each observable over the samples, for
+     substructure;
+   - a single sample, for a realistic image;
+   - the spread of the samples, as the per-event uncertainty.
+
+Same U-Net (21.6M parameters), batch 256, lr 2e-4, EMA 0.9999, checkpoints
+every 15 min. Checkpoints are selected on the 4-sample mean at 8 NFE, as
+for conditional CFM.
+
+`regress_mse` gives the posterior mean in one evaluation: s = sigmoid(net) m
+per tower, trained by mean squared error in GeV on the randomised jets.
+That is the estimator a K-sample mean converges to, at the cost of one pass.
+
+Runs, on A6000 dahlia, 2 h of training each unless noted:
+
+| arm | seeds | what it isolates |
+| :--- | :--- | :--- |
+| postflow [jets] | 0, 1, 2 | the proposed model; stability across seeds |
+| postflow | 0 | the randomised jets (against [jets] seed 0); generating the jet alone (against conditional CFM at 2 h) |
+| regress_mse [jets] | 0, 1 h | whether a one-pass mean reaches the sampler's energy resolution |
+
+Budget: 7 GPU-h of training plus about 3 of scoring, at most 6 GPUs at once.
+
+Metrics, fixed now:
+- Primary: val `jer_cal` of the 16-sample mean at the val-selected
+  checkpoint.
+- JEWEL `jer_cal` at that checkpoint.
+- Per-jet resolution of the posterior-mean observables (mass, girth,
+  p_T^D, core, z_lead, n1) on val and JEWEL (`posterior_substructure.py`),
+  against the published UVCGAN-S and the other models.
+- The JEWEL-PYTHIA modification fractions.
+- Per-tower `l1` and `mse`.
+- Seed spread at matched training times.
+- Inference ms/event.
+
+Hypotheses and decision rules:
+- H1: without randomisation, postflow's val `jer_cal` at 2 h is within
+  +-0.03 GeV of conditional CFM's at 2 h (3.62 GeV with 16 samples).
+- H2: the randomised jets lower JEWEL `jer_cal` by >= 0.15 GeV (postflow
+  [jets] against postflow, seed 0) at a val cost of <= 0.05 GeV.
+- H3: `regress_mse` [jets] reaches <= 3.65 GeV on val in one evaluation.
+- postflow [jets] is recommended over UVCGAN-S if, with 16 samples, it
+  reaches <= 3.62 GeV on val and <= 3.99 on JEWEL (the published model's),
+  and its per-jet substructure resolution is better for most shape
+  observables on both sets.
+
+JEWEL is scored once per run, at the val-selected checkpoint, and is not
+used for any choice.
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything

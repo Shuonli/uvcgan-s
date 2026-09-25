@@ -30,6 +30,16 @@ Methods (c.f. FLOW_NOTES.md):
              order is then shuffled, and the minibatch OT pairs them back
              (the share it gets right is logged). Synthetic mixtures, so
              the pairing is known information, as in UVCGAN-S's idt-aa.
+    postflow the posterior sampler of conditional CFM with the physics built
+             in: x1 = psi(s) alone, x0 ~ N(0, 1), conditioned on the synthetic
+             mixture psi(b + s); every sample is clipped to 0 <= s <= m and
+             the background is m - s, so the two always add up to the
+             mixture. Optionally trained on randomised jet shapes
+             (`JetShapes`, fm_train.py --augment jets).
+    regress_mse  one network for the posterior mean: the signal share of
+             every tower, s = sigmoid(net) m, trained by mean squared error
+             in GeV -- the estimator a K-sample mean of a sampler converges
+             to, in one evaluation; background m - s as for postflow
 
 The log bias of psi can be changed (`Norm(bias = ...)`, fm_train.py
 --log-bias); 0.1 is the baseline's.
@@ -43,6 +53,7 @@ import sys
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from torchcfm.conditional_flow_matching import (
     ConditionalFlowMatcher,
@@ -61,10 +72,14 @@ DATA_PATH = 'sphenix/2025-06-05_jet_bkg_sub'
 BIAS      = 0.1
 SHAPE     = (24, 64)
 METHODS   = [ 'otcfm', 'sbcfm', 'condcfm', 'regress', 'regress_l1',
-              'otcfm1', 'otcfm_pieces' ]
+              'otcfm1', 'otcfm_pieces', 'postflow', 'regress_mse' ]
 
 # methods whose flow starts from the mixture and uses a minibatch OT plan
 OT_METHODS = ('otcfm', 'sbcfm', 'otcfm1', 'otcfm_pieces')
+
+# posterior samplers: noise start, conditioned on the mixture, read as the
+# mean of `samples` draws
+SAMPLERS = ('condcfm', 'postflow')
 
 # (nfe, solver, decode, samples) that checkpoints are selected, and time
 # curves drawn, with -- all chosen on val (FLOW_NOTES.md): the regression
@@ -84,6 +99,9 @@ SELECTION = {
     # set before training, as for otcfm; revisited on val afterwards
     'otcfm1'       : (4, 'euler', 'mixture', 1),
     'otcfm_pieces' : (16, 'midpoint', 'direct', 1),
+    # as condcfm, set before training
+    'postflow'     : (8, 'midpoint', 'direct', 4),
+    'regress_mse'  : (1, 'none', 'direct', 1),
 }
 
 # domains each method draws from; condcfm and regress build their mixtures
@@ -95,6 +113,8 @@ DOMAINS = {
     'regress_l1' : ('background', 'signal'),
     'otcfm1'       : ('embed', 'background'),
     'otcfm_pieces' : ('background', 'signal'),
+    'postflow'     : ('background', 'signal'),
+    'regress_mse'  : ('background', 'signal'),
 }
 
 # weights of the background and signal L1 terms of regress_l1: those of the
@@ -245,10 +265,14 @@ def construct_net(method, channels = 96, res_blocks = 2, attn = (4,)):
     input channel.
     """
     cond = 1 if (method == 'condcfm') or is_regression(method) else 0
-    if is_regression(method):
+    if method == 'regress_mse':
+        (c_in, c_out) = (1, 1)
+    elif is_regression(method):
         (c_in, c_out) = (1, 2)
     elif method == 'otcfm1':
         (c_in, c_out) = (1, 1)
+    elif method == 'postflow':
+        (c_in, c_out) = (2, 1)          # signal state and the mixture
     else:
         (c_in, c_out) = (2 + cond, 2)
 
@@ -264,6 +288,74 @@ def construct_net(method, channels = 96, res_blocks = 2, attn = (4,)):
         num_heads             = 4,
         use_scale_shift_norm  = True,
     )
+
+class JetShapes:
+    """Randomised jet shapes: a broader signal prior than PYTHIA's.
+
+    With probability `p` a signal image (GeV, (N, H, W)) is replaced by a
+    transformed one, the strengths drawn per event:
+
+        hardness  s -> s^g sum(s) / sum(s^g), log g ~ U(hardness): harder
+                  (g > 1) or softer fragmentation at the same energy
+        spread    s -> (1 - l) s + l (K * s), l ~ U(0, spread), K the mean of
+                  the 8 neighbouring towers (periodic in phi; the eta edges
+                  lose their share): each tower gives a share l of its
+                  energy to its neighbours, wider jets
+        jitter    s_i -> s_i exp(sigma e_i - sigma^2 / 2), e_i ~ N(0, 1),
+                  sigma ~ U(0, jitter): tower-level fluctuations
+        scale     s -> a s, log a ~ U(-scale, scale): energy lost or gained
+
+    The synthetic mixture is made from the transformed signal, so the
+    training pairs stay exact. The hardness range is centred so that the
+    transformed PYTHIA signals keep, on average, the leading-tower share
+    and p_T^D of the originals (spreading alone softens them); set on
+    training signals before any training, not tuned on JEWEL
+    (FLOW_NOTES.md).
+    """
+
+    def __init__(self, p = 0.5, hardness = (-0.38, 0.52), spread = 0.4,
+                 jitter = 0.3, scale = 0.25):
+        # pylint: disable=too-many-arguments
+        self.p        = p
+        self.hardness = hardness
+        self.spread   = spread
+        self.jitter   = jitter
+        self.scale    = scale
+        self.kernel   = None
+
+    def neighbours(self, x):
+        if (self.kernel is None) or (self.kernel.device != x.device):
+            self.kernel = torch.full((1, 1, 3, 3), 1 / 8, device = x.device)
+            self.kernel[0, 0, 1, 1] = 0
+
+        x = F.pad(x.unsqueeze(1), (1, 1, 0, 0), mode = 'circular')
+        x = F.pad(x, (0, 0, 1, 1))
+        return F.conv2d(x, self.kernel)[:, 0]
+
+    @torch.no_grad()
+    def __call__(self, sig):
+        n = sig.shape[0]
+
+        def uniform(lo, hi):
+            return torch.empty((n, 1, 1), device = sig.device).uniform_(lo, hi)
+
+        x = sig.clamp(min = 0)
+
+        g     = torch.exp(uniform(*self.hardness))
+        total = x.sum((1, 2), keepdim = True)
+        xg    = x ** g
+        x     = xg * total / xg.sum((1, 2), keepdim = True).clamp(min = 1e-12)
+
+        share = uniform(0, self.spread)
+        x     = (1 - share) * x + share * self.neighbours(x)
+
+        sigma = uniform(0, self.jitter)
+        x     = x * torch.exp(sigma * torch.randn_like(x) - sigma**2 / 2)
+
+        x     = x * torch.exp(uniform(-self.scale, self.scale))
+
+        keep  = torch.rand((n, 1, 1), device = sig.device) >= self.p
+        return torch.where(keep, sig, x)
 
 class GraphedSinkhorn:
     """Entropic OT plan between uniform marginals, min <P, C> - reg H(P).
@@ -363,11 +455,13 @@ class GPUSinkhornPlanSampler(OTPlanSampler):
 class Method:
     """Training pairs and loss of one method, and its decoding."""
 
-    def __init__(self, name, norm, sigma = None):
+    def __init__(self, name, norm, sigma = None, augment = 'none'):
         assert name in METHODS, name
+        assert augment in ('none', 'jets'), augment
 
-        self.name = name
-        self.norm = norm
+        self.name    = name
+        self.norm    = norm
+        self.augment = JetShapes() if augment == 'jets' else None
 
         # otcfm_pieces: share of mixtures the plan pairs with their own pieces
         self.recovery = []
@@ -385,7 +479,7 @@ class Method:
             self.matcher.ot_sampler = GPUSinkhornPlanSampler(
                 reg = 2 * self.sigma**2
             )
-        elif name == 'condcfm':
+        elif name in SAMPLERS:
             self.sigma   = 0.0 if sigma is None else sigma
             self.matcher = ConditionalFlowMatcher(sigma = self.sigma)
         else:
@@ -420,6 +514,17 @@ class Method:
                     self.norm.z(bkg, 'bkg').unsqueeze(1), None)
 
         sig = batch['signal']
+        if self.augment is not None:
+            sig = self.augment(sig)
+
+        if self.name == 'postflow':
+            x1 = self.norm.z(sig, 'sig').unsqueeze(1)
+            return (torch.randn_like(x1), x1, self.condition(bkg + sig))
+
+        if self.name == 'regress_mse':
+            # x0 carries the mixture energy, x1 the signal energy
+            return (bkg + sig, sig, self.condition(bkg + sig))
+
         x1  = self.norm.state(bkg, sig)
 
         if self.name in ('otcfm', 'sbcfm'):
@@ -465,6 +570,11 @@ class Method:
         return value
 
     def loss(self, net, x0, x1, cond):
+        if self.name == 'regress_mse':
+            t     = torch.zeros(x1.shape[0], device = x1.device)
+            share = torch.sigmoid(net(t, cond)[:, 0])
+            return torch.mean((share * x0 - x1)**2)
+
         if self.name == 'regress':
             t = torch.zeros(x1.shape[0], device = x1.device)
             return torch.mean((net(t, cond) - x1)**2)
@@ -525,7 +635,7 @@ class Decomposer(torch.nn.Module):
     decode = 'direct'  : both channels as the flow ends them
              'mixture' : signal = mixture - background channel, i.e. the
                          additive mixing imposed at decoding
-    samples > 1 (condcfm): the mean energy of that many samples.
+    samples > 1 (condcfm, postflow): the mean energy of that many samples.
     """
 
     def __init__(
@@ -553,10 +663,34 @@ class Decomposer(torch.nn.Module):
             self.gen = torch.Generator(device = m.device)
             self.gen.manual_seed(self.seed)
 
-        if is_regression(name):
+        if name == 'regress_mse':
+            t   = torch.zeros(m.shape[0], device = m.device)
+            sig = torch.sigmoid(
+                self.net(t, self.method.condition(m))[:, 0]
+            ) * m.clamp(min = 0)
+            bkg = m - sig
+
+        elif is_regression(name):
             t = torch.zeros(m.shape[0], device = m.device)
             x = self.net(t, self.method.condition(m))
             (bkg, sig) = norm.components(x)
+
+        elif name == 'postflow':
+            # every sample is a decomposition that adds up: 0 <= s <= m
+            cond = self.method.condition(m)
+            top  = m.clamp(min = 0)
+            sig  = 0
+
+            for _ in range(self.samples):
+                x0 = torch.randn(
+                    (m.shape[0], 1, *m.shape[1:]), device = m.device,
+                    generator = self.gen
+                )
+                x  = integrate(self.net, x0, cond, self.nfe, self.solver)
+                s  = torch.minimum(norm.energy(x[:, 0], 'sig').clamp(min = 0), top)
+                sig = sig + s / self.samples
+
+            bkg = m - sig
 
         elif name == 'condcfm':
             cond = self.method.condition(m)

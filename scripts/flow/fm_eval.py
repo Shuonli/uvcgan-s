@@ -110,7 +110,7 @@ def settings(cmdargs, method):
                         (nfe, solver, samples) = (1, 'none', 1)
                     elif (solver == 'midpoint') and (nfe % 2):
                         continue
-                    if (method != 'condcfm') and (samples != 1):
+                    if (method not in fc.SAMPLERS) and (samples != 1):
                         continue
 
                     s = (nfe, solver, decode, samples)
