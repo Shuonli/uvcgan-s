@@ -67,7 +67,10 @@ def flow_curves(run_dir, samples = None):
 
     v['hours']  = v.train_time / 3600
     v['family'] = 'flow'
+    bias = config.get('log_bias', 0.1)
     v['arm']    = config['method'] + (
+        f' log(E+{bias:g})' if abs(bias - 0.1) > 1e-9 else ''
+    ) + (
         ' (m - b)' if decode == 'mixture' else ''
     ) + (f' (mean of {samples})' if samples > 1 else '')
     v['seed']   = config['seed']
@@ -315,6 +318,9 @@ ARM_STYLE = {
     'regress_l1'           : ('#9467bd', '--'),
     'regress'              : ('#8c564b', '--'),
     'sbcfm (m - b)'        : ('#17becf', ':'),
+    'otcfm1 (m - b)'       : ('#1f77b4', '-'),
+    'otcfm1 log(E+1) (m - b)' : ('#aec7e8', '-.'),
+    'otcfm_pieces'         : ('#e377c2', '-'),
 }
 
 def plot_report(curves, table, reference, out):

@@ -824,6 +824,52 @@ one-panel one throughout.
 - Training time is the other difference: OT-CFM reaches these numbers in
   15-75 minutes, UVCGAN-S in 8-17 hours.
 
+### Two more designs: true pieces in the batch, and one panel (2026-09-25)
+
+Seven 2-hour runs on dahlia (jobs 20120-20126), three seeds each and one
+for log(E + 1); benchmark jobs 20127-20137. `docs/flow/compare*.csv`,
+`compare_report.png` (val `jer_cal`, MAE, MSE against hours, JEWEL against
+val), `readout_v2.csv`, `substructure_v2*.csv`.
+
+Raw outputs at each model's selection setting, EMA network, val / JEWEL:
+
+| model | best val `jer_cal` | JEWEL | MAE / MSE per tower (val) | hours to 4.00 / 3.70 GeV | ms per event |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| UVCGAN-S batch 32 / batch 4, 3 seeds each | 3.60-3.65 / 3.62-3.66 | 4.00-4.15 / 3.91-4.03 | 0.033 / 0.024 | 5.2-6.7 / 8.4-16.7 | 0.27 |
+| two-panel unpaired OT-CFM, 4 steps | 3.67-3.68 | 3.55-3.56 | 0.151 / 0.068 | 0.33-0.5 / 0.75-1.25 | 2.0 |
+| **one-panel unpaired OT-CFM**, 4 steps | 3.69-3.70 | 3.58-3.61 | 0.155 / 0.071 | 0.25 / 0.75 (1 of 3 seeds; the others hover at 3.70-3.73) | 2.0 |
+| one panel, log(E + 1), 1 seed | 3.79 | 3.57 | 0.144 / 0.058 | 0.25 / - | 2.0 |
+| **true pieces in the batch**, jet panel | 5.08-5.26 | 4.91-5.58 | 0.033 / 0.031 | - / - | 8.1 |
+| true pieces, mixture - background (seed 0) | 4.25-4.64 | 4.83-5.03 | 0.033-0.037 / 0.024-0.026 | - / - | 8.1 |
+
+With the same clean-up for every model (10 GeV seeds + 0.7 GeV tower
+threshold), val / JEWEL `jer_cal` and val MAE: UVCGAN-S 3.66 / 3.96 /
+0.029; two-panel OT-CFM 3.64 / 3.48 / 0.037; one panel 3.63 / 3.49 /
+0.038; log(E + 1) 3.75 / 3.50 / 0.033; true pieces (m - b, 8 GeV + 0.5)
+4.14 / 4.22 / 0.029.
+
+- **True pieces in the batch** (a different design): the matching finds
+  every mixture's pieces (plan recovery 1.000 throughout training), so it
+  is supervised training on synthetic mixtures with a fixed start. It
+  gives the cleanest flow image (MAE 0.033, MSE 0.031: UVCGAN-S's level)
+  but poor, unstable jet energies (5.1-5.3 GeV, and 5.26 -> 6.59 between
+  two checkpoints of seed 0); more solver steps make it worse (4.6-4.8 at
+  4-8 steps, 5.3-5.7 at 16-32). From a fixed start with known targets the
+  flow heads for an average jet, like the log-space regression; its
+  JEWEL-minus-PYTHIA jet energy difference even has the wrong sign (-0.29 of
+  the truth): it pulls jets toward PYTHIA's. Not competitive on jet energy.
+- **One panel vs two**: the one-panel model gets to ~3.70 GeV within 15
+  minutes (two panels: 45-75), with 18% less GPU memory (36 against 44
+  GB, no PYTHIA pool on the GPU), but ends 0.015-0.04 GeV worse on val and
+  JEWEL; images and substructure are the same (JEWEL-PYTHIA shape
+  difference kept: p_T^D 0.88, z_lead 0.93, R_g 0.80, mass 0.41, against
+  0.88 / 0.93 / 0.79 / 0.39). Dropping the dead panel speeds up training,
+  it does not improve the result.
+- **log(E + 1)**: MAE -7%, MSE -18%, val jet resolution +0.1 GeV. A trade,
+  not the fix claimed earlier.
+- More solver steps never help the jets (c.f. above): OT-CFM is best at 4
+  Euler steps; the image is better cleaned afterwards.
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything
@@ -878,34 +924,11 @@ and end-to-end times), `inline_eval.csv`, `evals/{val,jewel}_truth.csv`
 (one row per checkpoint, network and inference setting) and the per-event
 jet energies `evals/*_truth/*.npy`.
 
-## Status (2026-09-25 13:10)
+## Status (2026-09-25 17:00)
 
-Running on dahlia (A6000), jobs 20120-20126, 120 min of training each,
-checkpoint every 15 min, scored on val when training ends (~14:40):
-
-- `otcfm_pieces` ("the true pieces in the batch", a different design, not
-  an improvement): each batch makes its 256 mixtures by adding its own 256
-  HIJING and 256 PYTHIA events, shuffles the pieces, and the minibatch OT
-  pairs them back (logged as `plan_recovery`; 100% in the checks). Same
-  two-panel start (mixture, empty) as `otcfm`. Seeds 0-2,
-  `OUTDIR/sphenix/flow/ext_pieces_s{0,1,2}/`, selected on the signal panel
-  read directly (midpoint 16 NFE).
-- `otcfm1`, the single-channel unpaired OT-CFM: real mixtures -> real HIJING
-  events, one panel, jet = mixture - background. Seeds 0-2,
-  `ext_otcfm1_s{0,1,2}/`, selected at 4 Euler steps as `otcfm`.
-- `otcfm1` in log(E + 1) instead of log(E + 0.1) (`--log-bias 1`), seed 0,
-  `ext_otcfm1_bias1_s0/`: tests the claim that a gentler scale cleans the
-  image at the source.
-
-Then (queued behind them, start by themselves): JEWEL at the val-selected
-checkpoints, solver sweeps, the image read-outs (`readout_test.py`),
-substructure (`substructure.py --extra`) -- jobs 20127-20130 -- and the
-per-tower **MSE** (added to the evaluator on 2026-09-25 at the user's
-request, next to the mean absolute error `l1_sig`): the new runs get it at
-every checkpoint; jobs 20131-20133 rescore UVCGAN-S (all checkpoints) and
-the earlier flows (their curves or selected checkpoints) with it. Then
-`fm_compare.py` over everything.
+All runs and benchmark jobs have ended; nothing of this study is running.
 
 - Open: the jet-level physics (jets found in the extracted image) for the
   flows; a one-network distillation of the conditional-CFM posterior mean;
-  why OT-CFM is better on JEWEL than on val.
+  why OT-CFM is better on JEWEL than on val; a like-for-like substructure
+  comparison with UVCGAN-S cleaned the same way.
