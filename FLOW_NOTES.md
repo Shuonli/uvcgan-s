@@ -257,6 +257,54 @@ information: a flow can only average over couplings like these. This is
 the correspondence failure the conditional follow-up (C) addresses; C and
 D were launched on this evidence, before the A and B pilots finished.
 
+### Pilot (seed 0, one A6000 each, jobs 20062-20065 and 20073)
+
+Batch 256, the same 21.6M-parameter network for all four, fp32. val
+`jer_cal` of the EMA network on the 20k events, midpoint 16 NFE
+(regression: one evaluation), at the training time given:
+
+| method | 5 min | 10 min | 15 min | 20 min | 25 min | `jes` | `l1_sig` | steps/s | coupling |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| A. OT-CFM, signal channel | (-336) | (-255) | (2835) | (120) | | 0.05 | 0.108 | 2.50 | 2.0% |
+| A. OT-CFM, read as m - b | | | | **4.56** | | 0.67 | 0.058 | | |
+| B. SB-CFM, signal channel | 40.8 | 32.2 | 29.0 | 71.5 | | 0.19-0.83 | 0.129 | 2.29 | 10.8% |
+| B. SB-CFM, read as m - b | | | | 6.69 | | 0.48 | 0.060 | | |
+| C. conditional CFM | 6.80 | 5.96 | 5.71 | 5.57 | 5.46 | 0.94 | 0.044 | 2.54 | - |
+| D. regression | 4.95 | 4.49 | | | | 0.81 | 0.032 | 2.53 | - |
+
+(raw network at the end: A signal channel meaningless, B 70.2, C 5.20,
+D 4.72 GeV. D also at 2.6 min: 6.76 and 7.5 min: 4.63.) References:
+median-rho 5.28; T_useful 4.00; T_acc 3.70. The baseline at these times
+has an unusable EMA; its raw generator needs 2.7-4.5 h to reach 4.00.
+
+- **A and B, read from their signal channel, fail** as the coupling
+  diagnostic predicted: A's signal channel holds 5% of the true energy,
+  B's energy scale wanders, neither correlates with the truth. Values in
+  brackets are meaningless (slope of the response near zero).
+- **A's background channel does learn the decomposition.** Read as mixture
+  minus background, the unpaired OT-CFM scores 4.56 GeV after 20 minutes,
+  better than median-rho, and better than its own coupling (7.8-8.4):
+  the flow averages over couplings into a least-change map from mixtures
+  to backgrounds, i.e. it removes the jet. No synthetic pairs and no
+  mixing knowledge in training; additivity only at read-out.
+- D improves fastest (6.76 -> 4.49 in 10 min, still falling); C is slower
+  (6.80 -> 5.46 in 25 min, still falling). One sample of C carries the
+  posterior's spread; its K-sample mean is the natural comparison with D.
+- None reached T_useful within the pilot. **The pilot is inconclusive on
+  time-to-quality**: every curve was still falling. A (read as m - b), C and
+  D are extended.
+
+Throughput is set by the network: 2.3-2.5 steps/s = 590-650 samples/s,
+against 8.6-54 samples/s for the baseline (batch 4-32). The exact plan
+costs 2% of A's time, the entropic plan 11% of B's. Peak GPU memory
+41-43 GB, of which 11-13 GB are the resident training data. Start-up
+(imports aside) 5 s: data from the page cache in 4 s.
+
+**Pilot budget: exceeded.** ~3.0 GPU-hours against the 2 planned: training
+75 min, scoring ~60 min (the 16-NFE scoring of the flows costs 160 s per
+checkpoint and network, which the plan underestimated), pre-pilot checks
+~35 min (run twice, after a resume bug was fixed), Sinkhorn checks ~5 min.
+
 ## Running (keep current)
 
 **Resource cap (user, 2026-09-24): at most 8 GPUs in use in total,
