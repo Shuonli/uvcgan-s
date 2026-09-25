@@ -2,7 +2,8 @@
 
 Started 2026-09-24. Branch `ddp` of `github.com/Shuonli/uvcgan-s`. The
 scaling notes (`SCALING_NOTES.md`) hold the baseline's training and its
-held-out scores; this file holds the flow-matching comparison.
+held-out scores; this file holds the flow-matching comparison. A short,
+plain-language summary of both is `FLOW_SUMMARY.md`.
 
 Questions: can a flow-based model reach the current UVCGAN-S physics
 performance in fewer GPU-hours; is it more stable across seeds; how do final
