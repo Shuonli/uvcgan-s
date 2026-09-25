@@ -124,3 +124,83 @@ checkpoint save/load round trip. Configurations that look promising are
 extended to longer runs and three seeds, capped by the baseline's own time
 to T_acc (~10-15 GPU-hours per seed): a candidate that needs longer is not
 faster.
+
+## Implementation
+
+All code is in `scripts/flow/`; nothing in `uvcgan_s/` or in the
+evaluator changed.
+
+| file | purpose |
+| :--- | :--- |
+| `fm_common.py` | data, normalisation, network, the four methods, ODE solver, `Decomposer` (a flow as a generator for `eval_val_truth.score_generator`) |
+| `fm_train.py` | training, resumable, with a budget in minutes of training time |
+| `fm_eval.py` | scores checkpoints with the baseline's evaluator; NFE / solver / decoding / sample-count sweeps; `--latency` |
+| `coupling_diag.py` | does a minibatch plan pair a mixture with its own signal (scored with held-out truth) |
+| `smoke_checks.py` | pre-pilot checks |
+| `make_cache.py` | one-off flat copy of the training h5 files |
+| `fm_compare.py` | time-to-target table and figure, flows against the baseline |
+| `*.sbatch` | SLURM wrappers: `fm_smoke`, `fm_run` (train + score), `make_cache` |
+
+**Dependencies.** Not in the `fm4npp` env; installed without their
+dependencies into `~/pyext/flow`, so the shared env is unchanged:
+
+    python -m pip install --no-deps --target ~/pyext/flow \
+        torchcfm==1.0.7 POT==0.9.7.post1
+    export PYTHONPATH=~/pyext/flow:$PWD:$PWD/scripts/flow
+
+torchcfm 1.0.7 is upstream tag `1.0.7` of
+github.com/atong01/conditional-flow-matching (commit
+`3fd278f9ef2f02e17e107e5769130b6cb44803e2`). The rest is the env: torch
+2.7.1+cu118, numpy 2.3.1, python 3.12.11.
+
+**Reused from TorchCFM:** `ExactOptimalTransportConditionalFlowMatcher`,
+`SchrodingerBridgeConditionalFlowMatcher`, `ConditionalFlowMatcher` (time
+sampling, interpolants, conditional velocities), `OTPlanSampler` (exact
+plan; drawing pairs from a plan with replacement, as the library does), and
+`UNetModel` (the ADM U-Net of the CIFAR-10 experiments: 96 channels,
+multipliers 1-2-2-2, two residual blocks per level, attention at 6 x 16 and
+in the middle block, scale-shift norm; 21.6M parameters). The plan is
+solved outside the matcher's own call only so that it can be timed; the
+arithmetic is the library's.
+
+**Adapted: the entropic plan.** The library's SB-CFM with
+`ot_method = 'sinkhorn'` calls numpy `ot.sinkhorn`, which underflows at
+reg = 2 sigma^2 = 2 against costs of 3000-7500 (standardised state of 3072
+numbers) and falls back to the independent plan with only a warning. POT's
+log-domain solver is correct but takes 0.35 s per batch of 256 (2000
+sweeps of tiny kernels). `fm_common.GraphedSinkhorn` solves the same
+problem (log-domain Sinkhorn in dual potentials, float32, sweeps replayed
+as a CUDA graph) to an L1 row-marginal error of 1e-3; its plan differs
+from POT's converged plan by 5e-4 in L1. At sigma 1 the plan is nearly a
+permutation (1.6 partners per row on average), so SB-CFM here differs
+from OT-CFM mostly by its Brownian-bridge noise.
+
+**Data path.** The training h5 files hold one lzf chunk per event. On this
+file system that caps reads at 50-150 events/s at random (300-1300 on a
+node whose page cache holds the files) and 5-55k/s for contiguous slices.
+The baseline's loader never notices (it needs < 200 events/s); a flow
+model at batch 256 needs thousands. `make_cache.py` copies the three
+training domains once (9 min, 12.8 GB of float16, lossless, checked
+against the source) into flat `.npy` files, which read at 1 GB/s cold and
+7 GB/s from the page cache. Each run holds them in GPU memory and draws
+i.i.d. indices per domain for every batch (0.1 ms per batch of 3 x 256).
+Loading counts as start-up, not training time.
+
+**Cost of a step** (one A6000, batch 256, fp32 with the default TF32
+convolutions, like the baseline): 385 ms for every method (the network
+dominates); the exact OT plan adds 8 ms (CPU network simplex), the
+entropic plan ~0.1 s. Width against step time: 64 channels 9.6M
+parameters 226 ms, 96 channels 21.6M 385 ms, 128 channels 38.3M 523 ms.
+
+## Running (keep current)
+
+- 2026-09-24 20:38, saturn (A6000): pilot OT-CFM (job 20062) and SB-CFM
+  (job 20063), seed 0, 20 min of training each, checkpoint every 5 min,
+  then scored on the 20k val events (`fm_run.sbatch`). Outputs
+  `OUTDIR/sphenix/flow/pilot_{otcfm,sbcfm}_s0/`.
+- Job 20061 (saturn): pre-pilot checks (passed), smoke runs of all four
+  methods, then `coupling_diag.py` (-> `OUTDIR/sphenix/flow/coupling_diag.csv`).
+- Next: the conditional-CFM and regression pilots once the coupling
+  diagnostic is in; then `fm_compare.py` against the baseline runs of
+  jobs 20040-20044 (they end ~23:35 and need their final checkpoints
+  scored, c.f. SCALING_NOTES.md).

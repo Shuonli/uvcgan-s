@@ -459,6 +459,9 @@ Knobs: `UVCGAN_S_DDP_MODE`, `UVCGAN_S_DDP_COMPRESS` (fp16/bf16, worth
 
 ## Still open
 
+- **Flow matching against UVCGAN-S**: a separate study, notes and job
+  ids in `FLOW_NOTES.md` (code in `scripts/flow/`, outputs in
+  `OUTDIR/sphenix/flow/`). Its baseline numbers come from the runs below.
 - **Jobs 20040-20044** (dahlia, one A6000 each, 26 h from 2026-09-23
   21:26, until ~2026-09-24 23:30): the short recipe of the base run
   (warm-up of one 200-update epoch, 5e-5, checkpoint every 10k updates,
