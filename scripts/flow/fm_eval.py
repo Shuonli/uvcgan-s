@@ -66,16 +66,16 @@ def best_step(run_dir):
     if not os.path.exists(csv):
         raise RuntimeError(f"'{run_dir}': score the val events first")
 
-    (nfe, solver, decode) = default_setting(run_dir)
+    (nfe, solver, decode, samples) = default_setting(run_dir)
 
     v = pd.read_csv(csv)
     v = v[(v.net == 'ema') & (v.nfe == nfe) & (v.solver == solver)
-          & (v.decode == decode) & (v.samples == 1)]
+          & (v.decode == decode) & (v.samples == samples)]
 
     return int(v.sort_values('jer_cal').step.iloc[0])
 
 def default_setting(run_dir):
-    """(nfe, solver, decode) that checkpoints are selected with."""
+    """(nfe, solver, decode, samples) that checkpoints are selected with."""
     with open(os.path.join(run_dir, 'config.json'), 'r', encoding = 'utf-8') as f:
         method = json.load(f)['method']
 

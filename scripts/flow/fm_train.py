@@ -157,7 +157,7 @@ class InlineScorer:
             dec = fc.Decomposer(
                 method, net, nfe = self.nfe,
                 decode = fc.SELECTION[method.name][2]
-            )
+            )   # one sample: a monitor, not the selection setting
             (scores, _) = fc.ev.score_generator(
                 dec, None, self.truth, 500, device
             )

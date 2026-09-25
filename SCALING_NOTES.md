@@ -13,28 +13,22 @@ stated otherwise. The README carries the same tables in a shorter form.
 
 ## What to do
 
-Revised on 2026-09-23 against held-out truth (see "Held-out quality
+Revised on 2026-09-23 and 2026-09-24 against held-out truth (see "Held-out quality
 against truth"). The first version of this list rested on training losses
 and recommended batch 32 at 1e-4 and `gp_cache_period` 4; neither holds up.
 
-1. **Train ~100k updates, not the configured 800k.** The published model
-   (800k updates at batch 4, five days) resolves the held-out jet energy
-   to 3.59 GeV. The base run (batch 32 at 5e-5) reaches 3.63 GeV at 80k
-   updates and 3.60 at 130k, 14 and 23 h on one A6000, with per-tower
-   errors as small or smaller: 5-7x less training for <1% in resolution
-   on the in-distribution val events. **On the JEWEL test the published
-   model stays 3-5% better** (3.99 against 4.1-4.2 GeV), so the long
-   training buys some robustness to out-of-distribution jets (or batch 4
-   and its long warm-up do; jobs 20040-20044 tell). The warm-up has to
-   shrink with the run: the configured one lasts 64k updates, the base
-   run used 200. One run each so far; more seeds are running.
-2. **Batch 32 at 5e-5**, the base run's setting. Batch 32 at 1e-4 gets the
-   raw generator to a given held-out quality faster during the first ~4 h,
-   but the EMA generator, which inference uses, is never better at equal
-   time than the configured batch 4 at 5e-5, and at 40k updates both of
-   its seeds are behind the (single) batch 32 at 5e-5 run. The "1.7x
-   faster" of the first version came from training losses, partly
-   `cycle_b`, which does not track the extraction.
+1. **Train 150-180k updates at batch 4 (20-24 h on one A6000), not the
+   configured 800k (~105 h).** Three seeds each of batch 4 and batch 32 at
+   5e-5 (jobs 20040-20044 with the base run; "Batch 32 against batch 4"
+   below): after 20-24 h batch 4 matches the published model on the JEWEL
+   test (3.99 GeV, the published model 3.99) and is within 1-2% on val
+   (3.63-3.65 against 3.59). The warm-up has to shrink with the run: the
+   configured one lasts 64k updates, these runs used 200.
+2. **Batch 32 only if the in-distribution resolution is all that
+   matters.** It is ahead on val at equal hours up to ~16 h (3.67 against
+   3.73 at 12 h; T_acc of 3.70 GeV reached after 8-15 h against 15-17 h)
+   and level by 20 h, but on JEWEL it stalls at 4.1-4.2 GeV while batch 4
+   keeps improving. Batch 32 at 1e-4 is never better on the EMA network.
 3. **Leave `gp_cache_period` at 0.** Caching the gradient penalty for 4
    steps shortens the steps by 1.32x, but the trained generator's held-out
    extraction is worse at every point of a 7 h run (per-tower error +20%,
@@ -54,8 +48,10 @@ and recommended batch 32 at 1e-4 and `gp_cache_period` 4; neither holds up.
 7. Never train across two nodes on this cluster: it is several times slower
    than one GPU.
 
-Item 1 is worth 6-8x on its own and item 4 another ~1.1x; items 2 and 3
-are about not losing quality.
+Item 1 is worth 4.5-5x on its own (and 6-8x for the val events alone, at
+batch 32) and item 4 another ~1.1x; items 2 and 3 are about not losing
+quality. For a possible much cheaper route to the same resolution, see
+`FLOW_NOTES.md` (supervised training on synthetic mixtures).
 
 ## Throughput against batch size
 
@@ -296,6 +292,38 @@ buy on these events is not visible; the signal discriminator is fooled
 more and more (`disc_a1` 0.02 -> 0.19, `gen_ba1` 1.19 -> 0.65). They do
 buy something on the JEWEL test (next section).
 
+### Batch 32 against batch 4, three seeds each (jobs 20040-20044)
+
+The short recipe (warm-up of one 200-update epoch, 5e-5) at batch 32
+(seeds 0-2; seed 0 is the base run, job 19989) and batch 4 (seeds 0-2),
+26 h each on dahlia, scored at every 10k-update checkpoint on the 20k
+val and JEWEL events (`scripts/slurm/compare_runs.py`, figure
+`OUTDIR/sphenix/base/compare_final.png`). EMA `jer_cal` in GeV, mean of
+the seeds [half their range]; (2) = two seeds reached that point:
+
+| | 8 h | 12 h | 16 h | 20 h | 24 h |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| val, batch 32 | **3.74** [0.05] | **3.67** [0.03] | **3.65** [0.03] | 3.63 [0.03] | 3.63 [0.03] (2) |
+| val, batch 4 | 3.78 [0.00] | 3.73 [0.01] | 3.69 [0.01] | 3.65 [0.02] | 3.64 [0.01] (2) |
+| JEWEL, batch 32 | 4.13 [0.04] | 4.17 [0.04] | 4.20 [0.01] | 4.19 [0.01] | 4.08 [0.06] (2) |
+| JEWEL, batch 4 | 4.16 [0.07] | **4.13** [0.04] | **4.07** [0.04] | **3.99** [0.05] | **3.99** [0.01] (2) |
+
+Published model (800k updates): val 3.59, JEWEL 3.99. By updates, val:
+3.78 / 3.87 at 40k (batch 32 / 4), 3.66 / 3.74 at 80k, 3.62 / 3.65 at 140k;
+JEWEL: 4.13 / 4.19 at 40k, 4.18 / 4.14 at 80k, 4.09 / 4.00 at 140k.
+Hours to val `jer_cal` <= 3.70 (first checkpoint below, confirmed by the
+next): batch 32 8.4, 8.6, 15.2 h; batch 4 14.7, 16.5, 16.7 h.
+
+- Per update, batch 32 is better on val (it sees 8x the data); per hour
+  the gap shrinks to 0.04-0.06 GeV and closes by 20 h.
+- On JEWEL the ranking flips from ~12 h: batch 4 keeps improving and
+  reaches the published model at 20-24 h (~150-180k updates); batch 32
+  stays at 4.1-4.2. The published model's JEWEL advantage over the base
+  run came from the small batch, not from its 800k updates.
+- The per-tower errors end level (EMA `l1_sig` 0.031-0.034 on val, 0.027-
+  0.029 on JEWEL, published 0.033 / 0.028). Seed spreads are 0.01-0.06
+  GeV throughout.
+
 ### The JEWEL test (out of distribution)
 
 The source ROOT dataset (Zenodo record 17594612) also has the JEWEL jets
@@ -462,18 +490,6 @@ Knobs: `UVCGAN_S_DDP_MODE`, `UVCGAN_S_DDP_COMPRESS` (fp16/bf16, worth
 - **Flow matching against UVCGAN-S**: a separate study, notes and job
   ids in `FLOW_NOTES.md` (code in `scripts/flow/`, outputs in
   `OUTDIR/sphenix/flow/`). Its baseline numbers come from the runs below.
-- **Jobs 20040-20044** (dahlia, one A6000 each, 26 h from 2026-09-23
-  21:26; ended at their time limit 2026-09-24 23:36; their final
-  checkpoints are being scored by jobs 20078 (val) and 20079 (JEWEL)): the short recipe of the base run
-  (warm-up of one 200-update epoch, 5e-5, checkpoint every 10k updates,
-  held-out val scores every epoch in `val_truth_history.csv`) at batch
-  32 with seeds 1 and 2 (`OUTDIR/sphenix/base/*_base_b32_lr5e-5_s{1,2}`;
-  the base run is seed 0) and at batch 4 with seeds 0, 1, 2
-  (`*_base_b4_lr5e-5_s{0,1,2}`; seed 0 starts from the same weights as the
-  base run). They confirm the short run and compare batch 32 with batch 4
-  at equal updates and equal hours, on val and JEWEL truth. When they
-  end, score the six run directories with `eval_val_truth.sbatch`, once
-  with `EVAL_ARGS="--truth val"` and once with `"--truth jewel"`.
 - The physics the paper uses (jets found in the extracted image, their
   shapes) is not captured by the cone energy.
 - Whether 5e-5 beats 1e-4 at batch 32 at depth rests on one seed of 5e-5.

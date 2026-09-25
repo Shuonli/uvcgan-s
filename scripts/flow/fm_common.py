@@ -51,16 +51,19 @@ BIAS      = 0.1
 SHAPE     = (24, 64)
 METHODS   = [ 'otcfm', 'sbcfm', 'condcfm', 'regress', 'regress_l1' ]
 
-# (nfe, solver, decode) that checkpoints are selected, and time curves
-# drawn, with: the regression takes one evaluation and no solver; the
-# unpaired flows are read as mixture - background channel, their signal
-# channel carries no event information (FLOW_NOTES.md)
+# (nfe, solver, decode, samples) that checkpoints are selected, and time
+# curves drawn, with: the regression takes one evaluation and no solver;
+# the unpaired flows are read as mixture - background channel, their signal
+# channel carries no event information; conditional CFM is read as the mean
+# energy of 4 posterior samples at 8 NFE -- one sample carries the
+# posterior's spread (5.0 GeV against 3.9 for four at the same checkpoint),
+# and 16 NFE are no better than 8 (FLOW_NOTES.md)
 SELECTION = {
-    'regress' : (1, 'none', 'direct'),
-    'regress_l1' : (1, 'none', 'direct'),
-    'condcfm' : (16, 'midpoint', 'direct'),
-    'otcfm'   : (16, 'midpoint', 'mixture'),
-    'sbcfm'   : (16, 'midpoint', 'mixture'),
+    'regress'    : (1, 'none', 'direct', 1),
+    'regress_l1' : (1, 'none', 'direct', 1),
+    'condcfm'    : (8, 'midpoint', 'direct', 4),
+    'otcfm'      : (16, 'midpoint', 'mixture', 1),
+    'sbcfm'      : (16, 'midpoint', 'mixture', 1),
 }
 
 # domains each method draws from; condcfm and regress build their mixtures

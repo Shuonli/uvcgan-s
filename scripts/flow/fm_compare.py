@@ -55,13 +55,15 @@ def flow_curves(run_dir):
         config = json.load(f)
 
     v = pd.read_csv(os.path.join(run_dir, 'evals', 'val_truth.csv'))
-    (nfe, solver, decode) = SELECTION[config['method']]
+    (nfe, solver, decode, samples) = SELECTION[config['method']]
     v = v[(v.nfe == nfe) & (v.solver == solver) & (v.decode == decode)
-          & (v.samples == 1)].copy()
+          & (v.samples == samples)].copy()
 
     v['hours']  = v.train_time / 3600
     v['family'] = 'flow'
-    v['arm']    = config['method'] + (' (m - b)' if decode == 'mixture' else '')
+    v['arm']    = config['method'] + (
+        ' (m - b)' if decode == 'mixture' else ''
+    ) + (f' (mean of {samples})' if samples > 1 else '')
     v['seed']   = config['seed']
     v['run']    = config['label']
 
@@ -102,9 +104,9 @@ def jewel_at(run_dir, family, step, method = None):
     j = j[j.net == 'ema']
 
     if family == 'flow':
-        (nfe, solver, decode) = SELECTION[method]
+        (nfe, solver, decode, samples) = SELECTION[method]
         j = j[(j.step == step) & (j.nfe == nfe) & (j.solver == solver)
-              & (j.decode == decode) & (j.samples == 1)]
+              & (j.decode == decode) & (j.samples == samples)]
     else:
         j = j[j.updates == step]
 
@@ -127,9 +129,12 @@ def latency(method):
     if method is None:
         x = lat[lat.model.str.startswith('uvcgan-s')]
     else:
-        (nfe, solver, _) = SELECTION[method]
+        (nfe, solver, _, samples) = SELECTION[method]
         x = lat[lat.model.str.endswith(f'({method})') & (lat.nfe == nfe)
-                & (lat.solver == solver) & (lat.samples == 1)]
+                & (lat.solver == solver)]
+        if len(x):
+            # the samples of a mean run one after the other
+            return float(x.ms_per_event.median()) * samples
 
     return float(x.ms_per_event.median()) if len(x) else None
 
@@ -229,9 +234,9 @@ def plot_nfe(runs, out):
             continue
 
         v = pd.read_csv(os.path.join(run_dir, 'evals', 'val_truth.csv'))
-        (nfe, solver, decode) = SELECTION[method]
+        (nfe, solver, decode, samples) = SELECTION[method]
         sel = v[(v.net == 'ema') & (v.nfe == nfe) & (v.solver == solver)
-                & (v.decode == decode) & (v.samples == 1)]
+                & (v.decode == decode) & (v.samples == samples)]
         if len(sel) == 0:
             continue
 
