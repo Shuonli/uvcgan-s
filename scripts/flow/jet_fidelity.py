@@ -1,52 +1,59 @@
 #!/usr/bin/env python
-"""Single-event fidelity of the extracted jets: per-jet estimates of the
-jet energy and substructure against truth, and the energy mover's distance
-between the extracted and the true jet.
+"""Single-event fidelity of the extracted jets: per-jet jet energy and
+substructure against truth, and the energy mover's distance between the
+extracted and the true jet.
 
-Each jet is the R = 0.4 cone around the true leading-jet axis of a val
-(PYTHIA) or JEWEL mixed event, towers as constituents, as in
-substructure.py (whose observables are used). Models are given as
+Each jet is the R = 0.4 cone around the true leading-jet axis of a mixed
+event, towers as constituents, as in substructure.py (whose observables are
+used). Events: val (PYTHIA in HIJING) 0 .. n-1 for the development scores,
+val n .. 2n-1 as the calibration set, JEWEL 0 .. n-1 as the frozen test.
+Models are given as
 
     LABEL=uvcgan                 the published UVCGAN-S generator (EMA)
     LABEL=single:RUN:DECODE      a flow run at its selection setting
                                  (fm_common.SELECTION), read `direct` or as
                                  `mixture` - background
     LABEL=sampler:RUN            a posterior sampler (conditional CFM,
-                                 postflow): K samples at 8 NFE, read out as
-                                     sample      one sample
-                                     mean-image  the observables of the mean
-                                                 image of the K samples
-                                     mean-obs    each observable averaged
-                                                 over the samples
+                                 postflow): K samples at 8 NFE
 
-(RUN under OUTDIR/sphenix/flow, its val-selected checkpoint, EMA). The
-first pass (`--models`) stores the per-jet values of every model in
+(RUN under OUTDIR/sphenix/flow, its val-selected checkpoint, EMA network).
+Read-outs:
+
+    image       a single-image model's output, raw
+    thr0.5      the same, towers below 0.5 GeV dropped: the one post-
+                processing applied identically to every single-image model,
+                compared with the truth thresholded the same way
+    sample      one posterior sample
+    mean-image  the observables of the mean image of the K samples
+    mean-obs    each observable averaged over the K samples
+
+The first pass (`--models`) stores per-jet values in
 OUTDIR/sphenix/flow/jet_fidelity/LABEL_{val,jewel}.npz, so that models can
 be computed in parallel jobs; `--report` makes the tables and the figure:
 
-    per read-out and observable   per-jet resolution sigma(estimate - truth)
-                                  / sigma(truth), correlation, relative shift
-                                  of the mean, W1 / sigma(truth), and the
-                                  JEWEL - PYTHIA difference of the mean for
-                                  jets of true cone energy 20-30 GeV as a
-                                  fraction of the true difference
-    per read-out                  `jer_cal` of the cone energy (as
-                                  eval_val_truth.py, on these events) and the
-                                  energy mover's distance (Komiske, Metodiev,
-                                  Thaler), EMD = min_f sum f_ij dR_ij / R +
-                                  |E - E'| with R = 0.4: the least energy x
-                                  angle needed to turn one jet into the other,
-                                  small only if energy and shape both agree;
-                                  and its shape part `emd_shape`, the EMD
-                                  after scaling the extracted jet to the true
-                                  energy (GeV at the true energy)
-    samplers, mean-obs            the per-jet error bars (spread of the
-                                  samples): share of jets within +-1 sigma
-                                  (68% if honest), correlation of sigma with
-                                  |error|
+    jet energy    raw response (`jes`, mean ratio), raw bias and RMSE; and
+                  after a linear calibration fitted on the calibration set
+                  (extracted = a + b true, inverted) and frozen: its bias,
+                  resolution (sigma) and RMSE on val and on JEWEL, GeV;
+                  `jer_cal` (the in-sample calibrated resolution of
+                  eval_val_truth.py) for continuity. Always against the full
+                  true cone energy.
+    observables   bias, RMSE, sigma(estimate - truth), each in units of
+                  sigma(truth); correlation; W1 / sigma(truth) of the
+                  distributions; the JEWEL - PYTHIA difference of the mean for
+                  jets of true cone energy 20-30 GeV as a fraction of the true
+                  difference
+    EMD           the energy mover's distance (Komiske, Metodiev, Thaler),
+                  EMD = min_f sum f_ij dR_ij / R + |E - E'|, R = 0.4: the least
+                  energy x angle that turns one jet into the other, small only
+                  if energy and shape agree; `emd_shape`: the EMD after
+                  scaling the extracted jet to the true energy
+    samplers      the per-jet error bars of mean-obs (spread of the samples):
+                  share of jets within +-1 sigma (68% if honest), correlation
+                  of sigma with |error|
 
     jet_fidelity.py --models SPEC [SPEC ...] [--samples 16] [--n-events 10000]
-    jet_fidelity.py --report [--figure docs/flow/jet_fidelity.png]
+    jet_fidelity.py --report [--show LABEL,...] [--figure PNG]
 """
 
 import argparse
@@ -65,14 +72,17 @@ from substructure import Geometry, observables, OBSERVABLES, WINDOW, \
 
 ev = fc.ev
 
-R_EMD    = 0.4
-TRUTHS   = [ 'val', 'jewel' ]
-READOUTS = [ 'image', 'sample', 'mean-image', 'mean-obs' ]
+R_EMD     = 0.4
+THRESHOLD = 0.5
+TRUTHS    = [ 'val', 'jewel' ]
+READOUTS  = [ 'image', 'thr0.5', 'sample', 'mean-image', 'mean-obs' ]
 
 def parse_cmdargs():
     parser = argparse.ArgumentParser(description = 'Single-event fidelity')
     parser.add_argument('--models', nargs = '*', default = [])
     parser.add_argument('--report', action = 'store_true')
+    parser.add_argument('--show', default = None,
+        help = 'comma separated labels to report (default: all)')
     parser.add_argument('--samples', type = int, default = 16)
     parser.add_argument('--nfe', type = int, default = 8)
     parser.add_argument('--n-events', type = int, default = 10000)
@@ -84,6 +94,9 @@ def parse_cmdargs():
         fc.out_root(), 'jet_fidelity'))
     parser.add_argument('--figure', default = None)
     return parser.parse_args()
+
+def threshold(img):
+    return torch.where(img > THRESHOLD, img, torch.zeros_like(img))
 
 # --- energy mover's distance
 
@@ -162,7 +175,7 @@ def load_sampler(run, device):
              if c.endswith(f'step_{step:08d}.pt') ][0]
     (method, net, _, _) = fc.load_run(run, ckpt, device, 'ema')
     assert method.name in fc.SAMPLERS, method.name
-    return (method, net, step)
+    return (method, net, step, run)
 
 @torch.no_grad()
 def one_sample(dec, embed, batch, device):
@@ -172,20 +185,146 @@ def one_sample(dec, embed, batch, device):
         out.append(dec(m.unsqueeze(1))[:, 1].cpu())
     return torch.cat(out)
 
-# --- per-jet values
+# --- events
 
-def jet_values(img, truth, idx, geo, emd, t_patch, with_emd = True):
-    """Observables, cone energy (with negative towers, as the jet scores)
-    and EMD to truth of the jets idx of the images img."""
-    p = geo.patches(img, truth, idx)
-    v = observables(p, truth, idx, geo)
-    v['e_cone'] = truth.at_axis(img.to(truth.row.device))[idx].cpu().numpy()
-    if with_emd:
-        (v['emd'], v['emd_shape']) = emd(p, t_patch)
-    return v
+class Events:
+    """Mixtures, truth and jets of one set of events."""
+
+    def __init__(self, truth_name, start, n, device, geo):
+        (embed, signal) = ev.load_pairs(
+            os.environ.get('UVCGAN_S_DATA', 'data'), 20000, 0,
+            truth = truth_name
+        )
+        self.embed  = embed [start:start + n]
+        self.signal = signal[start:start + n]
+        self.truth  = ev.Truth(self.embed, self.signal,
+                               ev.cone_kernel(ev.R_JET), 10.0, device)
+        self.idx    = torch.nonzero(self.truth.jets).flatten()
+        self.geo    = geo
+
+        sig = torch.from_numpy(self.signal).float()
+        self.t_patch = {
+            'full' : geo.patches(sig, self.truth, self.idx),
+            'thr'  : geo.patches(threshold(sig), self.truth, self.idx),
+        }
+
+    def e_cone(self, img):
+        return self.truth.at_axis(img.to(self.truth.row.device))[self.idx] \
+            .cpu().numpy()
+
+    def values(self, img, emd, ref = 'full', with_emd = True):
+        """Observables, cone energy (with negative towers, as the jet
+        scores) and EMD to the truth `ref` of the jets of the images."""
+        p = self.geo.patches(img, self.truth, self.idx)
+        v = observables(p, self.truth, self.idx, self.geo)
+        v['e_cone'] = self.e_cone(img)
+        if with_emd:
+            (v['emd'], v['emd_shape']) = emd(p, self.t_patch[ref])
+        return v
+
+def truth_file(cmdargs, truth_name, events, calib):
+    path = os.path.join(cmdargs.dir, f'truth_{truth_name}.npz')
+    if os.path.exists(path) and not cmdargs.force:
+        return
+
+    geo = events.geo
+    out = {}
+    for (ref, patch) in events.t_patch.items():
+        for (q, x) in observables(patch, events.truth, events.idx,
+                                  geo).items():
+            out[f'{ref}|{q}'] = x
+    out['e_cone'] = events.truth.e_true[events.idx].cpu().numpy()
+    if calib is not None:
+        out['calib|e_cone'] = calib.truth.e_true[calib.idx].cpu().numpy()
+    np.savez_compressed(path, **out)
+
+# --- per-model values
+
+def single_values(kind, parts, events, calib, emd, cmdargs, device):
+    def images(embed):
+        if kind == 'uvcgan':
+            return uvcgan_images(embed, cmdargs.batch, device)
+        return decoded_images(parts[1], parts[2], embed, cmdargs.batch,
+                              device)
+
+    img = images(events.embed)
+    out = {}
+    for (k, v) in events.values(img, emd).items():
+        out[f'image|{k}'] = v
+    for (k, v) in events.values(threshold(img), emd, 'thr').items():
+        out[f'thr0.5|{k}'] = v
+
+    if calib is not None:
+        img = images(calib.embed)
+        out['image|calib_e_cone']  = calib.e_cone(img)
+        out['thr0.5|calib_e_cone'] = calib.e_cone(threshold(img))
+
+    return out
+
+def sampler_calibration(run, step, calib, cmdargs, dec_args, device):
+    """Calibration-set cone energies of the mean of K samples and of one
+    sample: from fm_eval.py's per-event energies of the same checkpoint and
+    setting where present (val events n .. 2n-1 of its 20k), else drawn."""
+    (method, net) = dec_args
+    start = len(calib.embed)
+    out   = {}
+
+    for (name, k) in [ ('mean-image', cmdargs.samples), ('sample', 1) ]:
+        path = os.path.join(
+            run, 'evals', 'val_truth',
+            f's{step:08d}_ema_midpoint{cmdargs.nfe}_direct_x{k}.npy'
+        )
+        if os.path.exists(path):
+            e = np.load(path)[start:2 * start]
+            out[f'{name}|calib_e_cone'] = e[calib.idx.cpu().numpy()]
+            continue
+
+        print(f'{path} missing: drawing the calibration set', flush = True)
+        dec  = fc.Decomposer(method, net, nfe = cmdargs.nfe, samples = k,
+                             seed = 2)
+        img  = one_sample(dec, calib.embed, cmdargs.batch, device)
+        out[f'{name}|calib_e_cone'] = calib.e_cone(img)
+
+    out['mean-obs|calib_e_cone'] = out['mean-image|calib_e_cone']
+    return out
+
+def sampler_values(label, parts, events, calib, emd, cmdargs, device):
+    # pylint: disable=too-many-locals
+    (method, net, step, run) = load_sampler(parts[1], device)
+    dec  = fc.Decomposer(method, net, nfe = cmdargs.nfe, samples = 1,
+                         seed = 1)
+    out  = { 'step' : step, 'samples' : cmdargs.samples }
+    per  = {}
+    mean = None
+
+    for k in range(cmdargs.samples):
+        img  = one_sample(dec, events.embed, cmdargs.batch, device)
+        mean = img / cmdargs.samples if mean is None \
+            else mean + img / cmdargs.samples
+        v = events.values(img, emd, with_emd = (k == 0))
+        if k == 0:
+            for (q, x) in v.items():
+                out[f'sample|{q}'] = x
+        for (q, x) in v.items():
+            if not q.startswith('emd'):
+                per.setdefault(q, []).append(x)
+        print(f'{label}: sample {k + 1}/{cmdargs.samples}', flush = True)
+
+    for (q, x) in events.values(mean, emd).items():
+        out[f'mean-image|{q}'] = x
+
+    with np.errstate(all = 'ignore'):
+        for (q, xs) in per.items():
+            s = np.stack(xs)
+            out[f'mean-obs|{q}'] = np.nanmean(s, axis = 0)
+            out[f'mean-obs-sd|{q}'] = np.nanstd(s, axis = 0)
+
+    if calib is not None:
+        out.update(sampler_calibration(run, step, calib, cmdargs,
+                                       (method, net), device))
+    return out
 
 def compute_model(spec, cmdargs, device):
-    # pylint: disable=too-many-locals
     (label, rest) = spec.split('=', 1)
     parts = rest.split(':')
     kind  = parts[0]
@@ -199,187 +338,174 @@ def compute_model(spec, cmdargs, device):
             print(f'{path} exists, skipped')
             continue
 
-        (embed, signal) = ev.load_pairs(
-            os.environ.get('UVCGAN_S_DATA', 'data'), 20000, 0,
-            truth = truth_name
-        )
-        (embed, signal) = (embed[:cmdargs.n_events], signal[:cmdargs.n_events])
-        truth = ev.Truth(embed, signal, ev.cone_kernel(ev.R_JET), 10.0, device)
-        idx   = torch.nonzero(truth.jets).flatten()
-        sig   = torch.from_numpy(signal).float()
-        t_patch = geo.patches(sig, truth, idx)
-
-        tpath = os.path.join(cmdargs.dir, f'truth_{truth_name}.npz')
-        if not os.path.exists(tpath):
-            t = observables(t_patch, truth, idx, geo)
-            t['e_cone'] = truth.e_true[idx].cpu().numpy()
-            np.savez_compressed(tpath, **t)
-
-        out = { 'kind' : kind, 'spec' : spec }
+        n      = cmdargs.n_events
+        events = Events(truth_name, 0, n, device, geo)
+        calib  = Events('val', n, n, device, geo) if truth_name == 'val' \
+            else None
+        truth_file(cmdargs, truth_name, events, calib)
 
         if kind in ('uvcgan', 'single'):
-            if kind == 'uvcgan':
-                img = uvcgan_images(embed, cmdargs.batch, device)
-            else:
-                img = decoded_images(parts[1], parts[2], embed,
-                                     cmdargs.batch, device)
-            for (k, v) in jet_values(img, truth, idx, geo, emd,
-                                     t_patch).items():
-                out[f'image|{k}'] = v
-
+            out = single_values(kind, parts, events, calib, emd, cmdargs,
+                                device)
         elif kind == 'sampler':
-            (method, net, step) = load_sampler(parts[1], device)
-            out['step'] = step
-            dec  = fc.Decomposer(method, net, nfe = cmdargs.nfe, samples = 1,
-                                 seed = 1)
-            per  = {}
-            mean = None
-
-            for k in range(cmdargs.samples):
-                img  = one_sample(dec, embed, cmdargs.batch, device)
-                mean = img / cmdargs.samples if mean is None \
-                    else mean + img / cmdargs.samples
-                v = jet_values(img, truth, idx, geo, emd, t_patch,
-                               with_emd = (k == 0))
-                if k == 0:
-                    for (q, x) in v.items():
-                        out[f'sample|{q}'] = x
-                for (q, x) in v.items():
-                    if not q.startswith('emd'):
-                        per.setdefault(q, []).append(x)
-                print(f'{label} {truth_name}: sample {k + 1}/{cmdargs.samples}',
-                      flush = True)
-
-            for (q, x) in jet_values(mean, truth, idx, geo, emd,
-                                     t_patch).items():
-                out[f'mean-image|{q}'] = x
-
-            with np.errstate(all = 'ignore'):
-                for (q, xs) in per.items():
-                    s = np.stack(xs)
-                    out[f'mean-obs|{q}'] = np.nanmean(s, axis = 0)
-                    out[f'mean-obs-sd|{q}'] = np.nanstd(s, axis = 0)
-            out['samples'] = cmdargs.samples
+            out = sampler_values(f'{label} {truth_name}', parts, events,
+                                 calib, emd, cmdargs, device)
         else:
             raise ValueError(f"unknown model kind '{kind}'")
 
+        out.update({ 'kind' : kind, 'spec' : spec })
         np.savez_compressed(path, **out)
         print(f'wrote {path}', flush = True)
 
 # --- report
 
-def jer_cal(y, x):
+def calibration(y, x):
+    """(a, b) of extracted y = a + b true x."""
     b = np.mean((x - x.mean()) * (y - y.mean())) / x.var()
-    a = y.mean() - b * x.mean()
-    return float((y - a - b * x).std() / b)
+    return (y.mean() - b * x.mean(), b)
+
+def energy_scores(y, x, cal):
+    (a, b) = calibration(y, x)
+    row = {
+        'jes'      : float(np.mean(y / x)),
+        'raw_bias' : float(np.mean(y - x)),
+        'raw_rmse' : float(np.sqrt(np.mean((y - x)**2))),
+        'jer_cal'  : float((y - a - b * x).std() / b),
+    }
+    if cal is not None:
+        xhat = (y - cal[0]) / cal[1]
+        d    = xhat - x
+        row.update({ 'cal_bias' : float(d.mean()), 'cal_res' : float(d.std()),
+                     'cal_rmse' : float(np.sqrt(np.mean(d**2))) })
+    return row
 
 def compare(x, t):
     ok = np.isfinite(x) & np.isfinite(t)
     (x, t) = (x[ok], t[ok])
     sd = t.std()
+    d  = x - t
     return {
-        'rel_res'   : float((x - t).std() / sd),
+        'bias'      : float(d.mean()),
+        'rmse'      : float(np.sqrt(np.mean(d**2))),
+        'rel_bias'  : float(d.mean() / sd),
+        'rel_rmse'  : float(np.sqrt(np.mean(d**2)) / sd),
+        'rel_res'   : float(d.std() / sd),
         'corr'      : float(np.corrcoef(x, t)[0, 1]),
-        'rel_shift' : float((x.mean() - t.mean()) / abs(t.mean())),
         'w1_sigma'  : float(wasserstein_distance(x, t) / sd),
     }
 
-def load_all(directory):
+def load_all(directory, show):
+    truth = { t : dict(np.load(os.path.join(directory, f'truth_{t}.npz')))
+              for t in TRUTHS }
     models = {}
-    truth  = {}
-    for t in TRUTHS:
-        truth[t] = dict(np.load(os.path.join(directory, f'truth_{t}.npz')))
     for path in sorted(glob.glob(os.path.join(directory, '*_val.npz'))):
         label = os.path.basename(path)[:-len('_val.npz')]
-        if label == 'truth':
+        if (label == 'truth') or (show and label not in show):
             continue
         models[label] = {
             t : dict(np.load(os.path.join(directory, f'{label}_{t}.npz'),
                              allow_pickle = True)) for t in TRUTHS
         }
+    if show:
+        models = { k : models[k] for k in show if k in models }
     return (models, truth)
 
 def report(cmdargs):
-    # pylint: disable=too-many-locals
-    (models, truth) = load_all(cmdargs.dir)
+    # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+    show = cmdargs.show.split(',') if cmdargs.show else None
+    (models, truth) = load_all(cmdargs.dir, show)
     rows  = []
     jets  = []
     means = []
 
     for (label, per_truth) in models.items():
+        cals = {}
+        for r in READOUTS:
+            key = f'{r}|calib_e_cone'
+            if key in per_truth['val']:
+                cals[r] = calibration(per_truth['val'][key],
+                                      truth['val']['calib|e_cone'])
+
         for (t, d) in per_truth.items():
             tt = truth[t]
-            window = (tt['e_cone'] >= WINDOW[0]) & (tt['e_cone'] < WINDOW[1])
-
             for r in READOUTS:
                 if f'{r}|et' not in d:
                     continue
-                name = f'{label}' if r == 'image' else f'{label}, {r}'
-                row  = {
-                    'truth' : t, 'model' : label, 'readout' : r,
-                    'name' : name, 'n_jets' : len(tt['e_cone']),
-                    'jer_cal' : jer_cal(d[f'{r}|e_cone'], tt['e_cone']),
-                }
+                ref  = 'thr' if r.startswith('thr') else 'full'
+                name = label if r == 'image' else f'{label}, {r}'
+                row  = { 'truth' : t, 'model' : label, 'readout' : r,
+                         'name' : name, 'n_jets' : len(tt['e_cone']),
+                         **energy_scores(d[f'{r}|e_cone'], tt['e_cone'],
+                                         cals.get(r)) }
                 if f'{r}|emd' in d:
-                    e = d[f'{r}|emd']
-                    f = d[f'{r}|emd_shape']
+                    (e, f) = (d[f'{r}|emd'], d[f'{r}|emd_shape'])
                     row.update({ 'emd_mean' : float(e.mean()),
                                  'emd_median' : float(np.median(e)),
-                                 'emd_p90' : float(np.quantile(e, 0.9)),
-                                 'emd_shape_mean' : float(np.nanmean(f)),
-                                 'emd_shape_median' : float(np.nanmedian(f)) })
+                                 'emd_shape_mean' : float(np.nanmean(f)) })
                 jets.append(row)
 
+                window = (tt['e_cone'] >= WINDOW[0]) & (tt['e_cone'] < WINDOW[1])
                 for q in OBSERVABLES:
                     x = d[f'{r}|{q}']
-                    c = compare(x, tt[q])
+                    c = compare(x, tt[f'{ref}|{q}'])
                     if r == 'mean-obs':
                         sd  = d[f'mean-obs-sd|{q}']
-                        err = np.abs(x - tt[q])
+                        err = np.abs(x - tt[f'{ref}|{q}'])
                         ok  = np.isfinite(err) & np.isfinite(sd) & (sd > 0)
                         c['within_1sd'] = float(np.mean(err[ok] <= sd[ok]))
                         c['sd_err_corr'] = float(
                             np.corrcoef(sd[ok], err[ok])[0, 1])
                     rows.append({ 'truth' : t, 'model' : label,
                                   'readout' : r, 'name' : name,
-                                  'observable' : q, **c })
+                                  'reference' : ref, 'observable' : q, **c })
                     means.append({ 'truth' : t, 'name' : name,
-                                   'observable' : q,
+                                   'reference' : ref, 'observable' : q,
                                    'mean_window' : float(np.nanmean(x[window])) })
 
-        for (t, tt) in truth.items():
-            window = (tt['e_cone'] >= WINDOW[0]) & (tt['e_cone'] < WINDOW[1])
+    for (t, tt) in truth.items():
+        window = (tt['e_cone'] >= WINDOW[0]) & (tt['e_cone'] < WINDOW[1])
+        for ref in [ 'full', 'thr' ]:
             for q in OBSERVABLES:
-                means.append({ 'truth' : t, 'name' : 'truth', 'observable' : q,
-                               'mean_window' : float(np.nanmean(tt[q][window])) })
+                means.append({ 'truth' : t, 'name' : f'truth ({ref})',
+                               'reference' : ref, 'observable' : q,
+                               'mean_window' : float(np.nanmean(
+                                   tt[f'{ref}|{q}'][window])) })
 
-    obs  = pd.DataFrame(rows)
-    jet  = pd.DataFrame(jets)
-    mod  = pd.DataFrame(means).drop_duplicates([ 'truth', 'name', 'observable' ])
-    pv   = mod.pivot_table(index = [ 'name', 'observable' ], columns = 'truth',
-                           values = 'mean_window')
+    obs = pd.DataFrame(rows)
+    jet = pd.DataFrame(jets)
+    mod = pd.DataFrame(means)
+    pv  = mod.pivot_table(index = [ 'name', 'reference', 'observable' ],
+                          columns = 'truth', values = 'mean_window')
     pv['delta'] = pv['jewel'] - pv['val']
-    true_delta  = pv.loc['truth', 'delta']
-    pv['fraction'] = [ d / true_delta[q] for ((_, q), d) in pv['delta'].items() ]
+    truth_delta = { ref : pv.loc[(f'truth ({ref})', ref), 'delta']
+                    for ref in [ 'full', 'thr' ] }
+    pv['fraction'] = [ d / truth_delta[ref][q]
+                       for ((_, ref, q), d) in pv['delta'].items() ]
+    pv = pv.reset_index()
 
     obs.to_csv(f'{cmdargs.out}.csv', index = False)
     jet.to_csv(f'{cmdargs.out}_jets.csv', index = False)
-    pv.reset_index().to_csv(f'{cmdargs.out}_modification.csv', index = False)
+    pv.to_csv(f'{cmdargs.out}_modification.csv', index = False)
 
-    with pd.option_context('display.width', 250, 'display.max_rows', 200):
-        print('jet energy and EMD (GeV) per model and read-out:')
+    main_obs = [ 'mass', 'girth', 'ptd', 'zlead', 'zg', 'rg' ]
+    with pd.option_context('display.width', 250, 'display.max_rows', 300):
+        print('jet energy, GeV: raw response and, with the calibration fitted'
+              ' on val events n..2n-1 and frozen, bias / resolution / RMSE;'
+              ' EMD to truth (thr0.5 against the thresholded truth):')
         print(jet.set_index([ 'truth', 'name' ])
-              [[ 'n_jets', 'jer_cal', 'emd_mean', 'emd_median', 'emd_p90',
-                 'emd_shape_mean', 'emd_shape_median' ]]
+              [[ 'n_jets', 'jes', 'raw_bias', 'cal_bias', 'cal_res',
+                 'cal_rmse', 'jer_cal', 'emd_mean', 'emd_shape_mean' ]]
               .round(3).to_string())
-        print('\nper-jet resolution sigma(estimate - truth) / sigma(truth):')
-        print(obs.pivot_table(index = [ 'truth', 'name' ],
-                              columns = 'observable', values = 'rel_res')
-              [OBSERVABLES].round(3).to_string())
-        print('\nW1 / sigma(truth) of the distributions:')
-        print(obs.pivot_table(index = [ 'truth', 'name' ],
-                              columns = 'observable', values = 'w1_sigma')
-              [OBSERVABLES].round(3).to_string())
+        for (value, title) in [
+            ('rel_rmse', 'RMSE / sigma(truth)'),
+            ('rel_bias', 'bias / sigma(truth)'),
+            ('rel_res', 'sigma(estimate - truth) / sigma(truth)'),
+            ('w1_sigma', 'W1 / sigma(truth) of the distributions'),
+        ]:
+            print(f'\n{title} (thr0.5 against the thresholded truth):')
+            print(obs.pivot_table(index = [ 'truth', 'name' ],
+                                  columns = 'observable', values = value)
+                  [OBSERVABLES].round(3).to_string())
         x = obs[obs.readout == 'mean-obs']
         if len(x):
             print('\nsamplers, per-jet error bars of mean-obs: share within'
@@ -391,8 +517,10 @@ def report(cmdargs):
                                 columns = 'observable', values = 'sd_err_corr')
                   [OBSERVABLES].round(2).to_string())
         print('\nJEWEL - PYTHIA of the mean, true cone energy 20-30 GeV, as a'
-              ' fraction of the true difference:')
-        print(pv['fraction'].unstack()[OBSERVABLES].round(2).to_string())
+              ' fraction of the true difference (same truth reference):')
+        print(pv.pivot_table(index = 'name', columns = 'observable',
+                             values = 'fraction')[main_obs].round(2)
+              .to_string())
     print(f'wrote {cmdargs.out}.csv, {cmdargs.out}_jets.csv,'
           f' {cmdargs.out}_modification.csv')
 
@@ -416,13 +544,13 @@ def plot(obs, jet, out):
         ax = axes[row][0]
         for (k, name) in enumerate(names):
             v = obs[(obs.truth == t) & (obs.name == name)].set_index(
-                'observable').reindex(show)['rel_res']
+                'observable').reindex(show)['rel_rmse']
             ax.bar(np.arange(len(show)) + (k - len(names) / 2 + 0.5) * width,
                    v.values, width, label = name, color = cmap(k % 20))
         ax.set_xticks(np.arange(len(show)))
         ax.set_xticklabels(show)
-        ax.set_ylabel(f'{t}: sigma(estimate - truth) / sigma(truth)')
-        ax.set_ylim(0, 1.3)
+        ax.set_ylabel(f'{t}: per-jet RMSE / sigma(truth)')
+        ax.set_ylim(0, 1.4)
         ax.grid(axis = 'y', alpha = 0.3)
         if row == 0:
             ax.legend(fontsize = 6, ncol = 3)
@@ -447,8 +575,8 @@ def plot(obs, jet, out):
 
     n = int(jet.n_jets.max())
     fig.suptitle('Single-event fidelity: R = 0.4 cone around the true jet'
-                 f' axis, up to {n} jets per set (lower is better)',
-                 fontsize = 9)
+                 f' axis, up to {n} jets per set (lower is better; thr0.5'
+                 ' against the thresholded truth)', fontsize = 9)
     fig.tight_layout()
     fig.savefig(out, dpi = 110)
     print(f'wrote {out}')
