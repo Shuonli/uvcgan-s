@@ -305,6 +305,37 @@ costs 2% of A's time, the entropic plan 11% of B's. Peak GPU memory
 checkpoint and network, which the plan underestimated), pre-pilot checks
 ~35 min (run twice, after a resume bug was fixed), Sinkhorn checks ~5 min.
 
+### The regression plateau is the loss, not the model (job 20076)
+
+The log-space regression (D) stalls: its loss is flat from 10 min on and
+its monitor score creeps from 4.69 (15 min) to 4.43 GeV (60 min; 1000-event
+monitor, which reads ~0.4 GeV above the 20k score). It was stopped at 60
+min. Squared error of standardised log energies weights the high towers
+that make the jet energy least, and its optimum is a geometric-type mean.
+
+Follow-up `regress_l1` (not pre-registered; motivated by that plateau):
+the same network and data, trained with the baseline's own `idt-aa` loss,
+L1 of the energies in GeV with background : signal weights 1 : 10. val, 20k
+events, EMA network, seed 0:
+
+| training time | 5 min | 10 | 15 | 20 | 30 | 40 | 50 | 60 |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `jer_cal`, GeV | 4.81 | 4.03 | **3.92** | 3.86 | 3.82 | 3.80 | 3.81 | 3.79 |
+
+At 60 min: `l1_sig` 0.0264, `l1_bkg` 0.0280, `jes` 0.86 (raw network:
+`jer_cal` 3.89). T_useful (4.00) is reached at 15 min (confirmed at 20);
+T_acc (3.70) is not reached in 60 min, the curve is flat from 40 min on
+at 3.79-3.81. For comparison, the published model: `jer_cal` 3.59,
+`l1_sig` 0.0334, `l1_bkg` 0.0735 (EMA); the baseline reaches 4.00 after
+5-7 h (EMA) and 3.70 after 8-17 h.
+
+So **plain supervised training on synthetic mixtures, with the loss the
+baseline already uses for them, gets within 0.2 GeV (5%) of the
+baseline's jet resolution in under an hour of one GPU, and beats it on
+per-tower errors by 20-60%.** It is not a flow; it is the part of the
+baseline that the flows here compete with. The remaining 0.2 GeV is what
+the adversarial and cycle terms, or longer training, buy the baseline.
+
 ## Running (keep current)
 
 **Resource cap (user, 2026-09-24): at most 8 GPUs in use in total,
