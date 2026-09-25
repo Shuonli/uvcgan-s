@@ -487,9 +487,14 @@ Knobs: `UVCGAN_S_DDP_MODE`, `UVCGAN_S_DDP_COMPRESS` (fp16/bf16, worth
 
 ## Still open
 
-- **Flow matching against UVCGAN-S**: a separate study, notes and job
-  ids in `FLOW_NOTES.md` (code in `scripts/flow/`, outputs in
-  `OUTDIR/sphenix/flow/`). Its baseline numbers come from the runs below.
+- **Flow matching against UVCGAN-S**: done, see `FLOW_NOTES.md` ("Answer";
+  code in `scripts/flow/`, tables and figures in `docs/flow/`). In short:
+  conditional flow matching on synthetic mixtures, read as a 16-sample
+  posterior mean, reaches 3.60 GeV on val after 2.5-3 h (T_acc within 1 h)
+  but is weaker on JEWEL (4.27) and ~240x costlier at inference; unpaired
+  OT-CFM read as mixture minus background reaches 3.67-3.68 after 2-3 h
+  (T_acc in 45-75 min) and is the best model on JEWEL (3.55), with a coarse
+  per-tower image. Neither is tested yet on jets found in the image.
 - The physics the paper uses (jets found in the extracted image, their
   shapes) is not captured by the cone energy.
 - Whether 5e-5 beats 1e-4 at batch 32 at depth rests on one seed of 5e-5.

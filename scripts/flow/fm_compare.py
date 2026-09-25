@@ -232,9 +232,39 @@ def arms_table(table):
 
     return pd.DataFrame(rows)
 
+MATCHED_HOURS = [ 0.25, 0.5, 1.0, 2.0, 3.0, 8.0, 16.0, 24.0 ]
+
+def matched_table(curves):
+    """val jer_cal of the EMA network at fixed training times, per arm:
+    mean of the seeds, half their range and how many reached that time."""
+    rows = []
+
+    for (arm, x) in curves[curves.net == 'ema'].groupby('arm'):
+        row = { 'arm' : arm, 'seeds' : x.run.nunique() }
+
+        for h in MATCHED_HOURS:
+            vals = []
+            for (_, xr) in x.groupby('run'):
+                xr = xr.sort_values('hours')
+                # 1e-2 h: checkpoints land a few seconds after their mark
+                if xr.hours.iloc[0] - 1e-2 <= h <= xr.hours.iloc[-1] + 1e-2:
+                    vals.append(float(np.interp(h, xr.hours, xr.jer_cal)))
+
+            if vals:
+                row[f'{h:g}h'] = (
+                    f'{np.mean(vals):.2f}+-{(max(vals) - min(vals)) / 2:.2f}'
+                    + (f' ({len(vals)})' if len(vals) < row['seeds'] else '')
+                )
+        rows.append(row)
+
+    cols = [ 'arm', 'seeds' ] + [ f'{h:g}h' for h in MATCHED_HOURS ]
+    return pd.DataFrame(rows).reindex(columns = cols)
+
 def plot_nfe(runs, out):
-    """val jer_cal against NFE at each flow run's selected checkpoint."""
-    (fig, ax) = plt.subplots(figsize = (7, 5))
+    """val jer_cal against network evaluations per event (NFE x samples),
+    for each flow run at the checkpoint with the most solver settings
+    scored (the solver sweep)."""
+    (fig, ax) = plt.subplots(figsize = (7.5, 5))
     drawn = False
 
     for (run, (run_dir, method, samples)) in runs.items():
@@ -242,31 +272,34 @@ def plot_nfe(runs, out):
             continue
 
         v = pd.read_csv(os.path.join(run_dir, 'evals', 'val_truth.csv'))
-        (nfe, solver, decode, default) = SELECTION[method]
-        sel = v[(v.net == 'ema') & (v.nfe == nfe) & (v.solver == solver)
-                & (v.decode == decode) & (v.samples == default)]
-        if len(sel) == 0:
+        decode = SELECTION[method][2]
+        v = v[(v.net == 'ema') & (v.decode == decode)]
+        if len(v) == 0:
             continue
 
-        step = sel.loc[sel.jer_cal.idxmin()].step
-        v = v[(v.net == 'ema') & (v.step == step) & (v.decode == decode)]
+        step = v.groupby('step').size().idxmax()
+        v = v[v.step == step]
+        minutes = v.train_time.iloc[0] / 60
 
-        for ((solv, samples), x) in v.groupby([ 'solver', 'samples' ]):
-            if len(x) < 2 and samples == 1:
+        for ((solv, k), x) in v.groupby([ 'solver', 'samples' ]):
+            if len(x) < 2 and k == 1:
                 continue
             x = x.sort_values('nfe')
-            ax.plot(x.nfe * samples, x.jer_cal, marker = 'o',
-                    label = f'{run} {solv}' + (f' x{samples}' if samples > 1
-                                              else ''))
+            ax.plot(x.nfe * k, x.jer_cal, marker = 'o',
+                    label = f'{method} {solv}'
+                            + (f', mean of {k}' if k > 1 else '')
+                            + f' ({run}, {minutes:.0f} min)')
             drawn = True
 
     if not drawn:
         plt.close(fig)
         return
 
+    ax.axhline(3.70, color = 'grey', ls = ':', lw = 0.8)
     ax.set_xscale('log', base = 2)
-    ax.set_xlabel('network evaluations per event (NFE x samples)')
-    ax.set_ylabel('val jer_cal, GeV (EMA, selected checkpoint)')
+    ax.set_ylim(3.4, 5.3)
+    ax.set_xlabel('network evaluations per event (NFE x samples averaged)')
+    ax.set_ylabel('val jer_cal, GeV (EMA)')
     ax.grid(alpha = 0.3, which = 'both')
     ax.legend(fontsize = 7)
     fig.tight_layout()
@@ -462,9 +495,15 @@ def main():
         print(table[show].sort_values([ 'net', 'arm', 'seed' ])
               .round(3).to_string(index = False))
 
+    matched = matched_table(curves)
+    matched.to_csv(f'{cmdargs.out}_matched.csv', index = False)
+
     with pd.option_context('display.width', 250):
         print()
         print(arms.round(3).to_string(index = False))
+        print('\nval jer_cal (EMA) at matched training times, mean +- half'
+              ' range of the seeds (n if fewer seeds reached it):')
+        print(matched.fillna('').to_string(index = False))
 
     plot(curves, reference, f'{cmdargs.out}.png')
     plot_report(curves, table, reference, f'{cmdargs.out}_report.png')

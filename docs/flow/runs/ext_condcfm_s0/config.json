@@ -1,0 +1,35 @@
+{
+    "method": "condcfm",
+    "label": "ext_condcfm_s0",
+    "seed": 0,
+    "batch": 256,
+    "lr": 0.0002,
+    "warmup": 1000,
+    "ema": 0.9999,
+    "grad_clip": 1.0,
+    "sigma": 0.0,
+    "channels": 96,
+    "res_blocks": 2,
+    "attn": [
+        4
+    ],
+    "minutes": 180.0,
+    "max_steps": null,
+    "ckpt_minutes": 15.0,
+    "log_steps": 100,
+    "inline_events": 1000,
+    "inline_nfe": 8,
+    "outdir": null,
+    "n_params": 21559490,
+    "runs": [
+        {
+            "torch": "2.7.1+cu118",
+            "torchcfm": "1.0.7",
+            "pot": "0.9.7.post1",
+            "python": "3.12.11",
+            "gpu": "NVIDIA RTX A6000",
+            "node": "saturn.csi.bnl.gov",
+            "commit": "9f30518"
+        }
+    ]
+}
