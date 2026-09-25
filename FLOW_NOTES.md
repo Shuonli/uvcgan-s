@@ -336,6 +336,67 @@ per-tower errors by 20-60%.** It is not a flow; it is the part of the
 baseline that the flows here compete with. The remaining 0.2 GeV is what
 the adversarial and cycle terms, or longer training, buy the baseline.
 
+### Conditional CFM: the posterior mean reaches the baseline (jobs 20081, 20086)
+
+C is a generative model of p(background, signal | mixture): one sample is
+one plausible decomposition and carries the posterior's spread. For an
+energy resolution the natural estimator is the posterior mean, estimated
+by averaging the energies of K samples. At the 120 min checkpoint of
+`ext_condcfm_s0` (EMA network, midpoint solver; 20k val events):
+
+| samples K | 1 | 4 | 8 | 16 |
+| :--- | ---: | ---: | ---: | ---: |
+| `jer_cal`, 8 NFE | 5.03 | 3.92 | 3.72 | **3.62** |
+| `jer_cal`, 16 NFE | 5.06 | 3.94 | | |
+| `l1_sig` / `l1_bkg`, 8 NFE | 0.0414 / 0.0434 | 0.0375 / 0.0383 | 0.0366 / 0.0371 | 0.0361 / 0.0364 |
+| network evaluations per event | 8 | 32 | 64 | 128 |
+
+- 16 NFE is no better than 8: the paths are straight enough.
+- The resolution follows sigma_K^2 = a + b / K (independent sample noise):
+  K = 1 and 4 give a = 3.48^2 and b = 3.63^2, predicting 3.71 at K = 8
+  and 3.60 at K = 16 (measured 3.72 and 3.62). The posterior mean itself
+  (K -> infinity) resolves the jet energy to ~3.48 GeV, better than the
+  published model (3.59) -- after two hours of training on one A6000.
+- **With 16 samples conditional flow matching reaches T_acc and T_match
+  (3.62 GeV) after at most 2 h of training; the baseline needs 8-17 h
+  for 3.70.** The price is inference: 128 network evaluations of 0.5 ms,
+  ~65 ms per event against 0.27 ms for the UVCGAN-S generator (~240x).
+- The regressions are point estimates of per-tower medians or log-means;
+  the flow's sample mean in energy is the minimum-variance estimate of a
+  cone energy, which is why the flow overtakes the L1 regression (3.79)
+  once enough samples are averaged.
+
+Checkpoints of C are therefore selected, and its time curves drawn, on
+the mean of 4 samples at 8 NFE (`fm_common.SELECTION`, 32 evaluations per
+event), with K = 16 predicted from K = 1 and 4 and measured directly at
+some checkpoints.
+
+### Regressions: seeds, JEWEL (job 20085)
+
+Log-space regression D, 20k val events, EMA: seed 0 4.90 (5 min), 4.49
+(10), 4.34 (15), 4.25 (20), 4.18 (30), 4.12 (60); seeds 1 and 2 at 15 min
+4.31 and 4.27 (seed spread +-0.04 at matched time). JEWEL at the
+val-selected checkpoint: D 4.17 (seed 0, 55 min), the 10-min pilot 4.30,
+**`regress_l1` 4.31** -- worse than its val score (3.79) by more than any
+other model's val-to-JEWEL step, and worse than the baseline at batch 4
+(3.91-4.03) though its per-tower error on JEWEL is the smallest of all
+(`l1_sig` 0.019). The L1 regression has learned a PYTHIA prior that the
+quenched JEWEL jets do not follow.
+
+### Inference cost (`OUTDIR/sphenix/flow/latency.csv`, A6000, batch 500)
+
+| model | parameters | ms per event |
+| :--- | ---: | ---: |
+| UVCGAN-S published generator (`ema_gen_ba`) | 32.1M | 0.27 |
+| regression (D, `regress_l1`) | 21.6M | 0.50 |
+| flow, one network evaluation | 21.6M | 0.50 |
+| OT-CFM / conditional CFM, 8 NFE | | 4.1 |
+| conditional CFM, 4 samples x 8 NFE | | 16.3 |
+| conditional CFM, 16 samples x 8 NFE | | 65 |
+
+Linear in the evaluations (0.505 ms each); the solver type does not
+matter at equal NFE.
+
 ## Running (keep current)
 
 **Resource cap (user, 2026-09-24): at most 8 GPUs in use in total,
