@@ -56,6 +56,10 @@ def parse_cmdargs():
     parser.add_argument('--batch', type = int, default = 500)
     parser.add_argument('--references', action = 'store_true',
         help = 'also score the published UVCGAN-S and the L1 regression')
+    parser.add_argument('--clean-references', action = 'store_true',
+        help = 'with --references: apply the same read-out rules (tower'
+               ' threshold, jet seeding) to their signal images, for a'
+               ' like-for-like comparison')
     parser.add_argument('--out', default = None)
     parser.add_argument('--figure', default = None,
         help = 'event display of a few val events, with --references')
@@ -73,6 +77,26 @@ READOUTS = [
     'seeded12_zero_thr0.3', 'seeded12_zero_thr0.5', 'seeded12_zero_thr0.7',
     'seeded10_zero_thr0.5', 'seeded15_zero_thr0.5',
 ]
+
+def needs_converged(name):
+    """Read-outs that use the flow's converged solve, which a model that
+    outputs its signal directly does not have."""
+    return name in ('converged', 'converged_clip', 'blend') \
+        or name.endswith('_conv')
+
+def clean_image(images, embed, name, batch, device, kernel):
+    """A read-out rule applied to a model's own signal image: the rules
+    act on the signal, which here is the model's output rather than
+    mixture - flow background."""
+    (out, regions) = ([], [])
+    for start in range(0, len(images), batch):
+        s_hat = images[start:start + batch].to(device)
+        m = torch.from_numpy(embed[start:start + batch]).to(device).float()
+        (s_clean, region) = readout(name, m, m - s_hat, m - s_hat, kernel)
+        out.append(s_clean.cpu())
+        if region is not None:
+            regions.append(region.cpu())
+    return (torch.cat(out), torch.cat(regions) if regions else None)
 
 def cone_mask(truth, start, n, device):
     """Towers within R = 0.4 of each event's true jet axis."""
@@ -280,6 +304,20 @@ def main():
                                          device, kernel) })
             print(format_row(rows[-1]), flush = True)
             shown[label] = images
+
+            if cmdargs.clean_references:
+                for name in names:
+                    if needs_converged(name) or name == 'coarse':
+                        continue
+                    (cleaned, regions) = clean_image(
+                        images, embed, name, cmdargs.batch, device, kernel
+                    )
+                    rows.append({
+                        'model' : label, 'readout' : name,
+                        **score_images(cleaned, truth, cmdargs.batch, device,
+                                       kernel, regions),
+                    })
+                    print(format_row(rows[-1]), flush = True)
 
     for run_dir in cmdargs.runs:
         t0 = time.perf_counter()

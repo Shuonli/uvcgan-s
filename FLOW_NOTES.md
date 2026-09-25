@@ -789,6 +789,41 @@ behaviour -- best on PYTHIA val (3.60-3.79 GeV), worst on JEWEL
 (4.25-4.35) -- and for real mixtures it needs the pieces, which only the
 simulation's bookkeeping has.
 
+### Like-for-like: the same read-out rules for UVCGAN-S (2026-09-25)
+
+The comparisons above set the cleaned OT-CFM (seeds + tower threshold)
+against UVCGAN-S's raw output, and OT-CFM's mixture-consistent background
+against UVCGAN-S's separately drawn background channel. Both are unfair:
+the rules work on any extracted image. `readout_test.py
+--clean-references` applies them to UVCGAN-S's jet image as well
+(`docs/flow/readout_fair.csv`; seed 0 of each OT-CFM, the published
+UVCGAN-S, EMA network):
+
+| same rule for both | UVCGAN-S val / JEWEL `jer_cal` | UVCGAN-S MAE / off-jet GeV per event (val) | OT-CFM 1-panel val / JEWEL | OT-CFM MAE / off-jet (val) |
+| :--- | ---: | ---: | ---: | ---: |
+| raw output | 3.59 / 3.99 | 0.033 / 40 | 3.69 / 3.58 | 0.154 / 223 |
+| 0.5 GeV tower threshold | 3.60 / 3.87 | 0.031 / 36 | 3.61 / 3.50 | 0.065 / 86 |
+| 0.7 GeV tower threshold | 3.65 / 3.82 | 0.030 / 35 | 3.63 / 3.47 | 0.050 / 63 |
+| 8 GeV seeds + 0.5 GeV | 3.61 / 3.97* | 0.029 / 34 | 3.61 / 3.50 | 0.053 / 68 |
+| 10 GeV seeds + 0.7 GeV | 3.66 / 3.96* | 0.029 / 33 | 3.63 / 3.49 | 0.038 / 46 |
+
+(*) the seeds miss 4-5% of UVCGAN-S's JEWEL jets (its extracted JEWEL
+jets are softer); the two-panel OT-CFM is within 0.01-0.03 GeV of the
+one-panel one throughout.
+
+- **Image: UVCGAN-S is cleaner under every common rule** -- 4.5x on the
+  raw outputs, ~25-30% in MAE and off-jet energy with the same clean-up.
+- **Background image, same rule** (background = mixture - jet image, so
+  both add up to the mixture): UVCGAN-S 0.033 raw / 0.029 cleaned against
+  OT-CFM 0.154 / 0.038 -- UVCGAN-S better here too. The "2x better
+  background" quoted earlier compared different rules and is withdrawn.
+- **Val jet resolution: a tie once both use a threshold** (3.60-3.66 for
+  both); raw, UVCGAN-S is better by ~0.1 GeV.
+- **JEWEL jet resolution: OT-CFM better by 0.35-0.5 GeV under every
+  common rule**; the threshold helps UVCGAN-S there too (3.99 -> 3.82).
+- Training time is the other difference: OT-CFM reaches these numbers in
+  15-75 minutes, UVCGAN-S in 8-17 hours.
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything
