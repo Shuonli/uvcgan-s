@@ -48,14 +48,20 @@ def parse_cmdargs():
     parser.add_argument('--baseline', nargs = '*', default = [])
     parser.add_argument('--reference', default = None)
     parser.add_argument('--out', default = 'outdir/sphenix/flow/compare')
+    parser.add_argument('--extra-samples', type = int, default = None,
+        help = 'also show conditional CFM averaged over this many samples'
+               ' (only the checkpoints scored that way)')
     return parser.parse_args()
 
-def flow_curves(run_dir):
+def flow_curves(run_dir, samples = None):
+    """Scores of a flow run at its selection setting; `samples` overrides
+    the number of samples averaged (a second arm of the same run)."""
     with open(os.path.join(run_dir, 'config.json'), 'r', encoding = 'utf-8') as f:
         config = json.load(f)
 
     v = pd.read_csv(os.path.join(run_dir, 'evals', 'val_truth.csv'))
-    (nfe, solver, decode, samples) = SELECTION[config['method']]
+    (nfe, solver, decode, default) = SELECTION[config['method']]
+    samples = samples or default
     v = v[(v.nfe == nfe) & (v.solver == solver) & (v.decode == decode)
           & (v.samples == samples)].copy()
 
@@ -65,7 +71,9 @@ def flow_curves(run_dir):
         ' (m - b)' if decode == 'mixture' else ''
     ) + (f' (mean of {samples})' if samples > 1 else '')
     v['seed']   = config['seed']
-    v['run']    = config['label']
+    v['run']    = config['label'] + (
+        f' x{samples}' if samples != default else ''
+    )
 
     summary = {}
     path = os.path.join(run_dir, 'summary.json')
@@ -94,7 +102,7 @@ def baseline_curves(run_dir):
 
     return (v, label)
 
-def jewel_at(run_dir, family, step, method = None):
+def jewel_at(run_dir, family, step, method = None, samples = None):
     """(jer_cal, l1_sig) on JEWEL of the EMA network at a checkpoint."""
     csv = os.path.join(run_dir, 'evals', 'jewel_truth.csv')
     if not os.path.exists(csv):
@@ -104,9 +112,9 @@ def jewel_at(run_dir, family, step, method = None):
     j = j[j.net == 'ema']
 
     if family == 'flow':
-        (nfe, solver, decode, samples) = SELECTION[method]
+        (nfe, solver, decode, default) = SELECTION[method]
         j = j[(j.step == step) & (j.nfe == nfe) & (j.solver == solver)
-              & (j.decode == decode) & (j.samples == samples)]
+              & (j.decode == decode) & (j.samples == (samples or default))]
     else:
         j = j[j.updates == step]
 
@@ -115,9 +123,9 @@ def jewel_at(run_dir, family, step, method = None):
 
     return (float(j.jer_cal.iloc[0]), float(j.l1_sig.iloc[0]))
 
-def latency(method):
-    """ms per event of a method at its selection setting, and of the
-    published UVCGAN-S generator."""
+def latency(method, samples = None):
+    """ms per event of a method at its selection setting (or averaging
+    `samples`), and of the published UVCGAN-S generator."""
     path = os.path.join(
         os.environ.get('UVCGAN_S_OUTDIR', 'outdir'), 'sphenix', 'flow',
         'latency.csv'
@@ -129,12 +137,12 @@ def latency(method):
     if method is None:
         x = lat[lat.model.str.startswith('uvcgan-s')]
     else:
-        (nfe, solver, _, samples) = SELECTION[method]
+        (nfe, solver, _, default) = SELECTION[method]
         x = lat[lat.model.str.endswith(f'({method})') & (lat.nfe == nfe)
                 & (lat.solver == solver)]
         if len(x):
             # the samples of a mean run one after the other
-            return float(x.ms_per_event.median()) * samples
+            return float(x.ms_per_event.median()) * (samples or default)
 
     return float(x.ms_per_event.median()) if len(x) else None
 
@@ -166,9 +174,9 @@ def summarize(curves, summaries, runs):
     for ((run, net), x) in curves.groupby([ 'run', 'net' ]):
         best = x.loc[x.jer_cal.idxmin()]
         last = x.loc[x.hours.idxmax()]
-        (run_dir, method) = runs[run]
+        (run_dir, method, samples) = runs[run]
         (jewel, jewel_l1) = jewel_at(
-            run_dir, x.family.iloc[0], best.step, method
+            run_dir, x.family.iloc[0], best.step, method, samples
         )
         row  = {
             'family' : x.family.iloc[0], 'arm' : x.arm.iloc[0],
@@ -180,7 +188,7 @@ def summarize(curves, summaries, runs):
             'best_jes' : best.jes,
             'jewel_jer_cal' : jewel if net == 'ema' else None,
             'jewel_l1_sig' : jewel_l1 if net == 'ema' else None,
-            'ms_per_event' : latency(method),
+            'ms_per_event' : latency(method, samples),
         }
 
         for (name, target) in TARGETS.items():
@@ -229,14 +237,14 @@ def plot_nfe(runs, out):
     (fig, ax) = plt.subplots(figsize = (7, 5))
     drawn = False
 
-    for (run, (run_dir, method)) in runs.items():
-        if method is None or method.startswith('regress'):
+    for (run, (run_dir, method, samples)) in runs.items():
+        if (method is None) or method.startswith('regress') or samples:
             continue
 
         v = pd.read_csv(os.path.join(run_dir, 'evals', 'val_truth.csv'))
-        (nfe, solver, decode, samples) = SELECTION[method]
+        (nfe, solver, decode, default) = SELECTION[method]
         sel = v[(v.net == 'ema') & (v.nfe == nfe) & (v.solver == solver)
-                & (v.decode == decode) & (v.samples == samples)]
+                & (v.decode == decode) & (v.samples == default)]
         if len(sel) == 0:
             continue
 
@@ -319,12 +327,22 @@ def main():
         (v, config, summary) = flow_curves(run_dir.rstrip('/'))
         curves.append(v)
         summaries[config['label']] = summary
-        runs[config['label']] = (run_dir.rstrip('/'), config['method'])
+        runs[config['label']] = (run_dir.rstrip('/'), config['method'], None)
+
+        if cmdargs.extra_samples and (config['method'] == 'condcfm'):
+            (v, _, _) = flow_curves(run_dir.rstrip('/'), cmdargs.extra_samples)
+            if len(v):
+                curves.append(v)
+                label = v.run.iloc[0]
+                summaries[label] = summary
+                runs[label] = (
+                    run_dir.rstrip('/'), 'condcfm', cmdargs.extra_samples
+                )
 
     for run_dir in cmdargs.baseline:
         (v, label) = baseline_curves(run_dir.rstrip('/'))
         curves.append(v)
-        runs[label] = (run_dir.rstrip('/'), None)
+        runs[label] = (run_dir.rstrip('/'), None, None)
 
     cols   = [ 'family', 'arm', 'seed', 'run', 'net', 'step', 'hours',
                'jer_cal', 'l1_sig', 'l1_bkg', 'jes', 'bias' ]

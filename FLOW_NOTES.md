@@ -397,6 +397,106 @@ quenched JEWEL jets do not follow.
 Linear in the evaluations (0.505 ms each); the solver type does not
 matter at equal NFE.
 
+### Unpaired OT-CFM: few Euler steps reach the target (jobs 20075, 20095, 20097)
+
+Seed 0 was continued from the 20-min pilot to 180 min. Read as mixture
+minus background and solved to convergence (midpoint, 16 NFE) it
+improves from 4.55 GeV (5 min) to a best of 4.08 (105 min), then drifts
+to 4.14 (180 min); `l1_sig` 0.051-0.055, `jes` 0.69-0.70. The solver
+sweep at the 105-min checkpoint (val `jer_cal`, GeV; `l1_sig` in brackets):
+
+| NFE | 1 | 2 | 4 | 8 | 16 | 32 | 64 |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Euler | 5.10 (0.42) | 3.99 (0.24) | **3.68** (0.15) | 3.73 (0.10) | 3.84 (0.074) | | |
+| midpoint | | | 4.26 (0.057) | 4.15 (0.053) | 4.08 (0.048) | 4.11 (0.052) | 4.13 (0.051) |
+
+A few coarse Euler steps follow the flow's mean direction (at t = 0 the
+velocity is the average displacement over all the backgrounds the plan
+pairs a mixture with), so the background they reach is an average rather
+than one sharp sample: better cone energies, much worse towers. It is the
+same mean-against-sample trade as conditional CFM's, obtained here in
+four network evaluations. **4 Euler steps are the selection setting of
+OT-CFM from here on** (chosen on val; `fm_common.SELECTION`). Its time
+curve at that setting:
+
+| training time | 5 min | 10 | 15 | 20 | 30 | 45 | 60 | 75 | 90 | 120 | 150 | 180 |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| val `jer_cal` | 4.14 | 4.11 | 4.04 | 3.96 | 3.78 | 3.71 | 3.71 | **3.70** | 3.69 | 3.68 | 3.67 | 3.67 |
+
+T_useful at 20 min (confirmed at 30), **T_acc at 75 min (confirmed at
+90)**, T_match not reached in 3 h. No synthetic pairs, no mixing in
+training: the additivity enters only at read-out. On JEWEL (the
+out-of-distribution test) at the 105-min checkpoint: **3.56 GeV with 4
+Euler steps, 3.63 with the converged solve** -- better than every
+UVCGAN-S run (batch 4: 3.91-4.03, published 3.99) and better than its own
+val score. It has no signal prior to be wrong about: it removes what does
+not look like background. SB-CFM does not share this (read as m - b with
+1-4 Euler steps: 12.5 / 11.0 / 9.2 GeV at its 20-min pilot checkpoint).
+
+Conditional CFM with coarse solves, at its 180-min checkpoint (4 samples;
+total evaluations per event in brackets): midpoint 4 NFE 3.84 (16), 8 NFE
+3.89 (32), 16 NFE 3.91 (64); 16 samples at 8 NFE 3.60 (128). A single
+sample with 1-2 Euler steps (the posterior mean in log space, like the
+regressions): 4.18 / 4.02 (120 min).
+
+`regress_l1` with a cosine-decaying rate (job 20091): 3.82 GeV after 60
+min, level with the constant rate (3.79-3.81): its plateau is the
+estimator, not the schedule.
+
+## Commands
+
+From the repository root, on the a6k partition (A6000 nodes for anything
+timed). One-off setup:
+
+    python -m pip install --no-deps --target ~/pyext/flow \
+        torchcfm==1.0.7 POT==0.9.7.post1
+    sbatch scripts/flow/make_cache.sbatch            # flat .npy copy, ~9 min
+    sbatch -w saturn scripts/flow/fm_smoke.sbatch    # checks + coupling diagnostic
+
+Train and score one run (`fm_run.sbatch` = `fm_train.py` + `fm_eval.py`;
+rerunning the same command with a larger MINUTES resumes the run from its
+`resume.pt`, weights, EMA, optimizer and RNG states included):
+
+    # conditional CFM, 3 h, scored as the mean of 4 samples at 8 NFE
+    EVAL_ARGS="--nfe 8 --samples 4" METHOD=condcfm LABEL=ext_condcfm_s0 \
+        MINUTES=180 SEED=0 sbatch -w dahlia --time=04:30:00 \
+        scripts/flow/fm_run.sbatch --ckpt-minutes 15
+    # OT-CFM (unpaired), read as mixture - background
+    EVAL_DECODE=mixture METHOD=otcfm LABEL=pilot_otcfm_s0 MINUTES=180 \
+        sbatch -w saturn --time=04:30:00 scripts/flow/fm_run.sbatch \
+        --ckpt-minutes 15
+    # SB-CFM (sigma 1, entropic plan): METHOD=sbcfm, EVAL_DECODE=mixture
+    # regression with the baseline's idt-aa loss, 1 h
+    METHOD=regress_l1 LABEL=ext_regress_l1_s0 MINUTES=60 \
+        sbatch -w dahlia scripts/flow/fm_run.sbatch --ckpt-minutes 5
+
+Direct use (after `. ./scripts/flow/env.sh`, on a GPU node):
+
+    $PYTHON scripts/flow/fm_train.py --method condcfm --label NAME \
+        --minutes 180 --ckpt-minutes 15 [--seed S --batch 256 --lr 2e-4]
+    $PYTHON scripts/flow/fm_eval.py OUTDIR/sphenix/flow/NAME --truth val \
+        --nets ema --nfe 8 --samples 1,4,16
+    $PYTHON scripts/flow/fm_eval.py OUTDIR/sphenix/flow/NAME --truth jewel \
+        --steps best --nets ema --nfe 8 --samples 16
+    $PYTHON scripts/flow/fm_eval.py --latency RUN_DIR... --nfe 1,8,16,64
+    $PYTHON scripts/flow/coupling_diag.py --batches 256,1024,2048
+
+Compare with the baseline (tables, `compare_arms.csv`, figures):
+
+    B=outdir/sphenix/base; P='model_m(uvcgan-s)_d(resnet)_g(vit-modnet)'
+    $PYTHON scripts/flow/fm_compare.py --extra-samples 16 \
+        --flow outdir/sphenix/flow/{ext_condcfm_s0,pilot_otcfm_s0,...} \
+        --baseline "$B/${P}_base_b32_lr5e-5" "$B/${P}_base_b4_lr5e-5_s0" ... \
+        --reference "outdir/sphenix/pretrained/${P}_sgn_bkg_sub" \
+        --out outdir/sphenix/flow/compare
+
+Outputs per run in `OUTDIR/sphenix/flow/<label>/`: `config.json`
+(arguments, versions, GPU, commit), `history.csv`, `summary.json`
+(steps/s, samples/s, coupling share, peak memory, start-up, load, scoring
+and end-to-end times), `inline_eval.csv`, `evals/{val,jewel}_truth.csv`
+(one row per checkpoint, network and inference setting) and the per-event
+jet energies `evals/*_truth/*.npy`.
+
 ## Running (keep current)
 
 **Resource cap (user, 2026-09-24): at most 8 GPUs in use in total,
