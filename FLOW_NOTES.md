@@ -746,6 +746,34 @@ coupling of cone energies, which larger batches approach in 1-D, maps
 unpaired OT-CFM learns is the least change in whatever metric is chosen --
 a modelling assumption that unpaired data cannot test.
 
+### Other ways to set up the matching (`coupling_variants.py`, 2026-09-25)
+
+Question: start the right panel from the mixture instead of empty, or
+train two separate one-panel models (mixture -> HIJING, mixture ->
+PYTHIA)? Matching only, scored with the val truth (4 batches each):
+
+| set-up | matched jet at the right place, batch 256 / 1024 | its energy tracks the true jet (correlation) |
+| :--- | ---: | ---: |
+| random pairs | 4% / 4% | 0.00 |
+| empty start (as trained), log or GeV | 4% / 4-5% | -0.06-0.09 |
+| mixture start, (HIJING, PYTHIA) bundled, log | 28% / 35% | 0.09-0.11 |
+| mixture start, bundled, GeV | 29% / 39% | 0.21-0.25 |
+| mixture -> PYTHIA alone, log | 34% / 41% | 0.12-0.13 |
+| mixture -> PYTHIA alone, GeV | 41% / 52% | 0.19-0.23 |
+| mixture -> HIJING, jet = mixture - background, log | 69% / 69% | 0.64-0.65 |
+| mixture -> HIJING, jet = mixture - background, GeV | 66-67% / 66-67% | 0.53-0.58 |
+
+Starting the right panel from the mixture lets the matching look for a
+jet event whose jet sits on the mixture's bright spot: 30-50% right
+places instead of 4%, more in GeV (where the jet towers are the biggest
+numbers) and with more candidates. But the matched jet is somebody else's
+jet that happens to sit there: its energy hardly follows the true one
+(0.1-0.25), and reading its energy gives 25-120 GeV resolution. Reading
+the jet as mixture minus the matched background keeps the jet's own energy
+(0.53-0.65, the right place by construction). A mixture -> PYTHIA flow
+would learn "a typical jet where the mixture has an excess"; the
+background route is the one that carries the energy.
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything
