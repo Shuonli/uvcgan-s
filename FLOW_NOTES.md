@@ -774,6 +774,21 @@ the jet as mixture minus the matched background keeps the jet's own energy
 would learn "a typical jet where the mixture has an excess"; the
 background route is the one that carries the energy.
 
+### With the true pieces in the batch (`pieces_in_batch.py`, 2026-09-25)
+
+Question: build each batch so that its HIJING and PYTHIA events are the
+pieces of its mixtures (shuffled)? With the trained OT-CFM's cost, every
+mixture is matched to its own pieces: **100% of the time, for mixtures
+made by adding the pieces and for real val mixtures with their true
+pieces, batches of 256 and 1024** (4 each). The true background differs
+from the mixture only in the jet's ~50 towers, so it is by far the most
+similar candidate. The matching then only undoes the shuffle: this is
+supervised training on synthetic mixtures (the information of UVCGAN-S's
+`idt-aa`, conditional CFM and the regressions), with that family's
+behaviour -- best on PYTHIA val (3.60-3.79 GeV), worst on JEWEL
+(4.25-4.35) -- and for real mixtures it needs the pieces, which only the
+simulation's bookkeeping has.
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything
