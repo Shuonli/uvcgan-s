@@ -1,0 +1,16 @@
+{
+    "scales": [
+        1,
+        2,
+        4
+    ],
+    "a_s": [
+        0.2103232741355896,
+        0.3027114272117615,
+        0.3058694303035736
+    ],
+    "a_E": 0.06636185199022293,
+    "eps": 0.1,
+    "dropped_scales": [],
+    "subset": "first 2048 jets of train_closure_src and of train_closure_tgt, all source-target pairs"
+}

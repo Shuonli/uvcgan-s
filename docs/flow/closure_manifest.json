@@ -1,0 +1,44 @@
+{
+    "read_events": 600000,
+    "selected": 524749,
+    "selection": "leading cone (R = 0.4) >= 10.0 GeV, axis rows 4-19 (9 x 9 window inside the acceptance)",
+    "canvas": "16 x 16, 9 x 9 window at 4..12, R = 0.4 cone towers only, GeV",
+    "modification": "T(J) = 0.8 [0.8 J + 0.2 K(J)], K: 8 in-cone neighbours, exp(-dR^2 / 2 0.1^2), normalised per source tower",
+    "pools": {
+        "src": 200000,
+        "tgt": 200000,
+        "val": 10000,
+        "test": 20000
+    },
+    "seed": 0,
+    "checks": {
+        "val": {
+            "n": 10000,
+            "min_tower_T": 0.0,
+            "energy_ratio_min": 0.7999998331069946,
+            "energy_ratio_max": 0.8000003099441528,
+            "outside_cone_max": 0.0,
+            "median_E_J": 32.01459503173828
+        },
+        "test": {
+            "n": 20000,
+            "min_tower_T": 0.0,
+            "energy_ratio_min": 0.7999998331069946,
+            "energy_ratio_max": 0.8000002503395081,
+            "outside_cone_max": 0.0,
+            "median_E_J": 31.841672897338867
+        },
+        "train_tgt_float16": {
+            "energy_ratio_min": 0.799739420413971,
+            "energy_ratio_max": 0.8002777695655823,
+            "min_tower_T": 0.0
+        }
+    },
+    "norm": {
+        "jet": [
+            -2.1003058198589213,
+            0.6431755198562984
+        ],
+        "_bias": 0.1
+    }
+}

@@ -963,6 +963,32 @@ Hypotheses and decision rules:
 JEWEL is scored once per run, at the val-selected checkpoint, and is not
 used for any choice.
 
+### Step 2 results (jobs 20144-20157, 2026-09-25; kept as references)
+
+Energy scores are val / JEWEL `jer_cal`, 20k events, with 16 samples at
+8 NFE. The frozen-calibration resolution and the EMD come from
+`jet_fidelity.py`, on 10k events each, for the mean image.
+
+| model | `jer_cal` val / JEWEL | frozen-calibration resolution val / JEWEL | EMD per jet val / JEWEL, GeV |
+| :--- | ---: | ---: | ---: |
+| postflow, randomised jets, 3 seeds | 3.64 / 3.64 / 3.64 ; 4.27 / 4.30 / 4.29 | 3.64 / 4.56-4.62 | 4.75-4.78 / 4.57-4.58 |
+| postflow, no randomisation, seed 0 | 3.61 / 4.28 | 3.60 / 4.54 | 4.74 / 4.52 |
+| conditional CFM (`ext_condcfm_s0`) | 3.62 at 2 h, 3.60 at 3 h / 4.27 | 3.60 / 4.48 | 4.71 / 4.48 |
+| `regress_mse`, randomised jets, one pass (0.5 ms) | **3.56** (3.58 after 5 min) / 4.12 | **3.56** / 4.45 | **4.54 / 4.43** |
+| UVCGAN-S published | 3.59 / 3.99 | 3.57 / 4.16 | 4.75 / 4.54 |
+
+- **H1 holds.** Generating the jet alone, with background = mixture - jet,
+  costs nothing: 3.61 against 3.62 at 2 h.
+- **H2 fails.** The randomised jets do not help on JEWEL (4.27-4.30 against
+  4.28 without; 4.56-4.62 against 4.54 with the frozen calibration) and cost
+  0.03 GeV on val.
+- **H3 holds.** The one-pass posterior-mean network reaches 3.56 GeV on
+  val, the best in-distribution jet energy and EMD of any model here,
+  within an hour.
+- **The decision rule rejects postflow** over UVCGAN-S (val 3.64 > 3.62,
+  JEWEL 4.27-4.30 > 3.99).
+- **Every model trained on PYTHIA signals stays at 4.1-4.3 GeV on JEWEL.**
+
 ## Backbone ablation: the UVCGAN-S generator as the OT-CFM velocity network (2026-09-25)
 
 **Goal of the study** (restated 2026-09-25): a simple, credible OT flow-matching
@@ -1219,6 +1245,114 @@ without a worse energy response or RMSE and without worse marginals. Then
 seeds 1 and 2 of both costs follow. Otherwise the notes report what got
 worse.
 
+### Closure test results (seed 0, jobs 20170-20172, 2026-09-26)
+
+- **Training:** 2 h each on dahlia.
+  - Existing cost: 84.0k updates (11.7 steps/s).
+  - Shape + energy: 81.5k updates (11.3 steps/s; the cost adds ~3% to the
+    step).
+- **Selection** (validation EMD, as fixed):
+  - The existing cost's best checkpoint was its first (10 min, 7.0k
+    updates). Its validation EMD then rose from 4.60 to 4.66-4.75 GeV and its
+    shape EMD from 0.081 to 0.084.
+  - The candidate improved throughout: 4.41 -> 3.99 GeV, selected at 110
+    min.
+- **Inference:** 0.37 ms per jet with 4 Euler steps, 2.9 ms with 32
+  midpoint evaluations.
+- **Files:** `docs/flow/closure_eval_s0*.csv`, `docs/flow/runs/closure_*`,
+  figure `docs/flow/closure_jets.png`.
+
+Test set: 20k held-out pairs (J, T(J)); the resolved solve, 32 midpoint
+evaluations, on the first 2000 pairs.
+
+| | identity | random target | existing cost, 4 Euler | shape + energy, 4 Euler | existing, 32 midpoint | shape + energy, 32 midpoint |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| response E(F(J)) / E(J) (truth 0.8) | 1 | 0.83 +- 0.24 | 0.70 +- 0.08 | 0.71 +- 0.04 | 0.79 +- 0.09 | **0.81 +- 0.04** |
+| E(F(J)) - E(T(J)): bias / RMSE, GeV | +6.5 / 6.6 | 0 / 7.4 | -3.4 / 4.6 | -2.9 / 3.2 | -0.6 / 3.0 | **+0.2 / 1.3** |
+| log energy ratio RMSE | 0.22 | 0.28 | 0.18 | 0.13 | 0.12 | **0.05** |
+| EMD to T(J), GeV | 7.0 | 14.5 | 4.6 | 4.0 | 3.7 | **2.9** |
+| normalised-shape EMD to T(J) | **0.032** | 0.43 | 0.082 | 0.078 | 0.091 | 0.092 |
+| RMSE / sigma: mass | 0.96 | 1.41 | 0.64 | 0.67 | 0.59 | 0.52 |
+| RMSE / sigma: girth | **0.10** | 1.42 | 0.30 | 0.31 | 0.32 | 0.33 |
+| RMSE / sigma: p_T^D | 0.73 | 1.41 | 0.86 | 0.62 | 0.64 | 0.54 |
+| RMSE / sigma: z_lead | 0.55 | 1.41 | 0.80 | 0.50 | 0.69 | 0.50 |
+| RMSE / sigma: z_g / R_g | 0.82 / **0.44** | 1.41 / 1.42 | 1.03 / 0.77 | 1.02 / 0.78 | 1.03 / 0.85 | 1.09 / 0.85 |
+| mean change recovered, Delta_pred / Delta_true: E, mass, p_T^D, z_lead | 0 | 1 | 1.53, 1.42, 1.96, 2.08 | 1.44, 1.47, 1.69, 1.64 | 1.09, 1.15, 1.19, 1.21 | 0.97, 0.86, 1.39, 1.39 |
+| marginal W1 / sigma: E, p_T^D, z_lead, girth | 1.24, 0.67, 0.49, 0.08 | 0 | 0.66, 0.64, 0.53, 0.13 | 0.55, 0.46, 0.31, 0.15 | 0.11, 0.13, 0.10, 0.06 | **0.04**, 0.26, 0.19, 0.11 |
+| largest difference of the (log E, observables) correlation matrices | 0.24 | 0 | 0.23 | 0.45 | 0.09 | 0.10 |
+
+(The per-jet correlation of Delta_pred with Delta_true, also in the CSV, is
+not informative: both contain -O(J), so even the random target reaches
+0.66-0.78.)
+
+**Against the rule set before training: not a clear improvement.**
+- **Better, in both solves:** the per-jet energy correspondence. With the
+  resolved solve the energy RMSE drops from 3.0 to 1.3 GeV and the
+  response is 0.81 ± 0.04 against the true 0.8, with less spread; in log
+  terms the RMSE falls 0.12 -> 0.05. p_T^D and z_lead are better too.
+- **Not better, or worse:**
+  - The normalised-shape EMD shows no gain with the resolved solve (0.092
+    against 0.091).
+  - Girth is slightly worse (0.33 against 0.32).
+  - With the resolved solve the shape marginals are further from the target
+    (W1 of p_T^D 0.26 against 0.13, z_lead 0.19 against 0.10, girth 0.11
+    against 0.06). The candidate over-does the softening (p_T^D and z_lead
+    changes recovered 1.39x).
+  - With 4 steps its (log E, observables) correlation structure is worse
+    (0.45 against 0.23).
+- Seeds 1-2 were therefore not run.
+
+**Representative failure, common to both costs.** Neither transport keeps
+each jet's fine structure:
+- The output shape is 2.5-3x further from the true modified jet than the
+  unmodified input is (shape EMD 0.078-0.092 against 0.032). The per-jet
+  girth and R_g errors are 3x and 2x the identity's.
+- `docs/flow/closure_jets.png` shows what happens. The coarse layout of each
+  jet (where its prongs and core are) survives. The tower-level structure is
+  smeared into a diffuse halo: the flows put 2.6-4.4% of the jet energy in
+  towers that T(J) leaves (almost) empty, against 1.3% for T(J) itself, and
+  flatten the leading tower (its share 0.20-0.245 against 0.256).
+- It is the noise floor of the decomposition flows, and no cost change here
+  removes it. The minibatch coupling explains why: its matched targets are
+  5-7x further in shape from a source jet than the jet's own T(J) is (audit:
+  0.17-0.23 against 0.032). No training pair carries the fine correspondence,
+  and the flow averages over coarse ones.
+- The four-step solve, the decomposition's choice, is biased here for both
+  costs (response 0.70-0.71 against the true 0.8). The resolved solve
+  corrects the energy, so a jet -> jet flow should be read with an accurate
+  solve.
+
+**Conclusion.**
+- **What the coupling change does:** it improves event-level fidelity in the
+  energy (the soft log-energy term is enough for the unpaired transport to
+  recover each jet's energy change to 5%), and in p_T^D and z_lead.
+- **What it does not do:** improve the event-level shape, which both costs
+  lose to the same smearing.
+- **For PYTHIA -> JEWEL:** the evidence supports the method for per-jet
+  energy loss under this modification, not yet for per-jet substructure
+  modifications, so it does not yet justify a PYTHIA -> JEWEL substructure
+  study.
+- **Suggested next experiment:** make the transport keep a jet's own fine
+  structure, and test it in the same closure test. For example:
+  - larger minibatches (the audit's shape distance of matched pairs falls
+    only from 0.21 to 0.19 between 256 and 1024);
+  - a representation or objective that does not average near-empty towers
+    upward (the halo is also the decomposition's noise floor).
+- **Caveat:** passing such a test would still support the method only under
+  the tested modification; it would not validate the physical
+  correspondence of real PYTHIA and JEWEL jets.
+
+    python scripts/flow/closure_data.py                      # pools, T, norm
+    python scripts/flow/closure_matching.py                  # audit, cost scales
+    LABEL=closure_l2_s0 COST=l2 SEED=0 MINUTES=120 \
+        sbatch -w dahlia scripts/flow/closure_run.sbatch     # + validation selection
+    LABEL=closure_se1_s0 COST=shape_energy LAMBDA=1.0 SEED=0 MINUTES=120 \
+        sbatch -w dahlia scripts/flow/closure_run.sbatch
+    python scripts/flow/closure_eval.py closure_l2_s0 closure_se1_s0 \
+        --out outdir/sphenix/flow/closure_eval_s0            # test pairs
+    python scripts/flow/closure_eval.py closure_l2_s0 closure_se1_s0 \
+        --figure docs/flow/closure_jets.png
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything
@@ -1273,11 +1407,24 @@ and end-to-end times), `inline_eval.csv`, `evals/{val,jewel}_truth.csv`
 (one row per checkpoint, network and inference setting) and the per-event
 jet energies `evals/*_truth/*.npy`.
 
-## Status (2026-09-25 17:00)
+## Status (2026-09-26 01:45)
 
 All runs and benchmark jobs have ended; nothing of this study is running.
 
-- Open: the jet-level physics (jets found in the extracted image) for the
-  flows; a one-network distillation of the conditional-CFM posterior mean;
-  why OT-CFM is better on JEWEL than on val; a like-for-like substructure
-  comparison with UVCGAN-S cleaned the same way.
+- **Done 2026-09-25/26:**
+  - the posterior-sampler study (step 2), kept as a reference; its one-pass
+    posterior-mean network is the best in-distribution estimate;
+  - the backbone ablation (the backbone is a minor part of the fidelity
+    gap);
+  - the jet -> jet closure test with two matching costs. The shape + energy
+    cost recovers each jet's energy change; neither cost keeps a jet's fine
+    structure.
+- **Next, as the closure test suggests:** make the unpaired transport keep a
+  jet's own fine structure (the diffuse halo, the same as the decomposition's
+  noise floor), tested in the same closure test before any PYTHIA -> JEWEL
+  study.
+- **Also open:**
+  - the jet-level physics (jets found in the extracted image);
+  - why OT-CFM is better on JEWEL than on val;
+  - the reliance of any unpaired correspondence on the chosen cost, a method
+    dependence that marginal agreement cannot resolve.

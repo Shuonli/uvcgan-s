@@ -1,6 +1,6 @@
 # Summary: speeding up UVCGAN-S, and flow matching for sPHENIX background subtraction
 
-*As of 2026-09-25, 18:00. Branch `ddp` of github.com/Shuonli/uvcgan-s.
+*As of 2026-09-26, 01:45. Branch `ddp` of github.com/Shuonli/uvcgan-s.
 This file is the short version. The full logs, with job numbers and
 commands, are `SCALING_NOTES.md` (UVCGAN-S training) and `FLOW_NOTES.md`
 (flow matching).*
@@ -237,7 +237,7 @@ All flows use the same 21.6M-parameter U-Net on one A6000.
   inference and weak on JEWEL.
 - **UVCGAN-S** still has the cleanest single image.
 
-## Part 3: a model for the best single-event fidelity (in progress)
+## Part 3: a model for the best single-event fidelity (done; kept as a reference)
 
 Your request: newer technology, the best preservation of each event's jet
 energy and high-dimensional substructure, and stable training.
@@ -296,7 +296,7 @@ What this says:
   UVCGAN-S's, but its jet energy is worse than OT-CFM's** (0.41 against
   0.35). That is the PYTHIA prior again.
 
-### Step 2 (training now): the new model
+### Step 2: the new model
 
 `postflow` is a conditional flow-matching sampler with the physics built
 in:
@@ -348,20 +348,76 @@ Written down before training (`FLOW_NOTES.md`, section "Step 2"):
   16 samples, it reaches <= 3.62 GeV on val and <= 3.99 on JEWEL, and has
   better per-jet substructure on most shape observables on both sets.
 
-The final comparison (`scripts/flow/jet_fidelity.py`) adds one
-high-dimensional measure: the per-jet **energy mover's distance** between
-the extracted and the true jet. It is the least "energy x angle" needed to
-turn one jet into the other, so it is small only if the energy and the
-whole shape agree. It is also reported split into its shape part, with the
-extracted jet rescaled to the true energy. The reference models
-(UVCGAN-S, OT-CFM, the L1 regression and conditional CFM) are being
-computed now.
+**Outcome** (FLOW_NOTES.md, "Step 2 results"):
+- **H1 holds:** generating only the jet costs nothing (3.61 against 3.62
+  GeV at 2 h).
+- **H2 fails:** the randomised jet shapes did not help on JEWEL
+  (4.27-4.30 against 4.28 without them) and cost 0.03 GeV on val.
+- **H3 holds, and it is the surprise:** the one-pass `regress_mse` network,
+  which predicts the average split directly, reaches **3.56 GeV on val**
+  after under an hour of training (3.58 after 5 minutes), at 0.5 ms per
+  event. That is the best in-distribution jet energy and per-jet energy
+  mover's distance of any model. On JEWEL it gets 4.12.
+- **The new sampler is not recommended** over UVCGAN-S (val 3.64, JEWEL
+  4.27-4.30).
+- **Every model trained on PYTHIA jets stays at 4.1-4.3 GeV on JEWEL**,
+  against 3.99 for UVCGAN-S and about 3.55 for the unpaired OT-CFM.
 
-Expected timeline:
-- training ends around 19:40;
-- checkpoint scoring finishes around 20:30;
-- the 16-sample, JEWEL and jet-fidelity passes follow, with full results
-  around 21:30-22:00 tonight.
+## Part 4: does a better network fix unpaired OT-CFM's blurry jets? (backbone ablation)
+
+The research goal was restated: a simple, credible unpaired OT flow for
+vacuum -> medium jets, with the decomposition as a benchmark. The open
+issue is event-level spatial fidelity: the raw OT-CFM jet images carry a
+faint noise floor, which makes jets look broader and softer than they are.
+
+- **Test:** swap the flow's network for the UVCGAN-S generator, with the
+  time added to its style input, and change nothing else.
+- **Result:**
+  - Energy resolution is the same or slightly better (val 3.66 against
+    3.69-3.73 at 2 h; JEWEL 3.55 against 3.58-3.61).
+  - Raw substructure errors fall 3-7%.
+  - It trains 1.8x more updates per hour, uses half the memory, and runs
+    1.8x faster.
+  - The noise-floor biases (girth +0.18 sigma, p_T^D -0.35 sigma) are
+    unchanged.
+- **Conclusion:** the network is at most a minor part of the gap.
+
+## Part 5: known-modification closure test of the matching cost
+
+- **Question:** can an unpaired transport recover each jet's own
+  modification, and does a better matching cost help?
+- **Setup:**
+  - PYTHIA jets, and the same jets modified by a known rule: energy x 0.8
+    and a gentle broadening.
+  - Training on different jets for source and target, so no pairs are
+    seen; scoring each held-out jet against its true modified version.
+- **Costs compared:** the existing jet-centred matching, against a new cost
+  that compares unit-energy shapes at three scales plus a soft log-energy
+  term.
+- **Matching audit, before training:**
+  - Full-image matching pairs jets by position.
+  - The existing cost pairs by shape and ignores energy.
+  - The new cost pairs jets almost exactly by energy.
+- **Result:**
+  - The new cost recovers each jet's energy change well. With an accurate
+    solve the per-jet energy error is 1.3 GeV against 3.0, and the response
+    is 0.81 ± 0.04 against the true 0.80.
+  - p_T^D and z_lead are also better.
+  - The per-jet shape does not improve.
+  - **Neither cost keeps each jet's fine structure:** the output shapes are
+    2.5-3x further from the true modified jet than the unmodified input
+    jet is. The jets keep their coarse layout, but the tower-level detail is
+    smeared into a diffuse halo, the same noise floor as in the
+    decomposition.
+  - The decomposition's 4-step solve is biased for jet -> jet flows; an
+    accurate solve is needed.
+- **Conclusion:**
+  - The coupling change fixes per-jet energy correspondence, not per-jet
+    shape.
+  - This does not yet justify a PYTHIA -> JEWEL study of per-jet
+    substructure.
+  - The next step is making the transport keep a jet's own fine structure,
+    tested in the same closure test.
 
 ## Where everything is
 
@@ -385,9 +441,14 @@ Expected timeline:
 
 ## Still open
 
+- Making the unpaired transport keep each jet's fine structure (the diffuse
+  halo, also the decomposition's noise floor), tested in the closure test.
+  Candidates: larger minibatches, or a representation or objective that
+  does not average near-empty towers upward.
 - Jet-level physics with the jets actually found in the extracted image.
   So far a jet is the cone at the true axis.
 - Why OT-CFM does better on JEWEL than on val. At fixed energy JEWEL jets
   are narrower and harder, which may simply make them easier to separate.
-- Step 2's results. Then, possibly, distilling the sampler to 1-2 network
-  passes per sample to cut its inference cost.
+- Any unpaired correspondence depends on the chosen matching cost. That is
+  a method dependence to study, which agreement of the output distributions
+  cannot resolve.

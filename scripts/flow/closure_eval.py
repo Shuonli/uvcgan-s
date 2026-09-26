@@ -35,8 +35,12 @@ Modes:
                references alongside, and on a fixed subset (--resolved-n)
                also with a better-resolved solve (--resolved-nfe, midpoint)
 
+    --figure   test jets at four energy quantiles: J, T(J) and F(J) of each
+               run at both solves, with each jet's normalised-shape EMD to T(J)
+
     closure_eval.py RUN [RUN ...] --select
     closure_eval.py RUN [RUN ...] [--out PREFIX]
+    closure_eval.py RUN [RUN ...] --figure PNG
 """
 
 import argparse
@@ -67,6 +71,7 @@ def parse_cmdargs():
     parser.add_argument('--batch', type = int, default = 2000)
     parser.add_argument('--out', default = os.path.join(
         fc.out_root(), 'closure_eval'))
+    parser.add_argument('--figure', default = None)
     return parser.parse_args()
 
 def load_pairs(name, n = None):
@@ -272,6 +277,55 @@ def evaluate(cmdargs, device):
                   [[ 'E' ] + OBSERVABLES].round(3).to_string())
     print(f'wrote {cmdargs.out}.csv, {cmdargs.out}_observables.csv')
 
+def figure(cmdargs, device):
+    """Representative test jets, J -> T(J) and each run's F(J)."""
+    # pylint: disable=import-outside-toplevel,too-many-locals
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    pairs = load_pairs('test', cmdargs.resolved_n)
+    jets  = Jets(pairs['row'], device)
+    e     = pairs['src'][:, OFFSET:OFFSET + 9, OFFSET:OFFSET + 9].sum((1, 2))
+    pick  = [ int(np.argmin(np.abs(e - np.quantile(e, q))))
+              for q in (0.25, 0.5, 0.75, 0.95) ]
+    sel   = { k : v[pick] for (k, v) in pairs.items() }
+    jsel  = Jets(sel['row'], device)
+
+    columns = [ ('J', sel['src']), ('T(J)', sel['tgt']) ]
+    for run in cmdargs.runs:
+        step = selected_step(run)
+        ckpt = [ c for c in checkpoints(run) if ckpt_step(c) == step ][0]
+        (method, net, _, config) = fc.load_run(run, ckpt, device, 'ema')
+        for (nfe, solver) in [ (4, 'euler'), (cmdargs.resolved_nfe, 'midpoint') ]:
+            mapper = fc.JetMapper(method, net, nfe, solver)
+            columns.append((f"{config['label']}\n{solver} {nfe}",
+                            apply(mapper, sel['src'], 16, device)))
+
+    (fig, axes) = plt.subplots(len(pick), len(columns),
+                               figsize = (2.1 * len(columns), 2.3 * len(pick)))
+    for (c, (name, img)) in enumerate(columns):
+        w = jsel.window(img).cpu().numpy()
+        (_, shape) = jsel.emds(img, sel['tgt'])
+        for r in range(len(pick)):
+            ax = axes[r][c]
+            ax.imshow(np.log10(w[r] + 0.1), cmap = 'viridis', vmin = -1,
+                      vmax = 1.5)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            title = f'{w[r].sum():.1f} GeV'
+            if c > 0:
+                title += f', shape EMD {shape[r]:.3f}'
+            ax.set_title(title, fontsize = 6)
+            if r == 0:
+                ax.set_xlabel(name, fontsize = 7)
+                ax.xaxis.set_label_position('top')
+    fig.suptitle('Closure test jets (cone towers, log10(E + 0.1)); shape EMD'
+                 ' to T(J), unit-energy jets', fontsize = 8)
+    fig.tight_layout()
+    fig.savefig(cmdargs.figure, dpi = 110)
+    print(f'wrote {cmdargs.figure}')
+
 def main():
     cmdargs = parse_cmdargs()
     device  = torch.device('cuda')
@@ -279,6 +333,8 @@ def main():
                      else os.path.join(fc.out_root(), r) for r in cmdargs.runs ]
     if cmdargs.select:
         select(cmdargs, device)
+    elif cmdargs.figure:
+        figure(cmdargs, device)
     else:
         evaluate(cmdargs, device)
 
