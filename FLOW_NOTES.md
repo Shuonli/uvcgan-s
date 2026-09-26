@@ -1592,6 +1592,63 @@ training or representation:**
 to file" for two submissions; those ran the same script through a detached
 `srun`.)
 
+## Semi-paired closure test (set up 2026-09-26, before any scoring)
+
+**Question.** The controls placed the loss of fine structure in the
+unpaired coupling. How much event-level fidelity do a few true pairs restore
+in otherwise unpaired training?
+
+**Data.** The closure pools, unchanged. "Paired share" means that the
+first K training source jets A[:K], from training parents only, come with
+their own T(J):
+- K = 2000, 1% of the 200k source jets;
+- K = 10000, 5%.
+
+The unpaired pools, A and T(B), are unchanged.
+
+**Runs** (seed 0, 2 h, checkpoints every 10 min; everything else as in the
+other closure runs: U-Net, Adam 2e-4, EMA 0.9999, sigma 0 straight path,
+CFM velocity loss, batch 256):
+- **semi-paired, K = 2000 and K = 10000** (`--pairing semi --paired-n K
+  --paired-share 0.5`). Each batch holds 128 true pairs drawn from A[:K],
+  plus 128 pairs drawn from the exact OT plan of 256 unpaired sources and
+  256 unpaired targets. That plan uses the shape + energy cost (lambda 1,
+  frozen scales), so the matching pool is the unpaired run's.
+- **paired-only control, the same K** (`--pairing paired --paired-n K`):
+  the same pairs, with no unpaired data.
+
+**Why half of each batch.**
+- For one source jet, a true pair and an OT pair point to different
+  targets, and flow matching learns roughly their frequency-weighted
+  average.
+- At the natural 1-5% share, the pairs would move the result only 1-5% of
+  the way from the unpaired answer.
+- So the pairs are a small share of the data but get half the weight.
+
+**Evaluation:**
+- checkpoints selected on the validation EMD (32 midpoint evaluations);
+- the control report on the 20k test pairs;
+- to check for memorisation: the seen pairs A[:2000] against training jets
+  whose pairs were never shown, A[K:K+2000];
+- compared with 0% (the unpaired shape + energy run), 100% (the full paired
+  control) and the identity.
+
+**How the results are read.**
+- The pairs restore the detail if the per-jet shape EMD falls below the
+  identity's 0.032, toward the full paired control's 0.0002.
+- The unpaired data helps if the semi-paired run beats the paired-only run
+  with the same K on the test set.
+
+    LABEL=closure_semi1_s0 COST=shape_energy LAMBDA=1.0 SEED=0 MINUTES=120 \
+        EVAL_ARGS="--setting 32:midpoint --train-n 2000" \
+        sbatch -w dahlia scripts/flow/closure_run.sbatch \
+        --pairing semi --paired-n 2000 --paired-share 0.5
+    LABEL=closure_pk1_s0 COST=l2 SEED=0 MINUTES=120 \
+        EVAL_ARGS="--setting 32:midpoint --train-n 2000" \
+        sbatch -w dahlia scripts/flow/closure_run.sbatch \
+        --pairing paired --paired-n 2000
+    (closure_semi5_s0, closure_pk5_s0: the same with --paired-n 10000)
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything

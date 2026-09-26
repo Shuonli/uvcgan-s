@@ -67,9 +67,15 @@ def parse_cmdargs():
         help = 'matching pool per domain (default: the batch); the plan is'
                ' solved on the pool and --batch complete pairs drawn from it')
     parser.add_argument('--pairing', default = 'unpaired',
-        choices = [ 'unpaired', 'paired' ],
+        choices = [ 'unpaired', 'paired', 'semi' ],
         help = 'jetflow: paired = each source jet with its own T(J), the'
-               ' positive control of the closure test')
+               ' positive control of the closure test; semi = true pairs'
+               ' next to OT-coupled unpaired pairs in every batch')
+    parser.add_argument('--paired-n', type = int, default = None,
+        help = 'jetflow paired / semi: only the first N source jets have a'
+               ' known pair (default: all)')
+    parser.add_argument('--paired-share', type = float, default = 0.5,
+        help = 'jetflow semi: share of each batch that is true pairs')
     parser.add_argument('--sigma', type = float, default = None,
         help = 'path noise: 0 for otcfm and condcfm, 1 for sbcfm')
     parser.add_argument('--backbone', default = 'unet',
@@ -134,11 +140,13 @@ def write_config(run_dir, cmdargs, n_params):
         old.setdefault('pairing', 'unpaired')
         old.setdefault('target_domain', 'closure_tgt')
         old.setdefault('ot_pool', None)
+        old.setdefault('paired_n', None)
+        old.setdefault('paired_share', 0.5)
         for key in [ 'method', 'batch', 'lr', 'sigma', 'channels',
                      'res_blocks', 'attn', 'seed', 'ema', 'warmup',
                      'cosine_steps', 'log_bias', 'augment', 'backbone',
                      'cost', 'cost_lambda', 'pairing', 'target_domain',
-                     'ot_pool' ]:
+                     'ot_pool', 'paired_n', 'paired_share' ]:
             if old.get(key) != config.get(key):
                 raise RuntimeError(
                     f"resuming '{run_dir}' with {key} = {config.get(key)},"
@@ -227,7 +235,9 @@ def main():
         )
     method = fc.Method(cmdargs.method, norm, cmdargs.sigma, cmdargs.augment,
                        cmdargs.cost, cmdargs.cost_lambda, cmdargs.pairing,
-                       cmdargs.target_domain)
+                       cmdargs.target_domain, cmdargs.paired_n)
+    if cmdargs.pairing == 'semi':
+        method.n_paired = int(round(cmdargs.paired_share * cmdargs.batch))
     cmdargs.sigma = method.sigma
 
     torch.manual_seed(cmdargs.seed)
@@ -346,7 +356,7 @@ def main():
             first = False
 
         t0 = time.perf_counter()
-        batch = data.batch(cmdargs.ot_pool or cmdargs.batch)
+        batch = method.draw(data, cmdargs.batch, cmdargs.ot_pool)
         stats['data_time'] += time.perf_counter() - t0
 
         (x0, x1, cond) = method.endpoints(batch)
@@ -354,7 +364,7 @@ def main():
         if method.coupled:
             torch.cuda.synchronize()
             t0 = time.perf_counter()
-            (x0, x1) = method.couple(x0, x1, cmdargs.batch)
+            (x0, x1) = method.couple(x0, x1, cmdargs.batch - method.n_paired)
             torch.cuda.synchronize()
             stats['coupling_time'] += time.perf_counter() - t0
 

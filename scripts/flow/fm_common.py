@@ -49,7 +49,10 @@ Methods (c.f. FLOW_NOTES.md):
              (`cost = 'shape_energy'`); both go through the same solver
              and pair sampling. `pairing = 'paired'` is the positive
              control: the target of each source jet J is its own T(J)
-             (closure_data.Modification), no matching.
+             (closure_data.Modification), no matching; `paired_n` limits it
+             to the first paired_n source jets. `pairing = 'semi'`: each
+             batch holds n_paired such true pairs (from the first paired_n
+             source jets) next to OT-coupled unpaired pairs.
 
 The log bias of psi can be changed (`Norm(bias = ...)`, fm_train.py
 --log-bias); 0.1 is the baseline's.
@@ -62,6 +65,7 @@ network by adding the time to its style token (`UVCGANVelocity`).
 Nothing here reads the index files: the domains are drawn independently.
 """
 
+import copy
 import json
 import os
 import sys
@@ -653,14 +657,19 @@ class Method:
 
     def __init__(self, name, norm, sigma = None, augment = 'none',
                  cost = 'l2', cost_lambda = 1.0, pairing = 'unpaired',
-                 target = 'closure_tgt'):
+                 target = 'closure_tgt', paired_n = None):
         # pylint: disable=too-many-arguments
         assert name in METHODS, name
         assert augment in ('none', 'jets'), augment
         assert cost in ('l2', 'shape_energy'), cost
-        assert pairing in ('unpaired', 'paired'), pairing
-        self.pairing = pairing
-        self.modify  = None
+        assert pairing in ('unpaired', 'paired', 'semi'), pairing
+        self.pairing  = pairing
+        self.modify   = None
+        # the jets with a known pair: the first paired_n of the source pool
+        self.paired_n = paired_n
+        # true pairs per batch (semi); set by the trainer
+        self.n_paired = 0
+        self.paired   = None
         # jetflow's target pool: closure_tgt = T(B); closure_null_tgt = B
         # itself (the null test, closure_data.py --null)
         self.target  = target
@@ -707,7 +716,26 @@ class Method:
     @property
     def coupled(self):
         """Whether a minibatch plan is solved for every batch."""
-        return (self.name in OT_METHODS) and (self.pairing == 'unpaired')
+        return (self.name in OT_METHODS) and (self.pairing != 'paired')
+
+    def paired_sources(self, data, n):
+        """n random source jets with a known pair, from GPUData `data`."""
+        pool = data.data['closure_src']
+        k    = self.paired_n or len(pool)
+        idx  = torch.randint(k, (n,), device = pool.device,
+                             generator = data.gen)
+        return pool[idx].float()
+
+    def draw(self, data, batch, pool = None):
+        """The energies of one training step: `pool or batch` random events
+        of each domain (the matching pool), and the true-pair sources of the
+        (semi-)paired closure."""
+        if self.pairing == 'paired':
+            return { 'closure_src' : self.paired_sources(data, batch) }
+        out = data.batch(pool or batch)
+        if self.pairing == 'semi':
+            out['paired_src'] = self.paired_sources(data, self.n_paired)
+        return out
 
     def source(self, mixture):
         """x0 of the flow: the mixture, all of it background (one panel for
@@ -725,12 +753,15 @@ class Method:
         """(x0, x1, cond) of a batch of energies, before any coupling."""
         if self.name == 'jetflow':
             src = batch['closure_src']
+            if (self.pairing != 'unpaired') and (self.modify is None):
+                # pylint: disable=import-outside-toplevel
+                from closure_data import Modification
+                self.modify = Modification(src.device)
             if self.pairing == 'paired':
-                if self.modify is None:
-                    # pylint: disable=import-outside-toplevel
-                    from closure_data import Modification
-                    self.modify = Modification(src.device)
                 return (self.source(src), self.source(self.modify(src)), None)
+            if self.pairing == 'semi':
+                ps = batch['paired_src']
+                self.paired = (self.source(ps), self.source(self.modify(ps)))
             # the energies are kept for a cost computed on them
             self.raw = (src, batch[self.target])
             return (self.source(src), self.source(batch[self.target]), None)
@@ -777,6 +808,12 @@ class Method:
         `n_pairs` < len(x0): the plan is solved on the whole matching pool
         (all of x0 and x1) and n_pairs complete pairs are drawn from it, so
         that the SGD batch stays n_pairs while the pool grows."""
+        if self.pairing == 'semi':
+            # the unpaired pairs of the plan, then the batch's true pairs
+            (u0, u1) = Method.couple(self._unpaired_view(), x0, x1, n_pairs)
+            return (torch.cat([ u0, self.paired[0] ]),
+                    torch.cat([ u1, self.paired[1] ]))
+
         sampler = self.matcher.ot_sampler
         n_pairs = n_pairs or x0.shape[0]
 
@@ -806,6 +843,12 @@ class Method:
         ))
         (i, j) = sampler.sample_map(plan, x0.shape[0])
         return (x0[i], x1[j])
+
+    def _unpaired_view(self):
+        """This method as if it were unpaired (for couple())."""
+        view = copy.copy(self)
+        view.pairing = 'unpaired'
+        return view
 
     def pop_recovery(self):
         """Mean share of correct pairs since the last call (None if none)."""

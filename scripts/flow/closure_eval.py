@@ -97,6 +97,14 @@ def parse_cmdargs():
     parser.add_argument('--control', action = 'store_true')
     parser.add_argument('--truth', default = 'modified',
         choices = [ 'modified', 'identity' ])
+    parser.add_argument('--train-offset', type = int, default = 0,
+        help = 'training pairs start at this source jet (semi-paired runs:'
+               ' 0 = jets whose pair was seen, paired_n = jets whose was not)')
+    parser.add_argument('--pairs', default = 'test',
+        choices = [ 'test', 'val', 'train' ],
+        help = 'the pairs --control scores')
+    parser.add_argument('--n', type = int, default = None,
+        help = 'with --control: the first n pairs only')
     return parser.parse_args()
 
 def setting_of(cmdargs):
@@ -109,7 +117,7 @@ def setting_of(cmdargs):
 def tag_of(cmdargs):
     return '' if not cmdargs.setting else '_' + cmdargs.setting.replace(':', '')
 
-def load_pairs(name, n = None, truth = 'modified'):
+def load_pairs(name, n = None, truth = 'modified', offset = 0):
     """Pairs (src = J, tgt = T(J), row, ...) of the validation, test or
     training pool (training: the first n source jets A of the cache, T
     applied here); `truth = 'identity'`: tgt = J."""
@@ -117,11 +125,12 @@ def load_pairs(name, n = None, truth = 'modified'):
     if name == 'train':
         # pylint: disable=import-outside-toplevel
         from closure_data import Modification
-        src  = np.load(fc.cache_path('closure_src'), mmap_mode = 'r')[:n] \
+        sl   = slice(offset, offset + n)
+        src  = np.load(fc.cache_path('closure_src'), mmap_mode = 'r')[sl] \
             .astype(np.float32)
         meta = np.load(os.path.join(cache, 'closure_meta.npz'))
-        d = { 'src' : src, 'row' : meta['src_row'][:n],
-              'col' : meta['src_col'][:n], 'parent' : meta['src_parent'][:n],
+        d = { 'src' : src, 'row' : meta['src_row'][sl],
+              'col' : meta['src_col'][sl], 'parent' : meta['src_parent'][sl],
               'tgt' : Modification(torch.device('cpu'))(
                   torch.from_numpy(src)).numpy() }
     else:
@@ -228,7 +237,8 @@ def select(cmdargs, device):
     (nfe, solver) = setting_of(cmdargs)
     sets = { 'val' : load_pairs('val', cmdargs.n_val, cmdargs.truth) }
     if cmdargs.train_n > 0:
-        sets['train'] = load_pairs('train', cmdargs.train_n, cmdargs.truth)
+        sets['train'] = load_pairs('train', cmdargs.train_n, cmdargs.truth,
+                                   cmdargs.train_offset)
     jets = { k : Jets(v['row'], device) for (k, v) in sets.items() }
 
     for run in cmdargs.runs:
@@ -253,8 +263,9 @@ def select(cmdargs, device):
         df.to_csv(os.path.join(run, 'evals', f'closure_val{tag_of(cmdargs)}.csv'),
                   index = False)
         if 'train' in rows:
+            off = f'_o{cmdargs.train_offset}' if cmdargs.train_offset else ''
             pd.DataFrame(rows['train']).to_csv(os.path.join(
-                run, 'evals', f'closure_train{tag_of(cmdargs)}.csv'),
+                run, 'evals', f'closure_train{tag_of(cmdargs)}{off}.csv'),
                 index = False)
         print(f'{run}: selected step {best}', flush = True)
 
@@ -313,7 +324,8 @@ def control_scores(raw, pairs, jets, name):
 def control(cmdargs, device):
     # pylint: disable=too-many-locals
     (nfe, solver) = setting_of(cmdargs)
-    pairs = load_pairs('test', None, cmdargs.truth)
+    pairs = load_pairs(cmdargs.pairs, cmdargs.n, cmdargs.truth,
+                       cmdargs.train_offset)
     jets  = Jets(pairs['row'], device)
     rows  = [ control_scores(pairs['src'], pairs, jets, 'identity F(J) = J') ]
     for run in cmdargs.runs:
