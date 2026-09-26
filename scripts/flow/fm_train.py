@@ -54,6 +54,12 @@ def parse_cmdargs():
     parser.add_argument('--augment', default = 'none',
         choices = [ 'none', 'jets' ],
         help = 'jets: randomised signal shapes (fm_common.JetShapes)')
+    parser.add_argument('--cost', default = 'l2',
+        choices = [ 'l2', 'shape_energy' ],
+        help = 'jetflow matching cost: squared L2 of the states, or'
+               ' fm_common.ShapeEnergyCost')
+    parser.add_argument('--cost-lambda', type = float, default = 1.0,
+        help = 'weight of the energy term of the shape_energy cost')
     parser.add_argument('--sigma', type = float, default = None,
         help = 'path noise: 0 for otcfm and condcfm, 1 for sbcfm')
     parser.add_argument('--backbone', default = 'unet',
@@ -113,9 +119,12 @@ def write_config(run_dir, cmdargs, n_params):
 
         old.setdefault('augment', 'none')
         old.setdefault('backbone', 'unet')
+        old.setdefault('cost', 'l2')
+        old.setdefault('cost_lambda', 1.0)
         for key in [ 'method', 'batch', 'lr', 'sigma', 'channels',
                      'res_blocks', 'attn', 'seed', 'ema', 'warmup',
-                     'cosine_steps', 'log_bias', 'augment', 'backbone' ]:
+                     'cosine_steps', 'log_bias', 'augment', 'backbone',
+                     'cost', 'cost_lambda' ]:
             if old.get(key) != config.get(key):
                 raise RuntimeError(
                     f"resuming '{run_dir}' with {key} = {config.get(key)},"
@@ -189,10 +198,21 @@ def main():
 
     t_start = time.perf_counter()
 
-    norm   = fc.Norm.load_or_fit(
-        fc.Norm.path(cmdargs.log_bias), bias = cmdargs.log_bias
-    )
-    method = fc.Method(cmdargs.method, norm, cmdargs.sigma, cmdargs.augment)
+    if cmdargs.method == 'jetflow':
+        # fitted on the training jets by closure_data.py
+        with open(fc.Norm.path(method = 'jetflow'), 'r',
+                  encoding = 'utf-8') as f:
+            norm = fc.Norm(json.load(f))
+        if cmdargs.inline_events > 0:
+            print('jetflow: no inline scoring (closure_eval.py scores the'
+                  ' checkpoints)')
+            cmdargs.inline_events = 0
+    else:
+        norm = fc.Norm.load_or_fit(
+            fc.Norm.path(cmdargs.log_bias), bias = cmdargs.log_bias
+        )
+    method = fc.Method(cmdargs.method, norm, cmdargs.sigma, cmdargs.augment,
+                       cmdargs.cost, cmdargs.cost_lambda)
     cmdargs.sigma = method.sigma
 
     torch.manual_seed(cmdargs.seed)

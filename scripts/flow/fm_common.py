@@ -40,6 +40,14 @@ Methods (c.f. FLOW_NOTES.md):
              every tower, s = sigmoid(net) m, trained by mean squared error
              in GeV -- the estimator a K-sample mean of a sampler converges
              to, in one evaluation; background m - s as for postflow
+    jetflow  jet -> jet OT-CFM between two unpaired pools of jet-centred
+             jets (16 x 16 canvases in GeV, closure_data.py): x0 = psi of a
+             source jet, x1 = psi of an independently drawn target jet,
+             exact minibatch OT. The matching cost is the squared L2 of the
+             standardised states (`cost = 'l2'`, TorchCFM's own, the
+             jet-centred cost of vac_med_coupling.py) or `ShapeEnergyCost`
+             (`cost = 'shape_energy'`); both go through the same solver
+             and pair sampling.
 
 The log bias of psi can be changed (`Norm(bias = ...)`, fm_train.py
 --log-bias); 0.1 is the baseline's.
@@ -76,11 +84,13 @@ import eval_val_truth as ev   # pylint: disable=wrong-import-position
 DATA_PATH = 'sphenix/2025-06-05_jet_bkg_sub'
 BIAS      = 0.1
 SHAPE     = (24, 64)
+JET_SHAPE = (16, 16)
 METHODS   = [ 'otcfm', 'sbcfm', 'condcfm', 'regress', 'regress_l1',
-              'otcfm1', 'otcfm_pieces', 'postflow', 'regress_mse' ]
+              'otcfm1', 'otcfm_pieces', 'postflow', 'regress_mse',
+              'jetflow' ]
 
 # methods whose flow starts from the mixture and uses a minibatch OT plan
-OT_METHODS = ('otcfm', 'sbcfm', 'otcfm1', 'otcfm_pieces')
+OT_METHODS = ('otcfm', 'sbcfm', 'otcfm1', 'otcfm_pieces', 'jetflow')
 
 # posterior samplers: noise start, conditioned on the mixture, read as the
 # mean of `samples` draws
@@ -107,6 +117,8 @@ SELECTION = {
     # as condcfm, set before training
     'postflow'     : (8, 'midpoint', 'direct', 4),
     'regress_mse'  : (1, 'none', 'direct', 1),
+    # the OT-CFM inference setting, kept for the jet -> jet flow
+    'jetflow'      : (4, 'euler', 'direct', 1),
 }
 
 # domains each method draws from; condcfm and regress build their mixtures
@@ -120,6 +132,7 @@ DOMAINS = {
     'otcfm_pieces' : ('background', 'signal'),
     'postflow'     : ('background', 'signal'),
     'regress_mse'  : ('background', 'signal'),
+    'jetflow'      : ('closure_src', 'closure_tgt'),
 }
 
 # weights of the background and signal L1 terms of regress_l1: those of the
@@ -128,6 +141,9 @@ L1_WEIGHTS = (1.0, 10.0)
 
 def is_regression(name):
     return name.startswith('regress')
+
+def image_shape(method):
+    return JET_SHAPE if method == 'jetflow' else SHAPE
 
 def data_root():
     return os.path.join(os.environ.get('UVCGAN_S_DATA', 'data'), DATA_PATH)
@@ -249,7 +265,10 @@ class Norm:
         return norm
 
     @staticmethod
-    def path(bias = BIAS):
+    def path(bias = BIAS, method = None):
+        if method == 'jetflow':
+            # fitted by closure_data.py on its training canvases
+            return os.path.join(out_root(), 'norm_closure.json')
         name = 'norm_n20000_seed0.json' if bias == BIAS \
             else f'norm_n20000_seed0_bias{bias:g}.json'
         return os.path.join(out_root(), name)
@@ -289,7 +308,7 @@ class UVCGANVelocity(torch.nn.Module):
 
     TIME_FEATURES = 128
 
-    def __init__(self, c_in, c_out, **kwargs):
+    def __init__(self, c_in, c_out, shape = SHAPE, **kwargs):
         # pylint: disable=import-outside-toplevel
         super().__init__()
         from uvcgan_s.base.weight_init import init_weights
@@ -301,7 +320,7 @@ class UVCGANVelocity(torch.nn.Module):
 
         args = { **UVCGAN_GENERATOR, **kwargs }
         self.gen = ViTModNetGenerator(
-            input_shape = (c_in, *SHAPE), output_shape = (c_out, *SHAPE),
+            input_shape = (c_in, *shape), output_shape = (c_out, *shape),
             **args
         )
 
@@ -361,19 +380,20 @@ def construct_net(method, channels = 96, res_blocks = 2, attn = (4,),
         (c_in, c_out) = (1, 1)
     elif is_regression(method):
         (c_in, c_out) = (1, 2)
-    elif method == 'otcfm1':
+    elif method in ('otcfm1', 'jetflow'):
         (c_in, c_out) = (1, 1)
     elif method == 'postflow':
         (c_in, c_out) = (2, 1)          # signal state and the mixture
     else:
         (c_in, c_out) = (2 + cond, 2)
 
+    shape = image_shape(method)
     if backbone == 'uvcgan':
-        return UVCGANVelocity(c_in, c_out)
+        return UVCGANVelocity(c_in, c_out, shape)
     assert backbone == 'unet', backbone
 
     return UNetModel(
-        image_size            = SHAPE[1],
+        image_size            = shape[1],
         in_channels           = c_in,
         model_channels        = channels,
         out_channels          = c_out,
@@ -548,21 +568,106 @@ class GPUSinkhornPlanSampler(OTPlanSampler):
         (plan, self.last_err) = self.solver(torch.cdist(x0, x1) ** 2)
         return plan.double().cpu().numpy()
 
+class ShapeEnergyCost:
+    """Matching cost of jet-centred jets that separates shape and energy.
+
+    For a jet J (canvas, GeV, >= 0): E = sum J, Q = J / E. Then
+
+        D_s(i, j) = |P_s Q_i - P_s Q'_j|^2   P_s: sum pooling over s x s
+                                             blocks of the 16 x 16 canvas
+        D_E(i, j) = [log((E_i + eps) / (E'_j + eps))]^2
+        C(i, j)   = mean_s D_s / a_s + lambda D_E / a_E,   s in 1, 2, 4
+
+    a_s, a_E: medians of the positive pairwise distances between a fixed
+    training-only subset of source and target jets (`calibrate`), frozen in a
+    JSON file; a scale whose median is not positive is dropped and reported.
+    Only the shape features are normalised to unit energy; the flow's
+    endpoints keep their physical amplitudes.
+    """
+
+    def __init__(self, scales = (1, 2, 4), lam = 1.0, eps = 0.1,
+                 a_s = None, a_e = None):
+        # pylint: disable=too-many-arguments
+        self.scales = tuple(scales)
+        self.lam    = float(lam)
+        self.eps    = float(eps)
+        self.a_s    = a_s
+        self.a_e    = a_e
+
+    def features(self, jets):
+        jets   = jets.clamp(min = 0).float()
+        energy = jets.sum((-2, -1))
+        shape  = jets / energy.clamp(min = 1e-12)[:, None, None]
+        pooled = [
+            F.avg_pool2d(shape.unsqueeze(1), s).flatten(1) * s * s
+                for s in self.scales
+        ]
+        return (pooled, torch.log(energy + self.eps))
+
+    def terms(self, src, tgt):
+        """[D_s for each scale], D_E, (N_src, N_tgt) each."""
+        (ps, ls) = self.features(src)
+        (pt, lt) = self.features(tgt)
+        d_s = [ torch.cdist(a, b)**2 for (a, b) in zip(ps, pt) ]
+        d_e = (ls[:, None] - lt[None, :])**2
+        return (d_s, d_e)
+
+    def __call__(self, src, tgt):
+        (d_s, d_e) = self.terms(src, tgt)
+        used  = [ (d, a) for (d, a) in zip(d_s, self.a_s) if a is not None ]
+        shape = sum(d / a for (d, a) in used) / len(used)
+        return shape + self.lam * d_e / self.a_e
+
+    def calibrate(self, src, tgt):
+        (d_s, d_e) = self.terms(src, tgt)
+
+        def median_positive(d):
+            d = d.flatten()
+            d = d[d > 0]
+            return float(d.median()) if len(d) else None
+
+        self.a_s = [ median_positive(d) for d in d_s ]
+        self.a_s = [ a if (a is not None) and (a > 1e-12) else None
+                     for a in self.a_s ]
+        self.a_e = median_positive(d_e)
+        return { 'scales' : list(self.scales), 'a_s' : self.a_s,
+                 'a_E' : self.a_e, 'eps' : self.eps,
+                 'dropped_scales' : [ s for (s, a) in zip(self.scales, self.a_s)
+                                      if a is None ] }
+
+    @staticmethod
+    def calib_path():
+        return os.path.join(out_root(), 'closure_cost_calib.json')
+
+    @staticmethod
+    def load(lam, path = None):
+        with open(path or ShapeEnergyCost.calib_path(), 'r',
+                  encoding = 'utf-8') as f:
+            c = json.load(f)
+        return ShapeEnergyCost(c['scales'], lam, c['eps'], c['a_s'], c['a_E'])
+
 class Method:
     """Training pairs and loss of one method, and its decoding."""
 
-    def __init__(self, name, norm, sigma = None, augment = 'none'):
+    def __init__(self, name, norm, sigma = None, augment = 'none',
+                 cost = 'l2', cost_lambda = 1.0):
+        # pylint: disable=too-many-arguments
         assert name in METHODS, name
         assert augment in ('none', 'jets'), augment
+        assert cost in ('l2', 'shape_energy'), cost
 
         self.name    = name
         self.norm    = norm
         self.augment = JetShapes() if augment == 'jets' else None
+        self.cost    = cost
+        self.cost_fn = ShapeEnergyCost.load(cost_lambda) \
+            if cost == 'shape_energy' else None
+        self.raw     = None
 
         # otcfm_pieces: share of mixtures the plan pairs with their own pieces
         self.recovery = []
 
-        if name in ('otcfm', 'otcfm1', 'otcfm_pieces'):
+        if name in ('otcfm', 'otcfm1', 'otcfm_pieces', 'jetflow'):
             self.sigma   = 0.0 if sigma is None else sigma
             self.matcher = ExactOptimalTransportConditionalFlowMatcher(
                 sigma = self.sigma
@@ -596,6 +701,8 @@ class Method:
         otcfm1, with an empty signal panel otherwise)."""
         if self.name == 'otcfm1':
             return self.norm.z(mixture, 'bkg').unsqueeze(1)
+        if self.name == 'jetflow':
+            return self.norm.z(mixture, 'jet').unsqueeze(1)
         return self.norm.state(mixture, torch.zeros_like(mixture))
 
     def condition(self, mixture):
@@ -603,6 +710,12 @@ class Method:
 
     def endpoints(self, batch):
         """(x0, x1, cond) of a batch of energies, before any coupling."""
+        if self.name == 'jetflow':
+            # the energies are kept for a cost computed on them
+            self.raw = (batch['closure_src'], batch['closure_tgt'])
+            return (self.source(batch['closure_src']),
+                    self.source(batch['closure_tgt']), None)
+
         bkg = batch['background']
 
         if self.name == 'otcfm1':
@@ -642,6 +755,16 @@ class Method:
     def couple(self, x0, x1):
         """Minibatch plan, drawn as TorchCFM draws it (with replacement)."""
         sampler = self.matcher.ot_sampler
+
+        if self.cost_fn is not None:
+            # the same solver and pair sampling as sample_plan, with this
+            # cost matrix in place of the squared L2 of the states
+            cost = self.cost_fn(*self.raw).double().cpu().numpy()
+            plan = sampler.ot_fn(pot.unif(len(x0)), pot.unif(len(x1)), cost)
+            if (not np.all(np.isfinite(plan))) or (abs(plan.sum()) < 1e-8):
+                raise RuntimeError('the OT plan of the shape-energy cost failed')
+            (i, j) = sampler.sample_map(plan, x0.shape[0])
+            return (x0[i], x1[j])
 
         if self.name != 'otcfm_pieces':
             return sampler.sample_plan(x0, x1)
@@ -819,6 +942,22 @@ class Decomposer(torch.nn.Module):
 
         return torch.stack((bkg, sig), dim = 1)
 
+class JetMapper(torch.nn.Module):
+    """Source jets (N, H, W), GeV -> the flow's jets F(J), GeV (>= 0)."""
+
+    def __init__(self, method, net, nfe = 4, solver = 'euler'):
+        super().__init__()
+        self.method = method
+        self.net    = net
+        self.nfe    = nfe
+        self.solver = solver
+
+    @torch.no_grad()
+    def forward(self, jets):
+        x = integrate(self.net, self.method.source(jets), None, self.nfe,
+                      self.solver)
+        return self.method.norm.energy(x[:, 0], 'jet').clamp(min = 0)
+
 def count_params(net):
     return sum(p.numel() for p in net.parameters())
 
@@ -845,6 +984,7 @@ def load_run(run_dir, ckpt, device, which = 'ema'):
     state = torch.load(ckpt, map_location = device, weights_only = False)
     norm  = Norm(state['norm'])
     meth  = Method(config['method'], norm, config.get('sigma'))
+    meth.cost = config.get('cost', 'l2')      # training only; recorded
 
     net = construct_net(
         config['method'], config['channels'], config['res_blocks'],
