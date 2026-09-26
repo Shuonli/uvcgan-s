@@ -60,6 +60,13 @@ def parse_cmdargs():
                ' fm_common.ShapeEnergyCost')
     parser.add_argument('--cost-lambda', type = float, default = 1.0,
         help = 'weight of the energy term of the shape_energy cost')
+    parser.add_argument('--target-domain', default = 'closure_tgt',
+        choices = [ 'closure_tgt', 'closure_null_tgt' ],
+        help = 'jetflow targets: T(B), or B unmodified (the null test)')
+    parser.add_argument('--pairing', default = 'unpaired',
+        choices = [ 'unpaired', 'paired' ],
+        help = 'jetflow: paired = each source jet with its own T(J), the'
+               ' positive control of the closure test')
     parser.add_argument('--sigma', type = float, default = None,
         help = 'path noise: 0 for otcfm and condcfm, 1 for sbcfm')
     parser.add_argument('--backbone', default = 'unet',
@@ -121,10 +128,12 @@ def write_config(run_dir, cmdargs, n_params):
         old.setdefault('backbone', 'unet')
         old.setdefault('cost', 'l2')
         old.setdefault('cost_lambda', 1.0)
+        old.setdefault('pairing', 'unpaired')
+        old.setdefault('target_domain', 'closure_tgt')
         for key in [ 'method', 'batch', 'lr', 'sigma', 'channels',
                      'res_blocks', 'attn', 'seed', 'ema', 'warmup',
                      'cosine_steps', 'log_bias', 'augment', 'backbone',
-                     'cost', 'cost_lambda' ]:
+                     'cost', 'cost_lambda', 'pairing', 'target_domain' ]:
             if old.get(key) != config.get(key):
                 raise RuntimeError(
                     f"resuming '{run_dir}' with {key} = {config.get(key)},"
@@ -212,7 +221,8 @@ def main():
             fc.Norm.path(cmdargs.log_bias), bias = cmdargs.log_bias
         )
     method = fc.Method(cmdargs.method, norm, cmdargs.sigma, cmdargs.augment,
-                       cmdargs.cost, cmdargs.cost_lambda)
+                       cmdargs.cost, cmdargs.cost_lambda, cmdargs.pairing,
+                       cmdargs.target_domain)
     cmdargs.sigma = method.sigma
 
     torch.manual_seed(cmdargs.seed)

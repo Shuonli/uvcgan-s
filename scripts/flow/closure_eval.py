@@ -38,9 +38,27 @@ Modes:
     --figure   test jets at four energy quantiles: J, T(J) and F(J) of each
                run at both solves, with each jet's normalised-shape EMD to T(J)
 
-    closure_eval.py RUN [RUN ...] --select
+    --setting NFE:SOLVER   the inference setting of --select, --control and
+               --figure (default: the selection setting, 4 Euler steps); its
+               selections go to evals/closure_val_<NFE><SOLVER>.csv, with the
+               same scores on training pairs (--train-n) in
+               evals/closure_train_<NFE><SOLVER>.csv
+    --control  the positive-control report (FLOW_NOTES.md, "Paired positive
+               control"): identity and each run at --setting on the test
+               pairs, raw outputs clipped at 0 as the mapper does; energy
+               response against both denominators (E_out / E_in, whose truth is
+               0.8, and E_out / E(T(J)), whose truth is 1), bias and RMSE of the
+               mass and girth modification (O(F(J)) - O(J) against O(T(J)) -
+               O(J), physical units), the energy of the cone towers empty in
+               T(J) before and after the clip, and the per-tower error by true
+               tower energy
+    --truth identity       the target of every jet is the jet itself (the
+               null test)
+
+    closure_eval.py RUN [RUN ...] --select [--setting 32:midpoint --train-n 5000]
     closure_eval.py RUN [RUN ...] [--out PREFIX]
-    closure_eval.py RUN [RUN ...] --figure PNG
+    closure_eval.py RUN [RUN ...] --control --setting 32:midpoint [--truth identity]
+    closure_eval.py RUN [RUN ...] --figure PNG [--setting 32:midpoint]
 """
 
 import argparse
@@ -72,13 +90,46 @@ def parse_cmdargs():
     parser.add_argument('--out', default = os.path.join(
         fc.out_root(), 'closure_eval'))
     parser.add_argument('--figure', default = None)
+    parser.add_argument('--setting', default = None,
+        help = 'NFE:SOLVER, e.g. 32:midpoint')
+    parser.add_argument('--train-n', type = int, default = 0,
+        help = 'with --select: also score this many training pairs')
+    parser.add_argument('--control', action = 'store_true')
+    parser.add_argument('--truth', default = 'modified',
+        choices = [ 'modified', 'identity' ])
     return parser.parse_args()
 
-def load_pairs(name, n = None):
-    d = np.load(os.path.join(os.path.dirname(fc.cache_path('signal')),
-                             f'closure_{name}.npz'))
-    sl = slice(0, n)
-    return { k : d[k][sl] for k in d.files }
+def setting_of(cmdargs):
+    if cmdargs.setting:
+        (nfe, solver) = cmdargs.setting.split(':')
+        return (int(nfe), solver)
+    (nfe, solver, _, _) = fc.SELECTION['jetflow']
+    return (nfe, solver)
+
+def tag_of(cmdargs):
+    return '' if not cmdargs.setting else '_' + cmdargs.setting.replace(':', '')
+
+def load_pairs(name, n = None, truth = 'modified'):
+    """Pairs (src = J, tgt = T(J), row, ...) of the validation, test or
+    training pool (training: the first n source jets A of the cache, T
+    applied here); `truth = 'identity'`: tgt = J."""
+    cache = os.path.dirname(fc.cache_path('signal'))
+    if name == 'train':
+        # pylint: disable=import-outside-toplevel
+        from closure_data import Modification
+        src  = np.load(fc.cache_path('closure_src'), mmap_mode = 'r')[:n] \
+            .astype(np.float32)
+        meta = np.load(os.path.join(cache, 'closure_meta.npz'))
+        d = { 'src' : src, 'row' : meta['src_row'][:n],
+              'col' : meta['src_col'][:n], 'parent' : meta['src_parent'][:n],
+              'tgt' : Modification(torch.device('cpu'))(
+                  torch.from_numpy(src)).numpy() }
+    else:
+        f = np.load(os.path.join(cache, f'closure_{name}.npz'))
+        d = { k : f[k][slice(0, n)] for k in f.files }
+    if truth == 'identity':
+        d['tgt'] = d['src'].copy()
+    return d
 
 class Jets:
     """Observables and EMD of canvases in the jet frame of `rows`."""
@@ -173,33 +224,136 @@ def ckpt_step(path):
     return int(re.search(r'step_(\d+)\.pt$', path).group(1))
 
 def select(cmdargs, device):
-    pairs = load_pairs('val', cmdargs.n_val)
-    jets  = Jets(pairs['row'], device)
+    # pylint: disable=too-many-locals
+    (nfe, solver) = setting_of(cmdargs)
+    sets = { 'val' : load_pairs('val', cmdargs.n_val, cmdargs.truth) }
+    if cmdargs.train_n > 0:
+        sets['train'] = load_pairs('train', cmdargs.train_n, cmdargs.truth)
+    jets = { k : Jets(v['row'], device) for (k, v) in sets.items() }
+
     for run in cmdargs.runs:
-        rows = []
+        rows = { k : [] for k in sets }
         for ckpt in checkpoints(run):
             (method, net, state, config) = fc.load_run(run, ckpt, device, 'ema')
-            (nfe, solver, _, _) = fc.SELECTION['jetflow']
             mapper = fc.JetMapper(method, net, nfe, solver)
-            pred = apply(mapper, pairs['src'], cmdargs.batch, device)
-            (row, _) = scores(pred, pairs, jets, config['label'])
-            row.update({ 'step' : ckpt_step(ckpt),
-                         'train_time' : state['stats']['train_time'] })
-            rows.append(row)
-            print(f"{config['label']} step {row['step']:7d}"
-                  f" {row['train_time'] / 60:6.1f} min  emd {row['emd_gev']:.3f}"
-                  f"  shape {row['shape_emd']:.4f}  response"
-                  f" {row['response_mean']:.3f}", flush = True)
-        df = pd.DataFrame(rows)
+            for (k, pairs) in sets.items():
+                pred = apply(mapper, pairs['src'], cmdargs.batch, device)
+                (row, _) = scores(pred, pairs, jets[k], config['label'])
+                row.update({ 'step' : ckpt_step(ckpt),
+                             'train_time' : state['stats']['train_time'] })
+                rows[k].append(row)
+                print(f"{config['label']} {k:5s} step {row['step']:7d}"
+                      f" {row['train_time'] / 60:6.1f} min  emd"
+                      f" {row['emd_gev']:.3f}  shape {row['shape_emd']:.4f}"
+                      f"  response {row['response_mean']:.3f}", flush = True)
+        df = pd.DataFrame(rows['val'])
         best = int(df.sort_values('emd_gev').step.iloc[0])
         df['selected'] = df.step == best
         os.makedirs(os.path.join(run, 'evals'), exist_ok = True)
-        df.to_csv(os.path.join(run, 'evals', 'closure_val.csv'), index = False)
+        df.to_csv(os.path.join(run, 'evals', f'closure_val{tag_of(cmdargs)}.csv'),
+                  index = False)
+        if 'train' in rows:
+            pd.DataFrame(rows['train']).to_csv(os.path.join(
+                run, 'evals', f'closure_train{tag_of(cmdargs)}.csv'),
+                index = False)
         print(f'{run}: selected step {best}', flush = True)
 
-def selected_step(run):
-    df = pd.read_csv(os.path.join(run, 'evals', 'closure_val.csv'))
+def selected_step(run, tag = ''):
+    df = pd.read_csv(os.path.join(run, 'evals', f'closure_val{tag}.csv'))
     return int(df[df.selected].step.iloc[0])
+
+TOWER_CLASSES = [ ('=0', 0, 0), ('<0.2', 1e-9, 0.2), ('0.2-1', 0.2, 1),
+                  ('1-5', 1, 5), ('>5', 5, 1e9) ]
+
+def control_scores(raw, pairs, jets, name):
+    """The positive-control report of one output (raw: before the clip)."""
+    # pylint: disable=too-many-locals
+    (row, _) = scores(np.clip(raw, 0, None), pairs, jets, name)
+    o_f = jets.observables(np.clip(raw, 0, None))
+    o_t = jets.observables(pairs['tgt'])
+    o_j = jets.observables(pairs['src'])
+    (e_f, e_t, e_j) = (o_f['E'], o_t['E'], o_j['E'])
+    row.update({
+        'E_out_over_E_in' : float(np.mean(e_f / e_j)),
+        'E_out_over_E_in_sd' : float(np.std(e_f / e_j)),
+        'E_out_over_E_true' : float(np.mean(e_f / e_t)),
+        'E_out_over_E_true_rmse' : float(np.sqrt(np.mean((e_f / e_t - 1)**2))),
+    })
+    for q in [ 'mass', 'girth' ]:
+        d_true = o_t[q] - o_j[q]
+        err    = (o_f[q] - o_j[q]) - d_true
+        ok     = np.isfinite(err)
+        row.update({
+            f'd{q}_true_mean' : float(np.mean(d_true[ok])),
+            f'd{q}_true_sd' : float(np.std(d_true[ok])),
+            f'd{q}_bias' : float(np.mean(err[ok])),
+            f'd{q}_rmse' : float(np.sqrt(np.mean(err[ok]**2))),
+        })
+
+    mask = jets.mask
+    w_raw = torch.as_tensor(raw, device = jets.device).float()[
+        :, OFFSET:OFFSET + 9, OFFSET:OFFSET + 9] * mask
+    w_t   = jets.window(pairs['tgt'])
+    empty = (w_t == 0) & mask
+    row.update({
+        'empty_towers' : float(empty.sum((1, 2)).float().mean()),
+        'halo_signed_gev' : float((w_raw * empty).sum((1, 2)).mean()),
+        'halo_clipped_gev' : float((w_raw.clamp(min = 0) * empty)
+                                   .sum((1, 2)).mean()),
+    })
+    err = w_raw.clamp(min = 0) - w_t
+    for (label, lo, hi) in TOWER_CLASSES:
+        sel = empty if label == '=0' else ((w_t >= lo) & (w_t < hi) & mask
+                                           & (w_t > 0))
+        e = err[sel]
+        row[f'tower{label}_mean'] = float(e.mean())
+        row[f'tower{label}_rms'] = float(e.pow(2).mean().sqrt())
+    return row
+
+def control(cmdargs, device):
+    # pylint: disable=too-many-locals
+    (nfe, solver) = setting_of(cmdargs)
+    pairs = load_pairs('test', None, cmdargs.truth)
+    jets  = Jets(pairs['row'], device)
+    rows  = [ control_scores(pairs['src'], pairs, jets, 'identity F(J) = J') ]
+    for run in cmdargs.runs:
+        step = selected_step(run, tag_of(cmdargs))
+        ckpt = [ c for c in checkpoints(run) if ckpt_step(c) == step ][0]
+        (method, net, state, config) = fc.load_run(run, ckpt, device, 'ema')
+        mapper = fc.JetMapper(method, net, nfe, solver, clip = False)
+        torch.cuda.synchronize()
+        t0  = time.perf_counter()
+        raw = apply(mapper, pairs['src'], cmdargs.batch, device)
+        torch.cuda.synchronize()
+        dt  = time.perf_counter() - t0
+        row = control_scores(raw, pairs, jets, config['label'])
+        row.update({
+            'setting' : f'{solver}{nfe}', 'step' : step,
+            'train_time_min' : state['stats']['train_time'] / 60,
+            'updates' : state['stats']['step'],
+            'pairing' : config.get('pairing', 'unpaired'),
+            'cost' : config.get('cost', 'l2'),
+            'ms_per_jet' : 1000 * dt / len(pairs['src']),
+        })
+        rows.append(row)
+        print(f"{config['label']}: done", flush = True)
+
+    df = pd.DataFrame(rows)
+    df.to_csv(f'{cmdargs.out}.csv', index = False)
+    show = [ [ 'model', 'n', 'shape_emd', 'shape_emd_median', 'emd_gev',
+               'E_out_over_E_in', 'E_out_over_E_in_sd', 'E_out_over_E_true',
+               'E_bias_gev', 'E_rmse_gev' ],
+             [ 'model', 'dmass_true_mean', 'dmass_true_sd', 'dmass_bias',
+               'dmass_rmse', 'dgirth_true_mean', 'dgirth_true_sd',
+               'dgirth_bias', 'dgirth_rmse' ],
+             [ 'model', 'empty_towers', 'halo_signed_gev', 'halo_clipped_gev' ]
+             + [ f'tower{c[0]}_{k}' for c in TOWER_CLASSES
+                 for k in ('mean', 'rms') ] ]
+    with pd.option_context('display.width', 250, 'display.max_columns', 40):
+        for cols in show:
+            print(df[cols].round(4).to_string(index = False))
+            print()
+    print(f'wrote {cmdargs.out}.csv')
 
 def evaluate(cmdargs, device):
     # pylint: disable=too-many-locals
@@ -293,11 +447,13 @@ def figure(cmdargs, device):
     jsel  = Jets(sel['row'], device)
 
     columns = [ ('J', sel['src']), ('T(J)', sel['tgt']) ]
+    settings = [ setting_of(cmdargs) ] if cmdargs.setting else \
+        [ (4, 'euler'), (cmdargs.resolved_nfe, 'midpoint') ]
     for run in cmdargs.runs:
-        step = selected_step(run)
+        step = selected_step(run, tag_of(cmdargs))
         ckpt = [ c for c in checkpoints(run) if ckpt_step(c) == step ][0]
         (method, net, _, config) = fc.load_run(run, ckpt, device, 'ema')
-        for (nfe, solver) in [ (4, 'euler'), (cmdargs.resolved_nfe, 'midpoint') ]:
+        for (nfe, solver) in settings:
             mapper = fc.JetMapper(method, net, nfe, solver)
             columns.append((f"{config['label']}\n{solver} {nfe}",
                             apply(mapper, sel['src'], 16, device)))
@@ -333,6 +489,8 @@ def main():
                      else os.path.join(fc.out_root(), r) for r in cmdargs.runs ]
     if cmdargs.select:
         select(cmdargs, device)
+    elif cmdargs.control:
+        control(cmdargs, device)
     elif cmdargs.figure:
         figure(cmdargs, device)
     else:

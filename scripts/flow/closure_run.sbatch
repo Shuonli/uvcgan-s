@@ -28,5 +28,5 @@ echo "[$(date +%T)] $LABEL on $(hostname), $(nvidia-smi --query-gpu=name --forma
     --seed "${SEED:-0}" --ckpt-minutes 10 "$@" || exit 1
 
 echo "[$(date +%T)] selecting on the validation pairs"
-"$PYTHON" -u scripts/flow/closure_eval.py "$RUN" --select
+"$PYTHON" -u scripts/flow/closure_eval.py "$RUN" --select ${EVAL_ARGS:-}
 echo "[$(date +%T)] done"

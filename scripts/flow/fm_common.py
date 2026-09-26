@@ -47,7 +47,9 @@ Methods (c.f. FLOW_NOTES.md):
              standardised states (`cost = 'l2'`, TorchCFM's own, the
              jet-centred cost of vac_med_coupling.py) or `ShapeEnergyCost`
              (`cost = 'shape_energy'`); both go through the same solver
-             and pair sampling.
+             and pair sampling. `pairing = 'paired'` is the positive
+             control: the target of each source jet J is its own T(J)
+             (closure_data.Modification), no matching.
 
 The log bias of psi can be changed (`Norm(bias = ...)`, fm_train.py
 --log-bias); 0.1 is the baseline's.
@@ -650,11 +652,18 @@ class Method:
     """Training pairs and loss of one method, and its decoding."""
 
     def __init__(self, name, norm, sigma = None, augment = 'none',
-                 cost = 'l2', cost_lambda = 1.0):
+                 cost = 'l2', cost_lambda = 1.0, pairing = 'unpaired',
+                 target = 'closure_tgt'):
         # pylint: disable=too-many-arguments
         assert name in METHODS, name
         assert augment in ('none', 'jets'), augment
         assert cost in ('l2', 'shape_energy'), cost
+        assert pairing in ('unpaired', 'paired'), pairing
+        self.pairing = pairing
+        self.modify  = None
+        # jetflow's target pool: closure_tgt = T(B); closure_null_tgt = B
+        # itself (the null test, closure_data.py --null)
+        self.target  = target
 
         self.name    = name
         self.norm    = norm
@@ -689,12 +698,16 @@ class Method:
 
     @property
     def domains(self):
+        if self.pairing == 'paired':
+            return DOMAINS[self.name][:1]      # targets are made from them
+        if self.name == 'jetflow':
+            return (DOMAINS[self.name][0], self.target)
         return DOMAINS[self.name]
 
     @property
     def coupled(self):
         """Whether a minibatch plan is solved for every batch."""
-        return self.name in OT_METHODS
+        return (self.name in OT_METHODS) and (self.pairing == 'unpaired')
 
     def source(self, mixture):
         """x0 of the flow: the mixture, all of it background (one panel for
@@ -711,10 +724,16 @@ class Method:
     def endpoints(self, batch):
         """(x0, x1, cond) of a batch of energies, before any coupling."""
         if self.name == 'jetflow':
+            src = batch['closure_src']
+            if self.pairing == 'paired':
+                if self.modify is None:
+                    # pylint: disable=import-outside-toplevel
+                    from closure_data import Modification
+                    self.modify = Modification(src.device)
+                return (self.source(src), self.source(self.modify(src)), None)
             # the energies are kept for a cost computed on them
-            self.raw = (batch['closure_src'], batch['closure_tgt'])
-            return (self.source(batch['closure_src']),
-                    self.source(batch['closure_tgt']), None)
+            self.raw = (src, batch[self.target])
+            return (self.source(src), self.source(batch[self.target]), None)
 
         bkg = batch['background']
 
@@ -943,20 +962,24 @@ class Decomposer(torch.nn.Module):
         return torch.stack((bkg, sig), dim = 1)
 
 class JetMapper(torch.nn.Module):
-    """Source jets (N, H, W), GeV -> the flow's jets F(J), GeV (>= 0)."""
+    """Source jets (N, H, W), GeV -> the flow's jets F(J), GeV; clipped at 0
+    unless `clip = False` (the raw inverse of the normalisation, >= -bias)."""
 
-    def __init__(self, method, net, nfe = 4, solver = 'euler'):
+    def __init__(self, method, net, nfe = 4, solver = 'euler', clip = True):
+        # pylint: disable=too-many-arguments
         super().__init__()
         self.method = method
         self.net    = net
         self.nfe    = nfe
         self.solver = solver
+        self.clip   = clip
 
     @torch.no_grad()
     def forward(self, jets):
         x = integrate(self.net, self.method.source(jets), None, self.nfe,
                       self.solver)
-        return self.method.norm.energy(x[:, 0], 'jet').clamp(min = 0)
+        out = self.method.norm.energy(x[:, 0], 'jet')
+        return out.clamp(min = 0) if self.clip else out
 
 def count_params(net):
     return sum(p.numel() for p in net.parameters())

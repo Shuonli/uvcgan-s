@@ -41,6 +41,12 @@ and the flow's normalisation, psi = log(E + 0.1) standardised over the
 training canvases of A and T(B) together: OUTDIR/sphenix/flow/norm_closure.json.
 
     closure_data.py [--n-train 200000] [--n-val 10000] [--n-test 20000]
+
+--null rebuilds the train target pool B unmodified, from closure_meta.npz,
+for the unpaired null test (FLOW_NOTES.md): train_closure_null_tgt.npy,
+checked against the stored T(B).
+
+    closure_data.py --null
 """
 
 import argparse
@@ -71,6 +77,8 @@ def parse_cmdargs():
         help = 'events read from the signal cache')
     parser.add_argument('--seed', type = int, default = 0)
     parser.add_argument('--chunk', type = int, default = 20000)
+    parser.add_argument('--null', action = 'store_true',
+        help = 'rebuild the train target pool B unmodified (null test)')
     return parser.parse_args()
 
 def cone_mask():
@@ -134,10 +142,52 @@ def select(images, kernel, mask, min_jet):
     canvas[:, OFFSET:OFFSET + 9, OFFSET:OFFSET + 9] = win
     return (idx, row[idx], col[idx], canvas)
 
+def windows(images, rows, cols, mask):
+    """Canvases of the cone around known axes of (N, 24, 64) images."""
+    off = torch.arange(-HALF, HALF + 1, device = images.device)
+    r = rows[:, None, None] + off[None, :, None]
+    c = (cols[:, None, None] + off[None, None, :]) % fc.SHAPE[1]
+    k = torch.arange(len(images), device = images.device)[:, None, None]
+    canvas = torch.zeros((len(images), CANVAS, CANVAS), device = images.device)
+    canvas[:, OFFSET:OFFSET + 9, OFFSET:OFFSET + 9] = \
+        images[k, r, c].clamp(min = 0) * mask
+    return canvas
+
+def build_null(cmdargs, device):
+    cache  = os.path.dirname(fc.cache_path('signal'))
+    meta   = np.load(os.path.join(cache, 'closure_meta.npz'))
+    data   = np.load(fc.cache_path('signal'), mmap_mode = 'r')
+    stored = np.load(os.path.join(cache, 'train_closure_tgt.npy'),
+                     mmap_mode = 'r')
+    mask   = torch.from_numpy(cone_mask()).to(device)
+    modify = Modification(device)
+
+    parent = meta['tgt_parent']
+    order  = np.argsort(parent)
+    out    = np.zeros((len(parent), CANVAS, CANVAS), dtype = np.float16)
+    worst  = 0.0
+    for start in range(0, len(order), cmdargs.chunk):
+        sel = order[start:start + cmdargs.chunk]
+        img = torch.from_numpy(data[parent[sel]].astype(np.float32)).to(device)
+        can = windows(img, torch.as_tensor(meta['tgt_row'][sel], device = device),
+                      torch.as_tensor(meta['tgt_col'][sel], device = device),
+                      mask)
+        out[sel] = can.cpu().numpy().astype(np.float16)
+        ref = torch.from_numpy(stored[sel].astype(np.float32)).to(device)
+        diff = (modify(can) - ref).abs().max() / ref.abs().max()
+        worst = max(worst, float(diff))
+    np.save(os.path.join(cache, 'train_closure_null_tgt.npy'), out)
+    print(f'wrote train_closure_null_tgt.npy ({len(out)} jets); T of the'
+          f' rebuilt jets against the stored T(B): max relative difference'
+          f' {worst:.2e} (float16 storage)')
+
 def main():
     # pylint: disable=too-many-locals,too-many-statements
     cmdargs = parse_cmdargs()
     device  = torch.device('cuda')
+    if cmdargs.null:
+        build_null(cmdargs, device)
+        return
     rng     = np.random.default_rng(cmdargs.seed)
     kernel  = ev.cone_kernel(ev.R_JET).to(device)
     mask    = torch.from_numpy(cone_mask()).to(device)
