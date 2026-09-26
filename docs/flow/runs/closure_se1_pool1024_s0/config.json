@@ -1,0 +1,44 @@
+{
+    "method": "jetflow",
+    "label": "closure_se1_pool1024_s0",
+    "seed": 0,
+    "batch": 256,
+    "lr": 0.0002,
+    "warmup": 1000,
+    "cosine_steps": null,
+    "ema": 0.9999,
+    "grad_clip": 1.0,
+    "log_bias": 0.1,
+    "augment": "none",
+    "cost": "shape_energy",
+    "cost_lambda": 1.0,
+    "target_domain": "closure_tgt",
+    "ot_pool": 1024,
+    "pairing": "unpaired",
+    "sigma": 0.0,
+    "backbone": "unet",
+    "channels": 96,
+    "res_blocks": 2,
+    "attn": [
+        4
+    ],
+    "minutes": 120.0,
+    "max_steps": null,
+    "ckpt_minutes": 10.0,
+    "log_steps": 100,
+    "inline_events": 0,
+    "inline_nfe": 16,
+    "outdir": null,
+    "n_params": 21556897,
+    "runs": [
+        {
+            "torch": "2.7.1+cu118",
+            "torchcfm": "1.0.7",
+            "pot": "0.9.7.post1",
+            "python": "3.12.11",
+            "gpu": "NVIDIA RTX A6000",
+            "node": "dahlia",
+            "commit": "e7f6741"
+        }
+    ]
+}

@@ -1,6 +1,6 @@
 # Summary: speeding up UVCGAN-S, and flow matching for sPHENIX background subtraction
 
-*As of 2026-09-26, 01:45. Branch `ddp` of github.com/Shuonli/uvcgan-s.
+*As of 2026-09-26, 08:20. Branch `ddp` of github.com/Shuonli/uvcgan-s.
 This file is the short version. The full logs, with job numbers and
 commands, are `SCALING_NOTES.md` (UVCGAN-S training) and `FLOW_NOTES.md`
 (flow matching).*
@@ -419,6 +419,45 @@ faint noise floor, which makes jets look broader and softer than they are.
   - The next step is making the transport keep a jet's own fine structure,
     tested in the same closure test.
 
+## Part 6: where the closure test's fine structure is lost
+
+A sequence of cheap diagnostics, then controls:
+
+- **Pipeline checks, no training.** No bug.
+  - The normalisation round trip is exact.
+  - A zero velocity returns the input.
+  - Clipping at 0 changes nothing that matters.
+  - The probability path has no noise at either end, and inference starts
+    where training does.
+  - Correction to Part 5: there is no halo in empty towers. The true
+    modified jets have only ~1 exactly empty tower each, and the flows put
+    ~0 there. The error is a flattening of each jet's core: the hardest
+    towers come out low, and that energy is spread thinly over soft towers.
+- **Paired positive control:** the same flow, trained on the true pairs
+  (J, T(J)).
+  - It reproduces T(J) almost exactly: shape error 0.0002 against 0.032
+    for doing nothing and 0.09 for the unpaired flows.
+  - Energy response 0.7997 (truth 0.8); mass-change error 0.003 GeV.
+  - It gets there within 10 minutes of training, equally on training and
+    held-out jets.
+  - So the flow-matching pipeline is fine.
+- **Unpaired null test** (source and target both unmodified PYTHIA): the
+  flow is nearly the identity. Its spurious changes are 4-16% of the toy
+  modification. It doesn't deform jets on its own.
+- **Larger matching pool** (1024 instead of 256 jets per domain, same batch
+  of 256 pairs):
+  - All fine-structure errors drop 15-25%: shape error 0.076 against 0.091.
+  - The matching then takes 80% of each training step.
+  - Still 2.4x worse than doing nothing on shape.
+- **Conclusion:**
+  - The unpaired coupling, not the flow-matching training or
+    representation, loses each jet's fine structure.
+  - Bigger minibatch matching helps only slowly.
+  - The next justified experiment is semi-paired training: add a small
+    fraction of true pairs to the unpaired data. For vacuum -> medium, JEWEL
+    can simulate vacuum and medium versions of the same hard scattering to
+    provide them.
+
 ## Where everything is
 
 - `FLOW_NOTES.md`: the full log of the flow study (pre-registration,
@@ -441,14 +480,13 @@ faint noise floor, which makes jets look broader and softer than they are.
 
 ## Still open
 
-- Making the unpaired transport keep each jet's fine structure (the diffuse
-  halo, also the decomposition's noise floor), tested in the closure test.
-  Candidates: larger minibatches, or a representation or objective that
-  does not average near-empty towers upward.
+- A semi-paired closure test: how much event-level fidelity a small
+  fraction of true pairs recovers in otherwise unpaired training. For
+  vacuum -> medium, paired JEWEL vacuum/medium simulation would supply the
+  pairs.
 - Jet-level physics with the jets actually found in the extracted image.
   So far a jet is the cone at the true axis.
-- Why OT-CFM does better on JEWEL than on val. At fixed energy JEWEL jets
-  are narrower and harder, which may simply make them easier to separate.
+- Why OT-CFM does better on JEWEL than on val.
 - Any unpaired correspondence depends on the chosen matching cost. That is
   a method dependence to study, which agreement of the output distributions
   cannot resolve.

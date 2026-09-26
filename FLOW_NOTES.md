@@ -1489,16 +1489,84 @@ the unpaired claim.
   from learning a shift through the unpaired coupling, not from the
   pipeline.
 
-### Larger matching pool (`closure_se1_pool1024_s0`, job 20188): running
+### Larger matching pool (`closure_se1_pool1024_s0`, job 20188)
 
-- **Configuration:** a pool of 1024 jets per domain; each step, 256 complete
-  pairs are drawn from the 1024 x 1024 exact plan (`--ot-pool 1024`). The
-  cost and its scales, the solver, network, loss, batch and 2 h budget are
-  unchanged.
-- **It runs on the modification closure**, the clearest failure; the null
-  test's deformation is small.
-- **Matching overhead:** 74% of each step (3.2 steps/s against 11.5 at pool
-  256), about 23k updates in 2 h against 81.5k.
+**Configuration:**
+- a pool of 1024 jets per domain;
+- each step, 256 complete pairs drawn from the 1024 x 1024 exact plan
+  (`--ot-pool 1024`);
+- the same shape + energy cost and scales, solver, network, loss, batch and
+  2 h;
+- run on the modification closure, the clearest failure (the null test's
+  deformation is small).
+
+**Cost:** the matching takes 80% of each step, 2.4 steps/s against 11.3 at
+pool 256, so 17.2k updates in 2 h against 81.5k.
+
+**Validation:** shape EMD 0.075-0.077 from the first checkpoint to the last,
+train equal to val.
+
+Test (20k pairs, 32 midpoint evaluations; `docs/flow/closure_pool_m32.csv`):
+
+| | identity | paired control | unpaired, pool 256 | unpaired, pool 1024 |
+| :--- | ---: | ---: | ---: | ---: |
+| shape EMD, mean / median | 0.032 / 0.032 | 0.0002 / 0.0001 | 0.091 / 0.083 | 0.076 / 0.070 |
+| EMD, GeV | 7.03 | 0.015 | 2.87 | 2.37 |
+| E_out / E_in (0.8) | 1 | 0.7997 | 0.808 +- 0.038 | 0.802 +- 0.032 |
+| E_out - E_true: bias / RMSE, GeV | +6.5 / 6.6 | -0.011 / 0.021 | +0.22 / 1.32 | +0.01 / 1.10 |
+| mass change: bias / RMSE, GeV | +0.96 / 1.01 | -0.002 / 0.003 | +0.14 / 0.54 | +0.01 / 0.47 |
+| girth change: bias / RMSE | -0.0032 / 0.0044 | 0.0000 / 0.00004 | -0.0023 / 0.0146 | -0.0019 / 0.0113 |
+| hardest towers: error mean / rms, GeV | +4.05 / 4.45 | -0.006 / 0.014 | -0.87 / 2.16 | -0.50 / 1.61 |
+
+The 4x larger pool lowers every fine-structure error by 15-25% and the
+energy error by 17%, despite 4.7x fewer updates. But the shape error is
+still 2.4x the identity's and ~400x the paired control's, and the per-jet
+girth error is 2.6x the identity's. This is a real improvement, not a fix.
+As planned, no further pool sizes or costs were tried.
+
+### What the controls establish, and the next justified change
+
+**Established** (one seed each; the earlier U-Net seeds differed little):
+- **The pipeline is sound.** Given the correct endpoint pairs, this flow
+  matching pipeline reproduces each jet's modification almost exactly:
+  energy, tower pattern, mass and girth. The representation, straight
+  path, MSE velocity loss, network, normalisation, clipping and solver are
+  therefore not what loses fine structure.
+- **The coupling is where it is lost.** With the same pipeline and a real
+  shift to learn, the unpaired minibatch-OT coupling loses each jet's fine
+  structure. Train equals val, and the error is flat from the first
+  checkpoint on, so the objective itself settles there.
+- **Without a shift, the unpaired map is nearly the identity.** It does not
+  deform jets unprompted.
+- **What the coupling controls:**
+  - the energy term of the cost fixes the per-jet energy correspondence;
+  - a 4x larger matching pool improves the fine structure modestly, at 80%
+    matching overhead;
+  - the audit had shown the same trend: the shape distance of matched pairs
+    falls only from 0.21 to 0.19 between pools of 256 and 1024.
+
+**Uncertain:**
+- whether much larger pools or other couplings would converge to T; exact
+  OT cannot scale much further, and even the population OT map of this
+  cost is T only approximately, since sum pooling and K do not commute
+  exactly;
+- how this toy's behaviour carries over to a realistic, more complex
+  modification;
+- the basic limit: unpaired PYTHIA and JEWEL samples do not define a unique
+  per-jet correspondence.
+
+**The next justified change concerns the coupling, not the flow matching
+training or representation:**
+- Scaling the minibatch pool is an inefficient route, with a 4x pool for
+  -17%.
+- The single next experiment supported here is a semi-paired closure test:
+  the same unpaired training plus a small fraction (for example 1% and 5%)
+  of true (J, T(J)) pairs, measured by how much event-level fidelity each
+  fraction recovers.
+- For vacuum -> medium, JEWEL can provide such pairs in simulation: vacuum
+  and medium showers of the same hard scattering.
+- Until then, unpaired OT flow matching supports per-jet energy-loss
+  statements under this toy, not per-jet substructure ones.
 
     python scripts/flow/closure_checks.py --n 2000
     LABEL=closure_paired_s0 COST=l2 SEED=0 MINUTES=120 \
@@ -1578,24 +1646,25 @@ and end-to-end times), `inline_eval.csv`, `evals/{val,jewel}_truth.csv`
 (one row per checkpoint, network and inference setting) and the per-event
 jet energies `evals/*_truth/*.npy`.
 
-## Status (2026-09-26 01:45)
+## Status (2026-09-26 08:20)
 
 All runs and benchmark jobs have ended; nothing of this study is running.
 
 - **Done 2026-09-25/26:**
-  - the posterior-sampler study (step 2), kept as a reference; its one-pass
-    posterior-mean network is the best in-distribution estimate;
+  - the posterior-sampler study (step 2), kept as a reference;
   - the backbone ablation (the backbone is a minor part of the fidelity
     gap);
-  - the jet -> jet closure test with two matching costs. The shape + energy
-    cost recovers each jet's energy change; neither cost keeps a jet's fine
-    structure.
-- **Next, as the closure test suggests:** make the unpaired transport keep a
-  jet's own fine structure (the diffuse halo, the same as the decomposition's
-  noise floor), tested in the same closure test before any PYTHIA -> JEWEL
-  study.
+  - the jet -> jet closure test with two matching costs;
+  - locating its failure (pipeline checks, paired positive control, null
+    test, larger matching pool).
+  - **Result:** the unpaired coupling, not the flow-matching pipeline, loses
+    each jet's fine structure. The energy term fixes per-jet energy; a 4x
+    larger pool helps 17%.
+- **Next, as the controls suggest:** a semi-paired closure test (a small
+  fraction of true pairs added to unpaired training). For vacuum ->
+  medium, JEWEL vacuum/medium pairs of the same hard scattering would
+  supply them.
 - **Also open:**
   - the jet-level physics (jets found in the extracted image);
   - why OT-CFM is better on JEWEL than on val;
-  - the reliance of any unpaired correspondence on the chosen cost, a method
-    dependence that marginal agreement cannot resolve.
+  - the dependence of any unpaired correspondence on the chosen cost.
