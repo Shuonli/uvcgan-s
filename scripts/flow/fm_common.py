@@ -771,9 +771,14 @@ class Method:
 
         return (None, x1, cond)
 
-    def couple(self, x0, x1):
-        """Minibatch plan, drawn as TorchCFM draws it (with replacement)."""
+    def couple(self, x0, x1, n_pairs = None):
+        """Minibatch plan, drawn as TorchCFM draws it (with replacement).
+
+        `n_pairs` < len(x0): the plan is solved on the whole matching pool
+        (all of x0 and x1) and n_pairs complete pairs are drawn from it, so
+        that the SGD batch stays n_pairs while the pool grows."""
         sampler = self.matcher.ot_sampler
+        n_pairs = n_pairs or x0.shape[0]
 
         if self.cost_fn is not None:
             # the same solver and pair sampling as sample_plan, with this
@@ -782,11 +787,14 @@ class Method:
             plan = sampler.ot_fn(pot.unif(len(x0)), pot.unif(len(x1)), cost)
             if (not np.all(np.isfinite(plan))) or (abs(plan.sum()) < 1e-8):
                 raise RuntimeError('the OT plan of the shape-energy cost failed')
-            (i, j) = sampler.sample_map(plan, x0.shape[0])
+            (i, j) = sampler.sample_map(plan, n_pairs)
             return (x0[i], x1[j])
 
-        if self.name != 'otcfm_pieces':
+        if (self.name != 'otcfm_pieces') and (n_pairs == x0.shape[0]):
             return sampler.sample_plan(x0, x1)
+        if self.name != 'otcfm_pieces':
+            (i, j) = sampler.sample_map(sampler.get_map(x0, x1), n_pairs)
+            return (x0[i], x1[j])
 
         # as sample_plan, keeping the plan to see how often it pairs a
         # mixture with its own pieces (x1[k] is the piece of mixture perm[k])

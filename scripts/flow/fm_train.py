@@ -63,6 +63,9 @@ def parse_cmdargs():
     parser.add_argument('--target-domain', default = 'closure_tgt',
         choices = [ 'closure_tgt', 'closure_null_tgt' ],
         help = 'jetflow targets: T(B), or B unmodified (the null test)')
+    parser.add_argument('--ot-pool', type = int, default = None,
+        help = 'matching pool per domain (default: the batch); the plan is'
+               ' solved on the pool and --batch complete pairs drawn from it')
     parser.add_argument('--pairing', default = 'unpaired',
         choices = [ 'unpaired', 'paired' ],
         help = 'jetflow: paired = each source jet with its own T(J), the'
@@ -130,10 +133,12 @@ def write_config(run_dir, cmdargs, n_params):
         old.setdefault('cost_lambda', 1.0)
         old.setdefault('pairing', 'unpaired')
         old.setdefault('target_domain', 'closure_tgt')
+        old.setdefault('ot_pool', None)
         for key in [ 'method', 'batch', 'lr', 'sigma', 'channels',
                      'res_blocks', 'attn', 'seed', 'ema', 'warmup',
                      'cosine_steps', 'log_bias', 'augment', 'backbone',
-                     'cost', 'cost_lambda', 'pairing', 'target_domain' ]:
+                     'cost', 'cost_lambda', 'pairing', 'target_domain',
+                     'ot_pool' ]:
             if old.get(key) != config.get(key):
                 raise RuntimeError(
                     f"resuming '{run_dir}' with {key} = {config.get(key)},"
@@ -341,7 +346,7 @@ def main():
             first = False
 
         t0 = time.perf_counter()
-        batch = data.batch(cmdargs.batch)
+        batch = data.batch(cmdargs.ot_pool or cmdargs.batch)
         stats['data_time'] += time.perf_counter() - t0
 
         (x0, x1, cond) = method.endpoints(batch)
@@ -349,7 +354,7 @@ def main():
         if method.coupled:
             torch.cuda.synchronize()
             t0 = time.perf_counter()
-            (x0, x1) = method.couple(x0, x1)
+            (x0, x1) = method.couple(x0, x1, cmdargs.batch)
             torch.cuda.synchronize()
             stats['coupling_time'] += time.perf_counter() - t0
 

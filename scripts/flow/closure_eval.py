@@ -438,7 +438,7 @@ def figure(cmdargs, device):
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
 
-    pairs = load_pairs('test', cmdargs.resolved_n)
+    pairs = load_pairs('test', cmdargs.resolved_n, cmdargs.truth)
     jets  = Jets(pairs['row'], device)
     e     = pairs['src'][:, OFFSET:OFFSET + 9, OFFSET:OFFSET + 9].sum((1, 2))
     pick  = [ int(np.argmin(np.abs(e - np.quantile(e, q))))
@@ -446,7 +446,9 @@ def figure(cmdargs, device):
     sel   = { k : v[pick] for (k, v) in pairs.items() }
     jsel  = Jets(sel['row'], device)
 
-    columns = [ ('J', sel['src']), ('T(J)', sel['tgt']) ]
+    target  = 'J' if cmdargs.truth == 'identity' else 'T(J)'
+    columns = [ ('J', sel['src']) ] + (
+        [] if cmdargs.truth == 'identity' else [ ('T(J)', sel['tgt']) ])
     settings = [ setting_of(cmdargs) ] if cmdargs.setting else \
         [ (4, 'euler'), (cmdargs.resolved_nfe, 'midpoint') ]
     for run in cmdargs.runs:
@@ -477,7 +479,7 @@ def figure(cmdargs, device):
                 ax.set_xlabel(name, fontsize = 7)
                 ax.xaxis.set_label_position('top')
     fig.suptitle('Closure test jets (cone towers, log10(E + 0.1)); shape EMD'
-                 ' to T(J), unit-energy jets', fontsize = 8)
+                 f' to {target}, unit-energy jets', fontsize = 8)
     fig.tight_layout()
     fig.savefig(cmdargs.figure, dpi = 110)
     print(f'wrote {cmdargs.figure}')

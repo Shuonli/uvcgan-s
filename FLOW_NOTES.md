@@ -1312,6 +1312,10 @@ each jet's fine structure:
   smeared into a diffuse halo: the flows put 2.6-4.4% of the jet energy in
   towers that T(J) leaves (almost) empty, against 1.3% for T(J) itself, and
   flatten the leading tower (its share 0.20-0.245 against 0.256).
+  *Corrected 2026-09-26:* "almost empty" meant T below 0.05 GeV. Those
+  towers are occupied, and the exactly empty towers hold nothing. The error
+  is a flattening of each jet's core; see "Locating the closure-test
+  failure".
 - It is the noise floor of the decomposition flows, and no cost change here
   removes it. The minibatch coupling explains why: its matched targets are
   5-7x further in shape from a source jet than the jet's own T(J) is (audit:
@@ -1337,7 +1341,8 @@ each jet's fine structure:
   - larger minibatches (the audit's shape distance of matched pairs falls
     only from 0.21 to 0.19 between 256 and 1024);
   - a representation or objective that does not average near-empty towers
-    upward (the halo is also the decomposition's noise floor).
+    upward (the halo is also the decomposition's noise floor). *Superseded
+    by the paired positive control below: the pipeline is not the cause.*
 - **Caveat:** passing such a test would still support the method only under
   the tested modification; it would not validate the physical
   correspondence of real PYTHIA and JEWEL jets.
@@ -1352,6 +1357,172 @@ each jet's fine structure:
         --out outdir/sphenix/flow/closure_eval_s0            # test pairs
     python scripts/flow/closure_eval.py closure_l2_s0 closure_se1_s0 \
         --figure docs/flow/closure_jets.png
+
+## Locating the closure-test failure: pipeline checks, paired positive control, null test (2026-09-26)
+
+The plan: inexpensive pipeline checks, then one paired flow-matching
+positive control. A null test and a larger matching pool only if the
+control succeeds.
+
+### Pipeline checks (`closure_checks.py`, no training; the first 512-2000 test pairs)
+
+- **Normalisation round trip** (psi = log(E + 0.1), standardised):
+  - largest per-tower error 1.5e-5 GeV in float32, 2.7e-5 GeV from the
+    float16 training cache;
+  - zero towers stay exactly zero;
+  - total energy is reproduced to 4e-7.
+- **A velocity field that is exactly zero**, through the inference path
+  (4 Euler steps and 32 midpoint evaluations, with and without the clip at
+  0), returns J to 1.5e-5 GeV.
+- **Probability path.** TorchCFM with sigma 0: x_t = t x1 + (1 - t) x0,
+  u_t = x1 - x0, t ~ U(0, 1). The path is exactly x0 at t = 0 and x1 at
+  t = 1, with no noise at either end. Inference starts at z(J), which is
+  training's x0.
+- **Clipping.** Raw outputs are >= -0.1 GeV by construction. The clip at 0
+  changes the cone energy by < 0.1% and the energy of the empty towers not
+  at all.
+- **Halo, corrected.**
+  - T(J) has only 1.3 exactly empty cone towers per jet: PYTHIA jets fill
+    the cone, and the broadening fills the rest.
+  - The unpaired flows put 0.0002-0.0006 GeV per jet there (32 midpoint
+    evaluations).
+  - The earlier "2.6-4.4% in towers T(J) leaves almost empty" counted
+    towers below 0.05 GeV. Those are occupied, so there is no empty-tower
+    halo.
+- **What the error is.** Signed per-tower error by true tower energy, on
+  20k test pairs with 32 midpoint evaluations:
+  - The unpaired flows lower each jet's hardest towers (T > 5 GeV) by 0.87
+    and 1.82 GeV on average, with 2.2-3.4 GeV rms.
+  - They spread that energy over the ~32 softest towers, +0.03-0.04 GeV
+    each.
+  - So the core of each jet is flattened.
+- **No implementation bug was found.** No earlier comparison needs updating
+  beyond the halo wording (corrected in place above).
+
+### Paired positive control (`closure_paired_s0`, job 20182)
+
+**Configuration:** identical to the unpaired closure runs:
+- the ADM U-Net (21.6M), the backbone of the saved unpaired runs, so that
+  only the pairing changes;
+- standardised psi, straight path (sigma 0), CFM velocity loss;
+- Adam 2e-4, warm-up 1000, gradient clip 1, EMA 0.9999, batch 256;
+- 2 h, seed 0, the 200k training source jets A.
+
+The one difference: each source jet is paired with its own T(J), computed
+on the fly (`--pairing paired`), with no matching.
+
+Checkpoints are selected on the validation EMD with the accurate solve
+(32 midpoint evaluations). The unpaired runs were reselected the same way
+for this comparison (at 80 and 110 min). They had used the 4-step solve
+before.
+
+**Training against validation:**
+- The paired run's EMD (val / train) is 0.048 / 0.048 GeV at 10 min,
+  0.032 / 0.031 at 20, 0.019 / 0.019 at 50 and 0.015 / 0.015 at 120. Its
+  shape EMD falls from 0.0006 to 0.00016.
+- The unpaired runs sit at a shape EMD of 0.089-0.093 on both val and
+  train, flat from the first checkpoint to the last. No fitting or
+  generalisation gap is involved.
+
+**Test** (20k held-out pairs, 32 midpoint evaluations; every output clipped
+at 0; E_in = E(J), E_true = E(T(J)); `docs/flow/closure_control_m32.csv`,
+event displays `docs/flow/closure_control_jets.png`):
+
+| | identity F(J) = J | paired control | unpaired, jet-centred cost | unpaired, shape + energy cost |
+| :--- | ---: | ---: | ---: | ---: |
+| shape EMD to T(J), mean / median | 0.032 / 0.032 | **0.0002 / 0.0001** | 0.090 / 0.077 | 0.091 / 0.083 |
+| EMD to T(J), GeV | 7.03 | **0.015** | 3.56 | 2.87 |
+| E_out / E_in (truth 0.8) | 1 | **0.7997 +- 0.0004** | 0.785 +- 0.079 | 0.808 +- 0.038 |
+| E_out / E_true (truth 1) | 1.25 | 0.9996 | 0.981 | 1.010 |
+| E_out - E_true: bias / RMSE, GeV | +6.5 / 6.6 | **-0.011 / 0.021** | -0.68 / 2.83 | +0.22 / 1.32 |
+| mass change O(F) - O(J) against O(T) - O(J) (true -0.96 +- 0.31 GeV): bias / RMSE, GeV | +0.96 / 1.01 | **-0.002 / 0.003** | +0.07 / 0.55 | +0.14 / 0.54 |
+| girth change (true +0.0032 +- 0.0030): bias / RMSE | -0.0032 / 0.0044 | **0.0000 / 0.00004** | +0.0004 / 0.0144 | -0.0023 / 0.0146 |
+| energy in the truth-empty towers (1.3 per jet), before / after the clip, GeV | 0 | 0 / 0 | 0.0004 / 0.0006 | -0.0001 / 0.0002 |
+| hardest towers (T > 5 GeV): error mean / rms, GeV | +4.05 / 4.45 | -0.006 / 0.014 | -1.82 / 3.44 | -0.87 / 2.16 |
+| updates in 2 h | | 89.8k (12.5 /s) | 84.0k | 81.5k |
+
+**The positive control succeeds.** With the correct pairing, the same
+representation, path, loss, network and solve reproduce T(J) nearly
+exactly:
+- the shape error is 200x below the identity's and 450x below the unpaired
+  runs';
+- every tower class is within 0.014 GeV rms;
+- the mass and girth changes are recovered to 1% of their true spread;
+- all of this within 10 minutes of training, with no gap between training
+  and validation pairs.
+
+So neither the MSE velocity objective, nor the log representation, nor the
+solve blurs fine structure here. The unpaired failure lies in the endpoint
+assignment, the coupling. This is a diagnostic control, not evidence for
+the unpaired claim.
+
+### Unpaired null test (`closure_null_se1_s0`, job 20186)
+
+**Configuration:**
+- **Source:** A.
+- **Target:** an independent pool of unmodified PYTHIA jets with the same
+  selection: B before T, rebuilt from its parent events by
+  `closure_data.py --null`. T of the rebuilt jets matches the stored T(B) to
+  4e-4.
+- **Cost:** shape + energy (lambda 1, its frozen scales); everything else as
+  in the unpaired closure runs.
+- **Scoring:** F(J) against J, on the same held-out jets;
+  `docs/flow/closure_null_m32.csv`, event displays
+  `docs/flow/closure_null_jets.png`.
+- **Validation and training agree** (EMD 0.22 / 0.22 GeV); the checkpoint
+  selected is at 80 min.
+
+| | the toy modification, J -> T(J) | null test: F(J) against J |
+| :--- | ---: | ---: |
+| shape EMD, mean / median | 0.032 / 0.032 | 0.0033 / 0.0028 (10% of the toy's) |
+| EMD, GeV | 7.03 | 0.22 |
+| energy ratio | 0.8 | 0.999 +- 0.007 (RMSE 0.24 GeV) |
+| mass change: mean, RMSE | -0.96 +- 0.31 GeV | -0.001, 0.035 GeV (4% of the toy's mean change) |
+| girth change: mean, RMSE | +0.0032 +- 0.0030 | +0.0001, 0.0005 (16% of the toy's) |
+| hardest towers (> 5 GeV) | J above T(J) by 4.05 GeV | -0.05 / 0.19 GeV rms |
+
+**The null test passes.**
+- Without a domain shift, the unpaired transport is nearly the identity.
+  Its spurious changes are 4-16% of the toy modification's, so it does not
+  deform jets on its own.
+- It loses fine structure only when it has to move the jets. The loss comes
+  from learning a shift through the unpaired coupling, not from the
+  pipeline.
+
+### Larger matching pool (`closure_se1_pool1024_s0`, job 20188): running
+
+- **Configuration:** a pool of 1024 jets per domain; each step, 256 complete
+  pairs are drawn from the 1024 x 1024 exact plan (`--ot-pool 1024`). The
+  cost and its scales, the solver, network, loss, batch and 2 h budget are
+  unchanged.
+- **It runs on the modification closure**, the clearest failure; the null
+  test's deformation is small.
+- **Matching overhead:** 74% of each step (3.2 steps/s against 11.5 at pool
+  256), about 23k updates in 2 h against 81.5k.
+
+    python scripts/flow/closure_checks.py --n 2000
+    LABEL=closure_paired_s0 COST=l2 SEED=0 MINUTES=120 \
+        EVAL_ARGS="--setting 32:midpoint --train-n 5000" \
+        sbatch -w dahlia scripts/flow/closure_run.sbatch --pairing paired
+    python scripts/flow/closure_data.py --null
+    LABEL=closure_null_se1_s0 COST=shape_energy LAMBDA=1.0 SEED=0 MINUTES=120 \
+        EVAL_ARGS="--setting 32:midpoint --train-n 5000 --truth identity" \
+        sbatch -w dahlia scripts/flow/closure_run.sbatch \
+        --target-domain closure_null_tgt
+    LABEL=closure_se1_pool1024_s0 COST=shape_energy LAMBDA=1.0 SEED=0 MINUTES=120 \
+        EVAL_ARGS="--setting 32:midpoint --train-n 5000" \
+        sbatch -w dahlia scripts/flow/closure_run.sbatch --ot-pool 1024
+    python scripts/flow/closure_eval.py closure_l2_s0 closure_se1_s0 --select \
+        --setting 32:midpoint --train-n 5000          # reselect, accurate solve
+    python scripts/flow/closure_eval.py closure_paired_s0 closure_l2_s0 \
+        closure_se1_s0 --control --setting 32:midpoint \
+        --out outdir/sphenix/flow/closure_control_m32
+    python scripts/flow/closure_eval.py closure_null_se1_s0 --control \
+        --setting 32:midpoint --truth identity --out outdir/sphenix/flow/closure_null_m32
+
+(`sbatch` failed on 2026-09-26 with "I/O error writing script/environment
+to file" for two submissions; those ran the same script through a detached
+`srun`.)
 
 ## Commands
 
