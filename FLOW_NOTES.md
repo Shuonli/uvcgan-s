@@ -963,6 +963,262 @@ Hypotheses and decision rules:
 JEWEL is scored once per run, at the val-selected checkpoint, and is not
 used for any choice.
 
+## Backbone ablation: the UVCGAN-S generator as the OT-CFM velocity network (2026-09-25)
+
+**Goal of the study** (restated 2026-09-25): a simple, credible OT flow-matching
+method for mainly unpaired vacuum -> medium jet transformation. The
+decomposition is the controlled benchmark, with event-level truth and a
+strong UVCGAN-S reference. Unpaired OT-CFM already matches UVCGAN-S's
+calibrated jet energy resolution in under an hour of training, against
+8-17 h. The open question is event-level spatial fidelity: two jets of equal
+energy can place it at different angles, and so differ in mass,
+fragmentation and grooming.
+
+**Hypothesis.** Part of the fidelity gap comes from the velocity network,
+not from flow matching. All flows so far used TorchCFM's ADM U-Net, while
+UVCGAN-S uses a generator already shown to work on these images.
+
+**The two networks** (`fm_common.construct_net`, `UVCGANVelocity`):
+
+| | ADM U-Net (all flows so far) | UVCGAN-S generator (ViT-ModNet, published sPHENIX configuration) |
+| :--- | :--- | :--- |
+| parameters | 21.6M | 32.1M, plus 0.2M for the time input added here |
+| scales | 24 x 64 -> 12 x 32 -> 6 x 16 -> 3 x 8; 96, 192, 192, 192 channels | the same scales; 96, 192, 384 features |
+| blocks | 2 residual blocks per scale (3 in the decoder) | one plain two-conv block per scale (encoder); one block of modulated, demodulated convs per scale (decoder) |
+| normalisation | GroupNorm (32 groups) everywhere | none in the encoder; LayerNorm in the transformer; weight demodulation in the decoder |
+| global context | self-attention (4 heads) at 6 x 16 and 3 x 8 | 12-block transformer (384 features, 6 heads) over the 24 bottleneck positions, plus an extra token whose output is a style vector that modulates every decoder conv |
+| skips | every block's output, concatenated | one concatenated skip per scale; the path from below gated by a ReZero scale starting at 0 |
+| time input | sinusoidal embedding -> MLP -> scale and shift of every GroupNorm | none (a GAN generator). Added here, the one change: the same kind of embedding, through a 2-layer MLP, added to the extra token, so the style carries t |
+| initialisation | TorchCFM's | UVCGAN-S's (Kaiming) |
+
+**Held fixed:**
+- the one-panel unpaired OT-CFM (`otcfm1`: real mixtures -> HIJING events,
+  the general source -> target form);
+- exact minibatch OT (POT) on the squared L2 of standardised log(E + 0.1);
+- straight path (sigma 0) and the CFM velocity loss;
+- batch 256, Adam 2e-4 with 1000 warm-up steps, gradient clip 1, EMA
+  0.9999;
+- 2 h of training on one A6000 (dahlia), seed 0, checkpoints every 15 min;
+- read-out: 4 Euler steps, jet = mixture - background in GeV;
+- selection on val `jer_cal`.
+
+Baseline: the saved U-Net runs `ext_otcfm1_s0..s2`; new run
+`bb_uvcgan_otcfm1_s0`, job 20160. Only the network changed.
+
+**Evaluation** (`jet_fidelity.py`, rules fixed before scoring):
+- **Events:** the first 10k val events are the development set; val events
+  10k-20k are the calibration set; the first 10k JEWEL events are the
+  frozen test.
+- **Energy:** the raw response, and a linear calibration fitted on the
+  calibration set and frozen, with its bias, resolution and RMSE.
+- **Substructure:** per-jet bias and RMSE in units of the true spread; the
+  energy mover's distance and its shape part.
+- **Read-outs:** raw outputs, and the same 0.5 GeV tower threshold for every
+  model, against the equally thresholded truth.
+- **Tables:** `docs/flow/jet_fidelity_backbone*.csv`; figure
+  `docs/flow/jet_fidelity_backbone.png`.
+
+| | U-Net, 3 seeds | UVCGAN-S generator, seed 0 | UVCGAN-S (the GAN), reference |
+| :--- | ---: | ---: | ---: |
+| updates in 2 h (steps/s), peak memory | 18.2-18.3k (2.53), 35.6 GB | 32.3k (4.48), 19.1 GB | |
+| inference, 4 Euler steps | 2.0 ms/event (0.50 per evaluation) | 1.1 ms/event (0.27) | 0.27 ms (one pass) |
+| val `jer_cal`, 20k events: 15 min / 30 min / 2 h / best | 3.70-3.73 / 3.70-3.71 / 3.70-3.73 / 3.685-3.696 | 3.82 / 3.70 / 3.665 / **3.664** | 3.59 |
+| JEWEL `jer_cal`, 20k events, selected checkpoint | 3.58 / 3.61 / 3.58 | 3.55 | 3.99 |
+| frozen calibration: resolution, val / JEWEL, GeV | 3.66-3.67 / 3.58-3.62 | 3.65 / 3.58 | 3.57 / 4.16 |
+| frozen calibration: bias on JEWEL, GeV | +0.97 to +1.01 | +0.99 | +0.46 |
+| raw response `jes`, val / JEWEL | 0.94 / 0.99 | 0.92 / 0.96 | 0.94 / 0.95 |
+| EMD per jet, val / JEWEL, GeV | 5.15-5.17 / 4.74-4.75 | 5.36 / 4.77 | 4.75 / 4.54 |
+| EMD shape part, val / JEWEL | 3.17-3.18 / 3.11-3.12 | **3.12 / 3.06** | 3.12 / 2.83 |
+| RMSE / sigma, raw, val: mass, girth, p_T^D, z_lead, z_g, R_g | 0.85, 0.33, 0.49, 0.33, 1.09, 0.93 | 0.82, 0.32, 0.46, 0.32, 1.09, 0.92 | 1.06, 0.28, 0.41, 0.32, 1.10, 0.89 |
+| the same on JEWEL | 0.99-1.00, 0.40, 0.68, 0.49, 1.14, 0.94 | 0.93, 0.39, 0.65, 0.47, 1.15, 0.94 | 1.00, 0.34, 0.60, 0.51, 1.16, 0.90 |
+| bias / sigma, raw, val: girth, p_T^D, R_g | +0.19, -0.38, +0.24 | +0.18, -0.35, +0.22 | -0.09, +0.19, -0.23 |
+| RMSE / sigma, 0.5 GeV threshold, val: girth, p_T^D, z_lead | 0.27, 0.38, 0.29 | 0.27, 0.37, 0.30 | 0.29, 0.44, 0.35 |
+
+The U-Net seeds differ by 0.002-0.01 in these RMSEs. The solver curve is
+unchanged. On val, at the selected checkpoint, 1 / 2 / 4 / 8 / 16 Euler
+steps give 4.94 / 3.93 / 3.66 / 3.74 / 3.86 GeV (U-Net: 5.08 / 4.01 / 3.68
+/ 3.72 / 3.83), and 16 midpoint evaluations give 4.10 (both).
+
+**Verdict: a small, consistent gain, not a clear improvement.**
+- **Gains:**
+  - The raw per-jet RMSEs of mass, girth, p_T^D and z_lead fall by 3-7% on
+    val and 2-7% on JEWEL.
+  - The shape part of the EMD falls by 1.5%, to UVCGAN-S's level on val
+    (not on JEWEL).
+  - Calibrated energy resolution is equal or 0.01-0.02 GeV better. The
+    generator starts slower (3.82 GeV at 15 min against 3.70-3.73), passes
+    3.70 at the same 30 min, and keeps improving to 3.66. The U-Net
+    plateaus at 3.69-3.70 and drifts up to 3.70-3.73 by 2 h. At an equal
+    number of updates (18k) it is 3.67 against 3.70.
+- **Unchanged or worse:**
+  - The raw response is lower (0.92 against 0.94), so the full EMD is worse
+    (5.36 against 5.15 GeV).
+  - The characteristic biases of the raw OT-CFM image are unchanged: girth
+    +0.18 sigma, p_T^D -0.35 sigma, R_g +0.22 sigma, the noise floor around
+    the jet.
+  - Only 15-35% of the raw girth / p_T^D gap to UVCGAN-S closes.
+  - With the 0.5 GeV threshold both backbones are identical.
+- **Conclusion:** the backbone is at most a minor part of the fidelity gap.
+  The rest points at the coupling or the objective: a few-step solve of an
+  unpaired, averaged coupling.
+- **No three-seed confirmation.** Given the tiny U-Net seed spread, the
+  small gains are likely real, but confirming them would not change the
+  conclusion.
+
+**Compute trade-off.** More parameters (32.3M against 21.6M), yet 1.8x more
+updates per hour, half the memory and 1.8x cheaper inference: at 24 x 64 the
+generator's large transformer runs on only 24 positions. As a flow backbone
+it costs nothing extra and helps a little.
+
+**Next experiment supported by this result.** Change the coupling, not the
+network: the known-modification closure test of the matching cost (next
+section). The backbone is held fixed there at the ADM U-Net. It is the
+validated choice (three seeds, the TorchCFM reference), and at the closure
+test's 16 x 16 jet canvases the generator's transformer would see only 2 x 2
+positions.
+
+    METHOD=otcfm1 LABEL=bb_uvcgan_otcfm1_s0 MINUTES=120 SEED=0 \
+        EVAL_DECODE=mixture EVAL_ARGS="--nfe 4 --solver euler" \
+        sbatch -w dahlia --time=03:30:00 scripts/flow/fm_run.sbatch \
+        --ckpt-minutes 15 --inline-events 1000 --inline-nfe 4 --backbone uvcgan
+    $PYTHON scripts/flow/jet_fidelity.py \
+        --models 'OT-CFM-uvcgan-s0=single:bb_uvcgan_otcfm1_s0:mixture'
+    $PYTHON scripts/flow/jet_fidelity.py --report \
+        --show OT-CFM-unet-s0,OT-CFM-uvcgan-s0,UVCGAN-S \
+        --figure docs/flow/jet_fidelity_backbone.png
+
+## Closure test: does a shape-plus-energy matching cost improve event-level fidelity? (set up 2026-09-25, before training)
+
+**Why.** Competitive average energy resolution does not show that a
+transport keeps the identity of each jet while modifying its substructure.
+Two earlier observations point at the source-target coupling:
+- full-image matching is driven by where the jet is in the event;
+- jet-centred matching barely follows the energy (`vac_med_coupling.py`).
+
+**Test.** Hold the backbone fixed and change only the matching cost, in an
+unpaired experiment whose modification is known.
+
+**Jets** (`closure_data.py`; manifest `OUTDIR/sphenix/flow/cache/closure_manifest.json`):
+- **Source:** clean PYTHIA events from the signal training cache, 600k
+  random events read.
+- **Axis:** the leading R = 0.4 cone (as the jet scores).
+- **Selection:** cone >= 10 GeV, with the 9 x 9 window around the axis
+  inside the acceptance (axis rows 4-19). 525k jets pass (87%); median cone
+  energy 32 GeV.
+- **Frame and crop:** the jet image J is the 53 towers of the R = 0.4 cone,
+  in GeV of tower E_T as the images hold them, centred on the axis. It sits
+  on a 16 x 16 canvas (window at rows and columns 4-12) so that the U-Net can
+  downsample three times; the rest of the canvas is zero.
+- **Energy observable:** E = sum of J.
+- **Preprocessing:** the flow's existing psi = log(E + 0.1), standardised
+  with one mean and deviation fitted on the training canvases of both pools
+  (-2.10, 0.643; `norm_closure.json`). Amplitudes stay physical up to that
+  map; nothing is rescaled.
+
+**Known modification.** T(J) = 0.8 [0.8 J + 0.2 K(J)].
+- K moves each tower's energy to its in-cone neighbours (3 x 3 minus the
+  centre), with weights exp(-dR^2 / 2 (0.1)^2) normalised over the in-cone
+  neighbours of that tower, so K preserves the sum.
+- Checks: no negative tower; nothing outside the cone; E(T(J)) / E(J) =
+  0.8000000 +- 3e-7 (float32), 0.7997-0.8003 as stored in float16.
+- It is a method-validation toy, not a quenching model.
+
+**Splits**, disjoint by parent event, from one random permutation of the
+selected jets:
+- train source A, 200k;
+- train target B, 200k, stored only as T(B);
+- validation, 10k pairs (J, T(J));
+- test, 20k pairs.
+
+Training sees A and T(B) of different events, never a pair and never T's
+parameters. Selection acts on J before the modification and nothing is
+reselected after it. (Re-finding the leading jet in a modified full event
+would pick the other jet of the dijet in 57% of events.)
+
+**Costs** (`fm_common.ShapeEnergyCost`), each passed to the same exact OT
+solver as training (TorchCFM's `pot.emd`, uniform weights, default
+iterations), with pairs drawn from the plan with replacement by the same
+`sample_map`:
+- **Baseline, the existing jet-centred cost:** squared L2 of the
+  standardised states, TorchCFM's own. With one normalisation for both
+  pools this gives the same plan as `vac_med_coupling.py`'s "centred" cost,
+  the squared L2 of log(E + 0.1) over the cone towers.
+- **Candidate:** with Q = J / E (for shape features only),
+
+      D_s(i, j) = |P_s Q_i - P_s Q'_j|^2   P_s: sum pooling in s x s blocks of the canvas
+      D_E(i, j) = [log((E_i + 0.1 GeV) / (E'_j + 0.1 GeV))]^2
+      C(i, j)   = mean over s in {1, 2, 4} of D_s / a_s  +  lambda D_E / a_E
+
+  - lambda = 1 for the candidate; lambda = 0 as a matching-only
+    diagnostic.
+  - a_s and a_E are the medians of the positive source-target distances
+    between the first 2048 jets of each training pool, frozen in
+    `closure_cost_calib.json`: a_s = 0.210, 0.303, 0.306 and a_E = 0.0664.
+    No scale was degenerate.
+  - The pooling grid is fixed on the canvas. The axis tower (8, 8) sits at
+    a block corner, the same for every jet.
+
+**Matching audit** (`closure_matching.py`, before training; 4 repeats of
+unpaired batches, `docs/flow/closure_matching.csv`, figure
+`docs/flow/closure_matching.png`). Numbers are batch 256 / batch 1024:
+
+| cost | energy rank correlation, source vs matched target | matched / source energy: median, IQR | normalised-shape EMD of matched pairs | axis distance in the full events |
+| :--- | ---: | ---: | ---: | ---: |
+| random | -0.03 / -0.03 | 0.80, 0.30 / 0.80, 0.31 | 0.44 / 0.44 | 1.70 / 1.69 |
+| full image | 0.09 / 0.10 | 0.81, 0.30 / 0.80, 0.29 | 0.44 / 0.44 | **1.53 / 1.38** |
+| jet-centred (baseline) | 0.10 / 0.16 | 0.81, 0.29 / 0.80, 0.28 | 0.21 / 0.19 | 1.72 / 1.72 |
+| shape only (lambda 0) | 0.02 / 0.08 | 0.80, 0.30 / 0.80, 0.29 | **0.19 / 0.17** | 1.75 / 1.70 |
+| shape + energy (lambda 1) | **0.95 / 0.98** | 0.80, **0.065** / 0.80, **0.047** | 0.23 / 0.20 | 1.71 / 1.69 |
+
+- **What drives each cost:**
+  - Full-image matching pairs jets by position, not shape.
+  - The jet-centred cost pairs by the pattern of log tower energies and
+    hardly by energy.
+  - The candidate pairs almost monotonically in energy, at the ratio the
+    known T implies. That costs a little shape similarity: 0.23 against
+    0.21 at batch 256, equal at 1024.
+- **Invariance:** independent periodic phi shifts of the full events,
+  followed by re-finding the axis and re-centring, leave every centred cost
+  matrix exactly unchanged. The full-image cost changes by up to 40%.
+- **Caveat:** none of this validates a correspondence. A permutation keeps
+  the target marginal whatever the cost, and the trained ODE need not
+  follow the minibatch pairs.
+
+**Training** (`closure_run.sbatch` -> `fm_train.py --method jetflow`):
+- held identical for both costs: ADM U-Net (21.6M parameters), batch 256,
+  Adam 2e-4, 1000 warm-up steps, gradient clip 1, EMA 0.9999, straight path
+  (sigma 0), CFM velocity loss;
+- seed 0, so the initialisation and the drawn batches are identical;
+- 2 h on one A6000 (dahlia), checkpoints every 10 min;
+- inference: 4 Euler steps (the OT-CFM setting), outputs clipped at 0.
+
+**Selection metric, fixed now.** Mean per-jet EMD between F(J) and T(J)
+(GeV, R = 0.4) on the first 5000 validation pairs, EMA network, 4 Euler
+steps (`closure_eval.py --select`).
+
+**Test metrics** (`closure_eval.py`, 20k test pairs), with the identity and
+a random target jet as reference outputs:
+- the raw energy response E(F(J)) / E(J), whose target is 0.8 (no
+  calibration);
+- bias and RMSE of E(F(J)) - E(T(J));
+- normalised-shape EMD;
+- per observable: bias and RMSE of O(F(J)) - O(T(J)), the mean modification
+  recovered (mean Delta_pred / mean Delta_true), and the per-jet correlation
+  of Delta_pred with Delta_true;
+- marginal W1 / sigma, and the largest difference between the correlation
+  matrices of (log E, observables);
+- the same with a better-resolved solve (32 midpoint evaluations) on 2000
+  test pairs, for the direction of any difference.
+
+**Decision rule.** The candidate improves clearly if, at the selection
+setting and in the same direction with the resolved solve, it lowers:
+- the shape EMD;
+- the RMSE of O(F(J)) - O(T(J)) for most of mass, girth, p_T^D and z_lead;
+
+without a worse energy response or RMSE and without worse marginals. Then
+seeds 1 and 2 of both costs follow. Otherwise the notes report what got
+worse.
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything
