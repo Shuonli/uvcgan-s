@@ -1,0 +1,17 @@
+{
+    "step": 88370,
+    "train_time": 7200.012166902423,
+    "coupling_time": 0.0,
+    "data_time": 6.981585577130318,
+    "examples": 22622720,
+    "eval_time": 0.0,
+    "ckpt_time": 27.194834537804127,
+    "load_time": 0.024830296635627747,
+    "startup_time": 0.6264794394373894,
+    "end_to_end_time": 7227.873155683279,
+    "steps_per_s": 12.273590370614386,
+    "samples_per_s": 3142.039134877283,
+    "coupling_frac": 0.0,
+    "peak_mem_gb": 2.92201566696167,
+    "n_params": 21556897
+}

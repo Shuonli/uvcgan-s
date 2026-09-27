@@ -1,6 +1,6 @@
 # Summary: speeding up UVCGAN-S, and flow matching for sPHENIX background subtraction
 
-*As of 2026-09-26, 08:20. Branch `ddp` of github.com/Shuonli/uvcgan-s.
+*As of 2026-09-26, 21:30. Branch `ddp` of github.com/Shuonli/uvcgan-s.
 This file is the short version. The full logs, with job numbers and
 commands, are `SCALING_NOTES.md` (UVCGAN-S training) and `FLOW_NOTES.md`
 (flow matching).*
@@ -458,6 +458,41 @@ A sequence of cheap diagnostics, then controls:
     can simulate vacuum and medium versions of the same hard scattering to
     provide them.
 
+## Part 7: can a few true pairs rescue unpaired training? (semi-paired test)
+
+- **Setup:** give the flow true (before, after) pairs for 1% or 5% of the
+  training jets (2,000 or 10,000). Put them in half of every batch, next to
+  the usual unpaired matches.
+- **Control:** the same pairs alone, with no unpaired data.
+- **Result, on 20k held-out jets** (shape error; doing nothing = 0.032):
+
+| training | shape error | energy error |
+| :--- | ---: | ---: |
+| unpaired only | 0.091 | 1.32 GeV |
+| 2k pairs + unpaired | 0.086 | 1.32 GeV |
+| 10k pairs + unpaired | 0.022 (median 0.006) | 1.15 GeV |
+| **2k pairs only** | **0.0009** | **0.13 GeV** |
+| **10k pairs only** | **0.0003** | **0.04 GeV** |
+| all 200k pairs | 0.0002 | 0.02 GeV |
+
+- **A few true pairs on their own are enough for this toy.** 2,000 pairs
+  already make jets 35x better than doing nothing, even on jets whose pair
+  was never shown.
+- **Mixing them with unpaired matches ruins that.**
+  - With 2k pairs, the network memorises those 2,000 jets and blurs all the
+    others as badly as fully unpaired training.
+  - With 10k pairs, it does better early but gets worse as training goes on.
+- **Why:** the unpaired matches tell each jet to become some other, similar
+  jet. That contradicts the true pairs, and the network can't learn the true
+  rule while being pulled the other way.
+- **So:** don't mix the two naively. Let the few pairs decide the matching.
+  For example, train on the pairs first, then match the unpaired jets to
+  that model's predictions.
+- **For the real problem:** check whether JEWEL can simulate paired
+  vacuum/medium versions of the same collisions. Real medium effects are
+  random even for the same collision, so the flow would then need to output
+  a distribution per jet.
+
 ## Where everything is
 
 - `FLOW_NOTES.md`: the full log of the flow study (pre-registration,
@@ -480,10 +515,11 @@ A sequence of cheap diagnostics, then controls:
 
 ## Still open
 
-- A semi-paired closure test: how much event-level fidelity a small
-  fraction of true pairs recovers in otherwise unpaired training. For
-  vacuum -> medium, paired JEWEL vacuum/medium simulation would supply the
+- A pair-guided coupling: fit the few pairs first, then match the unpaired
+  data to that model's predictions. Test it in the same closure test with 1%
   pairs.
+- Whether paired JEWEL vacuum/medium simulation is available, and how
+  random its per-event modification is.
 - Jet-level physics with the jets actually found in the extracted image.
   So far a jet is the cone at the true axis.
 - Why OT-CFM does better on JEWEL than on val.

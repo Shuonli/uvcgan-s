@@ -1649,6 +1649,93 @@ CFM velocity loss, batch 256):
         --pairing paired --paired-n 2000
     (closure_semi5_s0, closure_pk5_s0: the same with --paired-n 10000)
 
+### Semi-paired results (jobs 20192-20195, 2026-09-26)
+
+**Validation during training** (shape EMD, held-out validation / the seen
+pairs A[:2000], 32 midpoint evaluations):
+- **Semi-paired, 2k pairs:** flat at 0.086-0.091 on validation all run
+  long, the unpaired level, while the seen pairs fall from 0.0030 to 0.0012.
+- **Semi-paired, 10k pairs:** 0.022-0.024 over the first 30 min, then
+  worse to 0.047 by 2 h, as the unpaired data takes over.
+- **Paired only, 2k pairs:** best at 10 min (0.0009); it then overfits
+  slowly, to 0.0025.
+- **Paired only, 10k pairs:** 0.0003, stable.
+
+Selected checkpoints (lowest validation EMD): 120, 20, 10 and 50 min.
+Updates in 2 h: 80.3k and 80.4k for the semi-paired runs (the matching
+takes 10% of the step), 88.2k and 88.4k for the paired-only ones.
+
+**Test** (20k held-out pairs, 32 midpoint evaluations;
+`docs/flow/closure_semi_m32.csv`, event displays
+`docs/flow/closure_semi_jets.png`):
+
+| | shape EMD, mean / median | E_out / E_in (0.8) | E_out - E_true, RMSE, GeV | mass change: bias / RMSE, GeV | girth change, RMSE | hardest towers: mean / rms, GeV |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| identity | 0.032 / 0.032 | 1 | 6.61 | +0.96 / 1.01 | 0.0044 | +4.05 / 4.45 |
+| unpaired (0% pairs) | 0.091 / 0.083 | 0.808 +- 0.038 | 1.32 | +0.14 / 0.54 | 0.0146 | -0.87 / 2.16 |
+| semi-paired, 2k pairs (1%) | 0.086 / 0.077 | 0.810 +- 0.037 | 1.32 | +0.18 / 0.51 | 0.0139 | -0.90 / 2.09 |
+| semi-paired, 10k pairs (5%) | 0.022 / 0.006 | 0.818 +- 0.032 | 1.15 | +0.08 / 0.27 | 0.0053 | +0.11 / 0.78 |
+| paired only, 2k pairs | **0.0009 / 0.0008** | 0.7999 +- 0.0033 | 0.13 | -0.001 / 0.020 | 0.0002 | -0.005 / 0.062 |
+| paired only, 10k pairs | **0.0003 / 0.0003** | 0.7999 +- 0.0010 | 0.04 | -0.001 / 0.006 | 0.0001 | -0.004 / 0.023 |
+| all 200k pairs | 0.0002 / 0.0001 | 0.7997 +- 0.0004 | 0.02 | -0.002 / 0.003 | 0.00004 | -0.006 / 0.014 |
+
+**Seen against unseen** (shape EMD on 2000 training jets whose pair was
+shown, against 2000 whose pair was not):
+
+| | seen pairs | unseen training jets |
+| :--- | ---: | ---: |
+| semi-paired, 2k | 0.0012 | 0.087 |
+| paired only, 2k | 0.0005 | 0.0009 |
+| semi-paired, 10k | 0.0072 | 0.022 |
+| paired only, 10k | 0.0002 | 0.0003 |
+
+**Reading:**
+- **A few true pairs alone restore the detail for this modification.**
+  With 2000 pairs (1%) and no unpaired data, the per-jet shape error is 35x
+  below the identity's, the energy is right to 0.13 GeV RMSE, and the mass
+  and girth changes are right to 6% of their spread. Unseen jets are almost
+  as good as the seen ones. 10k pairs nearly match the fully paired model.
+  T is smooth and simple, and a few thousand examples pin it down.
+- **Mixing those pairs with unpaired minibatch-OT pairs makes things worse,
+  not better.**
+  - With 2k pairs, jets whose pair was not shown come out as badly as fully
+    unpaired (0.087): the network memorises the 2000 pairs (0.0012) and
+    applies the blurring unpaired map everywhere else.
+  - With 10k pairs, the best checkpoint (20 min) reaches 0.022, better than
+    the identity. But the result is bimodal (median 0.006 against mean
+    0.022; one of the four displayed jets is badly wrong), it keeps getting
+    worse with training, and its energy runs 2% high.
+- **Why.** For a jet, the unpaired OT targets (other, similar jets) and the
+  true target conflict. The network cannot generalise the true
+  correspondence while the unpaired data keeps pulling toward the blurred
+  map.
+- **So the unpaired data, used this way, adds nothing here and costs a
+  lot.** Few pairs have to shape the coupling, not compete with it.
+
+**Uncertain:**
+- one seed;
+- a deterministic, smooth toy. A real medium modification is random even
+  for the same hard scattering, so a JEWEL vacuum/medium "pair" defines a
+  distribution of modified jets, not one, and would need a stochastic
+  (conditional) flow;
+- the paired share of the batch (50%) is one choice. The natural 1-5% share
+  was not run: the averaging argument predicts almost no effect;
+- selection matters: the paired-only 2k run overfits after 10 min, and the
+  semi-paired 10k run degrades after 20.
+
+**Next justified step:** use the pairs to shape the unpaired coupling
+rather than add them as competing targets. The first, simplest check is
+already in hand: the paired-only model. The next one:
+- train on the few pairs first;
+- match the unpaired targets to that model's predictions F(J) by OT
+  (pseudo-pairs consistent with the paired map);
+- retrain;
+- test in the same closure with 1% pairs.
+
+For vacuum -> medium, the first question is whether paired JEWEL
+vacuum/medium simulation is available, and how random its per-event
+modification is.
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything
@@ -1703,25 +1790,27 @@ and end-to-end times), `inline_eval.csv`, `evals/{val,jewel}_truth.csv`
 (one row per checkpoint, network and inference setting) and the per-event
 jet energies `evals/*_truth/*.npy`.
 
-## Status (2026-09-26 08:20)
+## Status (2026-09-26 21:30)
 
 All runs and benchmark jobs have ended; nothing of this study is running.
 
 - **Done 2026-09-25/26:**
-  - the posterior-sampler study (step 2), kept as a reference;
-  - the backbone ablation (the backbone is a minor part of the fidelity
-    gap);
-  - the jet -> jet closure test with two matching costs;
-  - locating its failure (pipeline checks, paired positive control, null
-    test, larger matching pool).
-  - **Result:** the unpaired coupling, not the flow-matching pipeline, loses
-    each jet's fine structure. The energy term fixes per-jet energy; a 4x
-    larger pool helps 17%.
-- **Next, as the controls suggest:** a semi-paired closure test (a small
-  fraction of true pairs added to unpaired training). For vacuum ->
-  medium, JEWEL vacuum/medium pairs of the same hard scattering would
-  supply them.
+  - the posterior-sampler study (a reference);
+  - the backbone ablation;
+  - the jet -> jet closure test and the location of its failure. The
+    unpaired coupling, not the flow-matching pipeline, loses fine
+    structure.
+  - the semi-paired test:
+    - 2000 true pairs alone give a near-exact per-jet map for this toy;
+    - mixing them with unpaired minibatch-OT pairs destroys that: the
+      network memorises the pairs and blurs the rest.
+- **Next, as the evidence suggests:**
+  - a pair-guided coupling: fit the few pairs first, then OT-match the
+    unpaired targets to that model's predictions;
+  - for vacuum -> medium, whether paired JEWEL vacuum/medium simulation
+    exists, and how random its modification is (it would need a
+    conditional, stochastic flow).
 - **Also open:**
-  - the jet-level physics (jets found in the extracted image);
+  - jet-level physics on extracted images;
   - why OT-CFM is better on JEWEL than on val;
-  - the dependence of any unpaired correspondence on the chosen cost.
+  - the dependence of unpaired correspondence on the cost.
