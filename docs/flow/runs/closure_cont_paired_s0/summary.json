@@ -1,0 +1,11 @@
+{
+    "updates": 12000,
+    "train_time": 980.6480737105012,
+    "end_to_end": 1010.3992227837443,
+    "updates_per_s": 12.236805763147341,
+    "paired": 980.6480737105012,
+    "teacher_lookup": 0.0,
+    "matching": 0.0,
+    "unpaired": 0.0,
+    "teacher_monitor": 0.0009578492920484605
+}

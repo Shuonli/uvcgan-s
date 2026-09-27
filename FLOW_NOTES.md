@@ -1736,6 +1736,265 @@ For vacuum -> medium, the first question is whether paired JEWEL
 vacuum/medium simulation is available, and how random its per-event
 modification is.
 
+## Teacher-guided coupling: can a few-pair teacher make unpaired data useful? (2026-09-26)
+
+**Question.** Can the few pairs improve the unpaired coupling enough for the
+unpaired data to add something? The baseline to beat is now the 2k-pair
+model (shape EMD ~0.0009), not unpaired-only (0.091).
+
+**Frozen teacher** (`closure_teacher.py`):
+- `closure_pk1_s0`, the paired-only model trained on the first 2000
+  source jets and their T(J) (1% of the 200k training jets), at its
+  validation-selected checkpoint (update 7350), EMA network, frozen
+  throughout;
+- its endpoints F_teacher(x) come from the accurate solve (32 midpoint
+  evaluations), in GeV and clipped at 0 like every closure output;
+- they are cached once for all 200k training sources (588 s on one A6000,
+  2.9 ms per jet) and for the validation pairs;
+- no pairs beyond these 2000 are used anywhere. Hidden T(x) outside them
+  serves only to score, and to build the audit's oracle.
+
+**The guided coupling:**
+- Only the reference of the cost changes, from C_old(i, j) = d(x_i, y_j) to
+  C_guided(i, j) = d(F_teacher(x_i), y_j).
+- d is the existing shape + log-energy cost (lambda 1, frozen scales).
+- The solver is the existing balanced exact OT (TorchCFM's `pot.emd`), on
+  the baseline pool of 256 sources x 256 real targets from T(B).
+- 256 complete pairs are drawn from the plan with TorchCFM's `sample_map`.
+- The student still flows from the original x to the selected real y; the
+  teacher only chooses y.
+
+### Audit before training (`closure_guided_audit.py`)
+
+1024 validation sources in 4 batches of 256, each matched against 4
+independent batches of 256 real targets from T(B) (other events, so the
+true counterpart is never present). Scored against the hidden T(x);
+`docs/flow/closure_guided_audit.csv`, figure
+`docs/flow/closure_guided_audit.png`.
+
+| what the source is matched from | matched target's shape EMD to T(x): mean / median / p90 | energy RMSE, GeV | shape EMD between the targets chosen in different batches |
+| :--- | ---: | ---: | ---: |
+| (the teacher's prediction itself) | 0.0010 / 0.0008 / 0.0016 | 0.14 | |
+| (identity x) | 0.032 / 0.032 / 0.039 | 6.6 | |
+| original, d(x, y) | 0.214 / 0.200 / 0.312 | 1.86 | 0.249 |
+| guided, d(F_teacher(x), y) | 0.214 / 0.199 / 0.309 | 1.80 | 0.247 |
+| perfect teacher, d(T(x), y) | 0.213 / 0.199 / 0.308 | 1.79 | 0.247 |
+| perfect teacher, nearest target without the one-to-one plan | 0.196 / 0.184 / 0.276 | 1.42 | 0.216 |
+
+**The concern is confirmed.**
+- Even a perfect teacher must be matched to a different real event. The
+  best of 256 real targets is 7x further from T(x) than the unchanged jet,
+  and 200x further than the teacher's own prediction.
+- Guidance barely changes the targets chosen (0.214 against 0.2135). The
+  limit is the pool, not the reference: in two of the three displayed
+  cases, all four references pick the same jet.
+- The selected target changes completely from one minibatch to the next.
+- Matching error is not a lower bound on the trained flow's error, but the
+  pilot was kept short, as planned.
+
+### Continuation controls (`closure_continue.py`)
+
+**Runs:**
+- **A:** the frozen teacher.
+- **B:** A's weights continued with paired-only flow matching.
+- **C:** A's weights continued with paired plus guided-unpaired flow
+  matching.
+
+**Held identical between B and C:**
+- the starting weights: the teacher's EMA weights, both as the network and
+  as the starting EMA (its warm-up continues from update 7350);
+- Adam 2e-4 (fresh, 1000 warm-up steps), gradient clip 1, EMA 0.9999;
+- ADM U-Net, standardised psi, straight path sigma 0, accurate solve for
+  evaluation;
+- per update, the same paired term: 256 true pairs from the same 2000
+  (A[:2000]), with the same pair-index and time sequences (their own
+  generators), T computed on the fly, paired-loss coefficient 1.
+
+**C's only addition:** weight 1 x the mean flow-matching loss of 256 pairs
+from the guided plan (their own generators). Each term is its own mean, so
+the paired gradient is not diluted.
+
+**Supervision exposure:**
+- the unique-pair budget is the same 2000 pairs (1%) for A, B and C;
+- A saw 7350 x 256 = 1.88M paired examples;
+- the selected B and C checkpoints each add 2000 x 256 = 0.51M paired
+  examples;
+- in C the pairs are 50% of the examples per update and 50% of the loss
+  weight, and in B 100%.
+
+**Budget:** 12000 updates each (pilot kept short after the audit),
+checkpoints every 2000 updates, monitored on 1000 validation pairs. A run
+stops if the monitor exceeds 3x the teacher at three checkpoints in a row.
+Jobs 20200 and 20201.
+
+**Cost:**
+- B: 12000 updates in 16.3 min (12.2 /s).
+- C: 6.0 updates/s. Per update, the paired term takes 26 ms, the teacher
+  lookup 0.3 ms (cached), matching 6.4 ms, and the unpaired forward and
+  backward 133 ms.
+- Plus the 588 s teacher cache, once.
+
+**Validation during training** (shape EMD, validation / the 2000 seen
+pairs):
+- B: 0.00093 / 0.00042 at 2000 updates; 0.00119 / 0.00028 at 12000.
+  It slowly overfits the 2000 pairs.
+- C: 0.078 / 0.022 at 2000 updates, 0.094 / 0.0035 at 4000, 0.098 / 0.0030
+  at 6000. It was stopped by the rule.
+- Both selected checkpoints are at 2000 updates, so the comparison is at an
+  equal number of updates.
+
+**Test** (20k held-out pairs, 32 midpoint evaluations, identical clip at 0,
+no recalibration; `docs/flow/closure_teacher_abc_m32.csv`, event displays
+`docs/flow/closure_teacher_abc_jets.png`):
+
+| | identity | A: teacher | B: + paired-only continuation | C: + guided unpaired |
+| :--- | ---: | ---: | ---: | ---: |
+| shape EMD: mean / median / p90 / p99 | 0.032 / 0.032 / 0.039 / 0.047 | **0.0009 / 0.0008 / 0.0016 / 0.0034** | 0.0009 / 0.0008 / 0.0016 / 0.0035 | 0.079 / 0.072 / 0.120 / 0.192 |
+| E_out / E_in (toy truth 0.8) | 1 | 0.7999 +- 0.0033 | 0.7999 +- 0.0035 | 0.787 +- 0.050 |
+| E_out - E_true: bias / RMSE, GeV | +6.5 / 6.6 | -0.010 / 0.13 | -0.012 / 0.14 | -0.57 / 1.87 |
+| mass change: bias / RMSE, GeV (truth -0.96 +- 0.31) | +0.96 / 1.01 | -0.001 / 0.020 | -0.001 / 0.020 | +0.35 / 0.49 |
+| girth change: bias / RMSE (truth +0.0032 +- 0.0030) | -0.0032 / 0.0044 | 0.0000 / 0.0002 | 0.0000 / 0.0002 | +0.0047 / 0.0107 |
+| marginals W1 / sigma: E, mass, girth, p_T^D, z_lead | 1.24, 0.92, 0.08, 0.67, 0.49 | 0.005, 0.003, 0.001, 0.002, 0.002 | 0.005, 0.003, 0.001, 0.002, 0.002 | 0.12, 0.33, 0.15, 0.46, 0.32 |
+| towers T > 5 GeV: error mean / rms, GeV | +4.05 / 4.45 | -0.005 / 0.062 | -0.008 / 0.062 | **-1.55 / 2.20** |
+| towers T < 0.2 GeV: error mean / rms, GeV | -0.023 / 0.048 | 0.000 / 0.001 | 0.000 / 0.001 | **+0.043 / 0.084** |
+
+**Result: the guided unpaired data adds nothing beyond the few-pair teacher,
+and it destroys the teacher's event-level fidelity.**
+- The guided term brings back the core flattening of unpaired training
+  (hard towers 1.55 GeV low, soft towers inflated) within 2000 updates.
+- C recovers the 2000 seen pairs (0.003) and blurs every other jet, as the
+  semi-paired runs did.
+- Continuing paired-only adds nothing either: B equals A within noise, and
+  slowly overfits.
+- The reason is the audit: at the baseline pool, even a perfect teacher can
+  only point to real jets that differ from T(x) in their fine structure. The
+  guided coupling therefore teaches the same averaged, blurred map as the
+  original one.
+- **As agreed, this toy experiment stops here.** Only one guidance weight
+  (1) was run; smaller weights would only interpolate between the teacher
+  and C.
+
+**What this establishes, for this toy only:**
+- with few true pairs, the paired-only flow is the best event-level model;
+- unpaired data, coupled by minibatch OT of real jets (guided or not), has
+  no useful role in it;
+- unpaired data could still help where the pairs do not cover the
+  distribution, or through a mechanism other than endpoint coupling. That
+  was not tested.
+
+## Physical pairs: what JEWEL and HYBRID can provide (feasibility, 2026-09-26)
+
+**Sources:**
+- JEWEL 2.0.0, "Directions for use of JEWEL" (K. C. Zapp, EPJC 74 (2014)
+  2762, arXiv:1311.0048), read in full;
+- the hybrid strong/weak coupling model (Casalderrey-Solana, Gulhan,
+  Milhano, Pablos, Rajagopal, JHEP 10 (2014) 019, arXiv:1405.3864;
+  JHEP 03 (2017) 135);
+- the EuCAIFCon 2026 contribution by Goncalves, Pablos, Flek and Schott,
+  "The Low-Level Inverse Jet-Quenching Problem" (Indico event 1277,
+  contribution 4223). It is a conference report and a lead, not a
+  validated application.
+
+**What is installed here: nothing.**
+- No JEWEL or HYBRID code on this cluster.
+- The JEWEL sample we use (Zenodo record 17594612, `jewel_jet30`) holds
+  only one calorimeter image per event (ROOT TH2), with no generator
+  record, seeds, version or parameters.
+- The JEWEL website blocked automated access, so versions after 2.0.0 were
+  not checked.
+
+**Three levels of correspondence:**
+1. the same hard scattering (the 2 -> 2 partons and the initial-state
+   shower);
+2. the same realised vacuum shower (the full parton cascade before
+   hadronisation);
+3. a medium modification of that same shower.
+
+**JEWEL 2.0.0, as documented:**
+- **Structure (section 3.2):**
+  - JEWEL first sets the geometry (impact parameter, jet production point);
+  - PYTHIA 6.4 generates the matrix element and the initial-state shower;
+  - JEWEL generates "the final state parton shower including possible
+    interactions in a medium";
+  - strings are built, and PYTHIA hadronises.
+  - Radiation and medium rescattering are interleaved in one evolution;
+    vacuum runs are a separate executable (`jewel-*-vac`) linking a
+    no-medium model.
+- **Levels 2 and 3 do not exist in JEWEL.** A medium event is not a
+  modification of a vacuum shower; it is a different stochastic evolution.
+- **Level 1 is not available out of the box either:**
+  - one job seed (`NJOB`) initialises the random numbers;
+  - no per-event state saving and no reading of external hard scatterings
+    is documented;
+  - the geometry is set before the hard scattering, so identical seeds need
+    not give identical hard scatterings in the vacuum and medium
+    executables. This is an inference to check by running both.
+- **The standard output cannot verify ancestry.** HepMC 2 keeps only the
+  hadronic stage: intermediate particles are deleted before hadronisation
+  (`COMPRESS`, `SHORTHEPMC`), and recoils are dropped unless `KEEPRECOILS`
+  is set.
+- **What level-1 pairs would take:**
+  - a code change that saves the PYTHIA 6 state (or the hard-scattering
+    record) after the matrix element and initial-state shower, and replays
+    it into both final-state showers;
+  - verification from an uncompressed parton record.
+  - Even then, the vacuum and the medium showers are independent random
+    evolutions of the same hard scattering. The pairing is conditional,
+    and every shower fluctuation lies between the two jets.
+- **Multiple medium realisations** of one hard scattering are possible with
+  such a change.
+
+**HYBRID:**
+- **Structure:**
+  - PYTHIA 8 generates the vacuum parton shower;
+  - each parton gets a formation time (tau = 2E/Q^2) and a path through a
+    hydrodynamic medium from a Glauber-sampled production point, and loses
+    energy at the holographic strong-coupling rate;
+  - later versions add medium response (Cooper-Frye) and elastic Moliere
+    scatterings;
+  - hadronisation is PYTHIA's.
+- **Level 3 exists by construction:** the medium jet is the same realised
+  vacuum shower (level 2) with per-parton energy loss. "Each quenched shower
+  is obtained by modifying a known vacuum shower and therefore provides
+  direct jet-by-jet supervision" (EuCAIFCon 2026).
+- **What differs between the paired outputs:**
+  - the production point and orientation in the medium;
+  - the sampling of the medium response;
+  - Moliere kicks, where enabled;
+  - hadronisation, which is a separate string fragmentation of the
+    modified partons.
+- **Several medium realisations of one vacuum shower** come from
+  re-sampling these. The target is then a conditional distribution
+  p(medium jet | vacuum shower), not a deterministic map, and its width can
+  be measured directly.
+- **Parent showers must be disjoint** between training and evaluation.
+- **Availability:** no public release of the HYBRID code was found. Access
+  would go through the authors, for example D. Pablos, who co-authored the
+  report. This is unconfirmed until the code, or a small paired sample, is
+  obtained.
+
+**Conclusions:**
+- JEWEL, as documented, cannot supply shower-level pairs; at most
+  hard-scattering-level pairs with a code change, and those leave the whole
+  shower unpaired.
+- HYBRID can supply shower-level pairs by design. With a stochastic medium,
+  the realistic target is a conditional distribution.
+- Nothing here validates the physics of such pairs. The claims in this file
+  about pairs stay restricted to the toy until a paired physical sample
+  exists.
+
+    python scripts/flow/closure_teacher.py --run closure_pk1_s0     # cache, 588 s
+    python scripts/flow/closure_guided_audit.py                      # audit
+    python scripts/flow/closure_continue.py --label closure_cont_paired_s0 \
+        --mode paired --updates 12000 --ckpt-updates 2000
+    python scripts/flow/closure_continue.py --label closure_cont_guided_s0 \
+        --mode guided --updates 12000 --ckpt-updates 2000             # stopped at 6000
+    python scripts/flow/closure_eval.py closure_cont_paired_s0 closure_cont_guided_s0 \
+        --select --setting 32:midpoint --train-n 2000
+    python scripts/flow/closure_eval.py closure_pk1_s0 closure_cont_paired_s0 \
+        closure_cont_guided_s0 --control --setting 32:midpoint \
+        --out outdir/sphenix/flow/closure_teacher_abc_m32
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything
@@ -1790,26 +2049,25 @@ and end-to-end times), `inline_eval.csv`, `evals/{val,jewel}_truth.csv`
 (one row per checkpoint, network and inference setting) and the per-event
 jet energies `evals/*_truth/*.npy`.
 
-## Status (2026-09-26 21:30)
+## Status (2026-09-26 23:30)
 
 All runs and benchmark jobs have ended; nothing of this study is running.
 
-- **Done 2026-09-25/26:**
-  - the posterior-sampler study (a reference);
-  - the backbone ablation;
-  - the jet -> jet closure test and the location of its failure. The
-    unpaired coupling, not the flow-matching pipeline, loses fine
-    structure.
-  - the semi-paired test:
-    - 2000 true pairs alone give a near-exact per-jet map for this toy;
-    - mixing them with unpaired minibatch-OT pairs destroys that: the
-      network memorises the pairs and blurs the rest.
-- **Next, as the evidence suggests:**
-  - a pair-guided coupling: fit the few pairs first, then OT-match the
-    unpaired targets to that model's predictions;
-  - for vacuum -> medium, whether paired JEWEL vacuum/medium simulation
-    exists, and how random its modification is (it would need a
-    conditional, stochastic flow).
+- **Latest, the teacher-guided coupling:**
+  - even a perfect teacher can only point to other real jets (the audit);
+  - guided unpaired training destroys the 2k-pair teacher's fidelity (shape
+    EMD 0.0009 -> 0.079);
+  - paired-only continuation adds nothing.
+  - So unpaired data has no useful role in this toy, whether minibatch-OT
+    coupled or teacher-guided.
+- **Physical pairs:**
+  - JEWEL, as documented, cannot supply shower-level pairs;
+  - HYBRID can, by design, with a stochastic medium part, but its code is
+    not public (contact the authors).
+- **Next:** obtain a small paired HYBRID sample with several medium
+  realisations per vacuum shower. That measures how random the
+  modification is, and whether the target is a map or a conditional
+  distribution, before any further model work.
 - **Also open:**
   - jet-level physics on extracted images;
   - why OT-CFM is better on JEWEL than on val;

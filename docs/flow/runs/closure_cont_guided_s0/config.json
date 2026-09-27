@@ -1,0 +1,26 @@
+{
+    "method": "jetflow",
+    "channels": 96,
+    "res_blocks": 2,
+    "attn": [
+        4
+    ],
+    "backbone": "unet",
+    "sigma": 0.0,
+    "label": "closure_cont_guided_s0",
+    "mode": "guided",
+    "teacher": "closure_pk1_s0",
+    "teacher_step": 7350,
+    "paired_n": 2000,
+    "batch": 256,
+    "weight": 1.0,
+    "updates": 12000,
+    "lr": 0.0002,
+    "warmup": 1000,
+    "ema": 0.9999,
+    "grad_clip": 1.0,
+    "seed": 0,
+    "cost": "shape_energy (guided)",
+    "pairing": "guided",
+    "gpu": "NVIDIA RTX A6000"
+}

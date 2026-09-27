@@ -1,6 +1,6 @@
 # Summary: speeding up UVCGAN-S, and flow matching for sPHENIX background subtraction
 
-*As of 2026-09-26, 21:30. Branch `ddp` of github.com/Shuonli/uvcgan-s.
+*As of 2026-09-26, 23:30. Branch `ddp` of github.com/Shuonli/uvcgan-s.
 This file is the short version. The full logs, with job numbers and
 commands, are `SCALING_NOTES.md` (UVCGAN-S training) and `FLOW_NOTES.md`
 (flow matching).*
@@ -493,6 +493,47 @@ A sequence of cheap diagnostics, then controls:
   random even for the same collision, so the flow would then need to output
   a distribution per jet.
 
+## Part 8: can the few-pair model make unpaired data useful? And can real pairs be made?
+
+- **Idea:** freeze the model trained on 2,000 true pairs (the "teacher").
+  Let it propose where each unpaired jet should end up, and match each
+  unpaired jet to the real target jet closest to that proposal.
+- **Check before training:**
+  - even a perfect teacher can only point at other real jets. Among 256
+    candidates, the closest one to the true answer is still 7x further away
+    than leaving the jet unchanged;
+  - the teacher's guidance barely changes which jet gets picked.
+- **Training (same pairs, same budget):**
+
+| model | shape error (lower is better) | energy error |
+| :--- | ---: | ---: |
+| teacher (2,000 pairs) | 0.0009 | 0.13 GeV |
+| teacher + more paired-only training | 0.0009 | 0.14 GeV |
+| teacher + teacher-guided unpaired data | 0.079 | 1.87 GeV |
+| (doing nothing) | 0.032 | 6.6 GeV |
+
+- **Result:**
+  - Adding the guided unpaired data wrecks the teacher within minutes: the
+    blurred cores come back.
+  - More paired-only training doesn't help either.
+  - So in this toy, unpaired data coupled this way adds nothing on top of a
+    few true pairs; the toy experiment stops here.
+- **Real pairs:**
+  - JEWEL, as documented, can't give "the same jet with and without medium".
+    Its medium changes the shower as it develops, so there is no vacuum
+    shower to compare to. At best, with a code change, it could give the
+    same initial hard collision, with different showers after that.
+  - HYBRID is built the other way: it takes a PYTHIA vacuum shower and makes
+    each parton lose energy. So it naturally gives the same shower with and
+    without medium, and a recent conference report uses exactly that.
+  - The medium part is random (where the jet starts in the medium, the
+    medium's response, hadronisation). So one vacuum jet maps to a spread
+    of possible modified jets, not a single one.
+  - The HYBRID code isn't public; we would have to ask its authors.
+- **Next:** get a small paired HYBRID sample, with several medium versions
+  of each vacuum shower, to measure how random the change really is before
+  building more models.
+
 ## Where everything is
 
 - `FLOW_NOTES.md`: the full log of the flow study (pre-registration,
@@ -515,11 +556,9 @@ A sequence of cheap diagnostics, then controls:
 
 ## Still open
 
-- A pair-guided coupling: fit the few pairs first, then match the unpaired
-  data to that model's predictions. Test it in the same closure test with 1%
-  pairs.
-- Whether paired JEWEL vacuum/medium simulation is available, and how
-  random its per-event modification is.
+- A small paired HYBRID sample (several medium versions per vacuum shower),
+  obtained from the authors, to measure how random the modification is. It
+  decides whether the target is a map or a conditional distribution.
 - Jet-level physics with the jets actually found in the extracted image.
   So far a jet is the cone at the true axis.
 - Why OT-CFM does better on JEWEL than on val.

@@ -1,0 +1,11 @@
+{
+    "run": "closure_pk1_s0",
+    "step": 7350,
+    "network": "ema",
+    "solver": "midpoint 32",
+    "clip": "at 0",
+    "train_jets": 200000,
+    "seconds": 588.3511049598455,
+    "ms_per_jet": 2.9417555247992278,
+    "gpu": "NVIDIA RTX A6000"
+}

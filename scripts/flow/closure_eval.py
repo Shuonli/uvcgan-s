@@ -198,6 +198,8 @@ def scores(pred, pairs, jets, name):
         'emd_gev' : float(full.mean()),
         'shape_emd' : float(np.nanmean(shape)),
         'shape_emd_median' : float(np.nanmedian(shape)),
+        'shape_emd_p90' : float(np.nanquantile(shape, 0.9)),
+        'shape_emd_p99' : float(np.nanquantile(shape, 0.99)),
     }
     rows = []
     for q in [ 'E' ] + OBSERVABLES:
@@ -279,7 +281,10 @@ TOWER_CLASSES = [ ('=0', 0, 0), ('<0.2', 1e-9, 0.2), ('0.2-1', 0.2, 1),
 def control_scores(raw, pairs, jets, name):
     """The positive-control report of one output (raw: before the clip)."""
     # pylint: disable=too-many-locals
-    (row, _) = scores(np.clip(raw, 0, None), pairs, jets, name)
+    (row, obs) = scores(np.clip(raw, 0, None), pairs, jets, name)
+    for o in obs:
+        if o['observable'] in ('E', 'mass', 'girth', 'ptd', 'zlead'):
+            row[f"w1_{o['observable']}"] = o['w1_sigma']
     o_f = jets.observables(np.clip(raw, 0, None))
     o_t = jets.observables(pairs['tgt'])
     o_j = jets.observables(pairs['src'])
@@ -352,12 +357,14 @@ def control(cmdargs, device):
 
     df = pd.DataFrame(rows)
     df.to_csv(f'{cmdargs.out}.csv', index = False)
-    show = [ [ 'model', 'n', 'shape_emd', 'shape_emd_median', 'emd_gev',
+    show = [ [ 'model', 'n', 'shape_emd', 'shape_emd_median', 'shape_emd_p90',
+               'shape_emd_p99', 'emd_gev',
                'E_out_over_E_in', 'E_out_over_E_in_sd', 'E_out_over_E_true',
                'E_bias_gev', 'E_rmse_gev' ],
              [ 'model', 'dmass_true_mean', 'dmass_true_sd', 'dmass_bias',
                'dmass_rmse', 'dgirth_true_mean', 'dgirth_true_sd',
                'dgirth_bias', 'dgirth_rmse' ],
+             [ 'model', 'w1_E', 'w1_mass', 'w1_girth', 'w1_ptd', 'w1_zlead' ],
              [ 'model', 'empty_towers', 'halo_signed_gev', 'halo_clipped_gev' ]
              + [ f'tower{c[0]}_{k}' for c in TOWER_CLASSES
                  for k in ('mean', 'rms') ] ]
