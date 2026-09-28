@@ -2508,6 +2508,14 @@ response near 0.8, marginals no worse than OT-CFM's and no hard-core loss.
 Then a second seed; if robust, one unpaired M -> B pilot through the Part 9
 benchmark. Otherwise stop after the closure test and report the limitation.
 
+**When eps = 0.25 is run (fixed 11:58, before any score of a refined
+model).** Only if alpha-DSBM fails the gate *and* its error is dominated by
+the sampling spread: on the 1000 validation pairs of the step check, the
+shape EMD between two independent samples of the same jet is at least its
+single-sample shape EMD to T(J). (For a Euclidean distance, the spread then
+makes at least half of the squared error.) Otherwise the error is mostly
+systematic, not the noise level's, and the test stops at eps = 1.
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything
