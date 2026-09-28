@@ -266,6 +266,17 @@ def steps_check(cmdargs, device):
 
 OBS_SPREAD = [ 'E', 'mass', 'girth', 'ptd', 'zlead' ]
 
+def colour(label):
+    """One colour per arm in every figure (the slides' colours)."""
+    low = label.lower()
+    for (key, c) in [ ('identity', '#7f7f7f'), ('alpha-dsbm', '#d62728'),
+                      ('pretrained', '#9ecae1'), ('bridge', '#1f77b4'),
+                      ('ot-cfm', '#2ca02c'), ('paired', '#ff7f0e') ]:
+        if key in low:
+            # a second noise level of the same arm: darker
+            return '#8c1d1d' if (key == 'alpha-dsbm' and '0.25' in low) else c
+    return 'k'
+
 def multi(cmdargs, device):
     """K samples per test jet: sampling variability, and the average image."""
     # pylint: disable=too-many-locals
@@ -330,14 +341,14 @@ def figure(cmdargs, device):
         full_outputs[label] = out
         if m.bridge and i == 0:
             samples = [ np.clip(m(pairs['src'], 1000 + k), 0, None) for k in range(8) ]
-            for k in range(3):
+            for k in range(2):
                 columns.append((f'{label}\nsample {k + 1}', samples[k][pick]))
             columns.append((f'{label}\nmean of 8', np.mean(samples, axis = 0)[pick]))
         else:
             columns.append((label, out[pick]))
 
     (fig, axes) = plt.subplots(len(pick), len(columns),
-                               figsize = (1.55 * len(columns), 1.75 * len(pick)))
+                               figsize = (1.45 * len(columns), 2.0 * len(pick)))
     for (c, (name, img)) in enumerate(columns):
         w = jsel.window(img).cpu().numpy()
         (_, shape) = jsel.emds(img, sel['tgt'])
@@ -349,11 +360,11 @@ def figure(cmdargs, device):
             title = f'{w[r].sum():.1f} GeV' + (f'\nshape {shape[r]:.3f}' if c > 0 else '')
             ax.set_title(title, fontsize = 5.5)
             if r == 0:
-                ax.set_xlabel(name, fontsize = 5.5)
+                ax.set_xlabel(name, fontsize = 5.5, labelpad = 12)
                 ax.xaxis.set_label_position('top')
     fig.suptitle('Closure test jets, log10(E + 0.1): single samples (fixed seed) unless'
                  ' marked; shape EMD to T(J), unit-energy jets', fontsize = 7)
-    fig.tight_layout()
+    fig.tight_layout(h_pad = 1.2)
     fig.savefig(cmdargs.figure, dpi = 150)
     plt.close(fig)
 
@@ -373,8 +384,10 @@ def figure(cmdargs, device):
             v = err[sel_t]
             means.append(float(v.mean()))
             rmss.append(float(v.pow(2).mean().sqrt()))
-        axes[0].bar(xs + (k - len(all_out) / 2 + 0.5) * width, means, width, label = label)
-        axes[1].bar(xs + (k - len(all_out) / 2 + 0.5) * width, rmss, width, label = label)
+        axes[0].bar(xs + (k - len(all_out) / 2 + 0.5) * width, means, width, label = label,
+                    color = colour(label))
+        axes[1].bar(xs + (k - len(all_out) / 2 + 0.5) * width, rmss, width, label = label,
+                    color = colour(label))
     for (ax, t) in zip(axes, [ 'mean error, GeV', 'RMS error, GeV' ]):
         ax.set_xticks(xs)
         ax.set_xticklabels([ c[0] for c in classes ])
@@ -399,11 +412,14 @@ def figure(cmdargs, device):
                 ls = ':', density = True, label = 'J (identity)')
         for (label, out) in full_outputs.items():
             v = jets.observables(out)[q]
-            ax.hist(v[np.isfinite(v)], bins, histtype = 'step', density = True, label = label)
+            ax.hist(v[np.isfinite(v)], bins, histtype = 'step', density = True, label = label,
+                    color = colour(label))
         ax.set_title(q, fontsize = 7)
         ax.tick_params(labelsize = 6)
-    axes[0].legend(fontsize = 5)
-    fig.tight_layout()
+    (handles, labels) = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc = 'lower center', ncol = len(labels), fontsize = 6,
+               frameon = False)
+    fig.tight_layout(rect = (0, 0.08, 1, 1))
     fig.savefig(f'{base}_distributions.png', dpi = 150)
     plt.close(fig)
     print(f'wrote {cmdargs.figure}, {base}_residuals.png, {base}_distributions.png')

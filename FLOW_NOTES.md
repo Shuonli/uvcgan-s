@@ -2516,6 +2516,13 @@ single-sample shape EMD to T(J). (For a Euclidean distance, the spread then
 makes at least half of the squared error.) Otherwise the error is mostly
 systematic, not the noise level's, and the test stops at eps = 1.
 
+**Triggered (13:57).** eps = 1 failed the gate on test (single-sample shape
+EMD 0.097 against the identity's 0.032), and on the step check's 1000
+validation pairs two samples of a jet differ by 0.116 against 0.099 to
+T(J) (ratio 1.17). The eps = 0.25 arms (`dsbm_*_e025_s0`, jobs 20314-20316)
+were launched with everything else unchanged (midpoint noise sd 0.25 in z,
+0.16 in log E).
+
 ### Gaussian check results (jobs 20238-20270, 2026-09-28)
 
 `dsbm_gauss.py`, pi0 = N(0, I_16), pi1 = N(0, s1^2 I_16), eps = 1, 30
@@ -2565,6 +2572,101 @@ refinement; `docs/flow/dsbm/gauss_check.{png,csv}`, per-run histories
   linear either, so the closure's marginals are checked against the target.
 - Cost of the check and its diagnostics: 15 jobs, 2.1 GPU-hours on one
   A6000 each (sacct).
+
+### Closure results at eps = 1 (jobs 20271-20274 training, 20311-20313 scoring)
+
+**Training** (one A6000 each, run side by side on dahlia; `summary.json`):
+
+| arm | GPU h | updates | updates / s | time in rollouts (OT: matching) | peak GB | inference, ms / jet |
+| :--- | ---: | ---: | ---: | ---: | ---: | :--- |
+| bridge, pretrained | 0.50 | 26.9k | 14.9 | | 3.6 | SDE 30 steps, 1.51 |
+| alpha-DSBM | 0.50 + 1.50 | 26.9k + 9.0k | 1.67 | 89% (7680 NFE / update) | 3.8 | SDE 30 steps, 1.51 |
+| bridge, continued | 0.50 + 1.50 | 26.9k + 80.6k | 14.9 | | 3.8 | SDE 30 steps, 1.51 |
+| OT-CFM, UVCGAN, L2 | 2.00 | 122.8k | 17.1 | 10% | 3.5 | ODE, 32 midpoint NFE, 1.61 |
+
+Latency: batch 2000, one A6000, in the same scoring job. The bridge net has
+32.8M parameters (the OT-CFM net 32.3M plus the direction embedding).
+
+**Validation** (`docs/flow/dsbm/closure_curves.{png,csv}`; 5000 pairs, one
+output per jet):
+- **alpha-DSBM:** shape EMD 0.195 (the pretrained bridge) -> 0.132 after 1k
+  refinement updates, then 0.110, 0.104, 0.101, 0.099, 0.098, 0.098, 0.097,
+  0.097. At the end it still falls by ~0.0005 per 1000 updates. Response
+  0.84-0.85 early in the refinement, back to 0.82.
+- **The continued bridge** stays at 0.195-0.200 and **OT-CFM** (UVCGAN) at
+  0.087-0.093, from their first checkpoints on.
+- Train (2000 or 5000 training pairs) and val agree within 0.001 for every
+  run. Selected: the last checkpoint for alpha-DSBM and the pretrained
+  bridge; 100 min for OT-CFM; 70 of 90 min of continuation for the
+  continued bridge.
+
+**Test** (`docs/flow/dsbm/closure_test.csv`, `_observables.csv`; 20k
+held-out pairs, one output per jet, fixed seed; `+` = historical U-Net
+reference, ODE):
+
+| | shape EMD: mean / median / p90 / p99 | EMD, GeV | E_out / E_in (0.8) | E RMSE, GeV | towers > 5 GeV: mean / rms, GeV | mass change RMSE, GeV | girth change RMSE |
+| :--- | :--- | ---: | :--- | ---: | :--- | ---: | ---: |
+| identity | 0.032 / 0.032 / 0.039 / 0.047 | 7.03 | 1 | 6.61 | +4.05 / 4.45 | 1.01 | 0.0044 |
+| paired control + | 0.0002 / 0.0001 / 0.0002 / 0.0005 | 0.015 | 0.7997 +- 0.0004 | 0.02 | -0.006 / 0.014 | 0.003 | 0.0000 |
+| OT-CFM U-Net, L2 + | 0.090 / 0.077 / 0.151 / 0.274 | 3.56 | 0.785 +- 0.079 | 2.83 | -1.82 / 3.44 | 0.55 | 0.0144 |
+| OT-CFM U-Net, shape + E + | 0.091 / 0.083 / 0.143 / 0.240 | 2.87 | 0.808 +- 0.038 | 1.32 | -0.87 / 2.16 | 0.54 | 0.0146 |
+| same, pool 1024 + | 0.076 / 0.070 / 0.117 / 0.188 | 2.37 | 0.802 +- 0.032 | 1.10 | -0.50 / 1.61 | 0.47 | 0.0113 |
+| **OT-CFM, UVCGAN, L2** (matched) | 0.092 / 0.079 / 0.152 / 0.284 | 4.02 | 0.778 +- 0.102 | 3.65 | -1.49 / 3.60 | 0.69 | 0.0145 |
+| bridge, pretrained | 0.194 / 0.151 / 0.360 / 0.731 | 7.62 | 0.799 +- 0.169 | 5.49 | -2.97 / 5.36 | 0.88 | 0.0289 |
+| bridge, continued | 0.195 / 0.152 / 0.363 / 0.729 | 7.56 | 0.788 +- 0.164 | 5.38 | -3.11 / 5.35 | 0.88 | 0.0292 |
+| **alpha-DSBM** | 0.097 / 0.090 / 0.142 / 0.224 | 5.75 | 0.818 +- 0.170 | 5.49 | -1.45 / 4.18 | 0.79 | 0.0152 |
+
+Distributions against T(J) (W1 / sigma: E, mass, girth, p_T^D, z_lead):
+identity 1.24, 0.92, 0.08, 0.67, 0.49; OT-CFM UVCGAN 0.18, 0.12, 0.03,
+0.15, 0.12; OT-CFM U-Net 0.02-0.13, 0.07-0.14, 0.06-0.10, 0.14-0.36,
+0.10-0.28; pretrained bridge 0.12, 0.09, 0.04, 0.08, 0.06; **alpha-DSBM
+0.02, 0.06, 0.03, 0.04, 0.03**. Per-jet RMSE / sigma (p_T^D, z_lead):
+alpha-DSBM 0.73, 0.84; OT-CFM UVCGAN 0.68, 0.72; identity 0.73, 0.55.
+Energy in the truth-empty towers: alpha-DSBM 0.014 GeV per jet, the bridges
+0.03, OT-CFM <= 0.001. Clipping: raw outputs are >= -0.045 GeV (the
+readout's floor is -0.1); every score uses the output clipped at 0, as
+before; in the truth-empty towers the clip changes the energy by < 0.001
+GeV per jet.
+
+**Sampling spread and integration** (the step check on 1000 val pairs,
+`closure_test_steps.csv`; 8 samples of each of 1000 test jets,
+`closure_test_multi.csv`):
+
+| | shape EMD to T(J) | two samples of one jet | 30 vs 60 steps, same noise | mean of 8 samples to T(J) | spread of E / sigma(E), girth, mass |
+| :--- | ---: | ---: | ---: | ---: | :--- |
+| bridge, pretrained | 0.192 | 0.222 | 0.016 | 0.130 | 0.71, 0.44, 0.58 |
+| bridge, continued | 0.193 | 0.224 | 0.016 | 0.132 | 0.67, 0.45, 0.56 |
+| alpha-DSBM | 0.099 | 0.116 | 0.013 | 0.058 | 0.70, 0.25, 0.51 |
+
+- **30 steps resolve the SDE.** Doubling the steps with the same Brownian
+  path moves a jet by about a tenth of the distance between two samples;
+  the error to T(J) is 0.099 against 0.100 at 60 steps.
+- **The spread is most of the error.** Two samples of a jet differ by more
+  than either differs from T(J). The energy of a jet varies between samples
+  by 70% of the whole population's spread: its E_out / E_in has sd 0.17,
+  against 0.03-0.10 for OT-CFM.
+- **Beyond the spread there is a systematic part.** Even the mean of 8
+  samples (reported separately, not a result) is 0.058, 1.8x the identity.
+- Single-sample scores vary by 0.001 between seeds of the sampler.
+
+**Decision (pre-registered gate): not promising at eps = 1.**
+- The single-sample shape EMD (0.097) is not below OT-CFM's with the same
+  backbone and budget (0.092), and 3x the identity's (0.032).
+- The energy response (0.82) is near 0.8 and the marginals are better than
+  OT-CFM's, but the hard core is not kept better (-1.45 / 4.18 GeV against
+  -1.49 / 3.60) and the per-jet energy error is worse (5.5 against 3.6 GeV).
+
+**What the refinement did (measured).**
+- At the same 2 GPU hours, learning the coupling online halves the error of
+  continuing the independent-pair bridge: shape 0.097 against 0.195,
+  girth-change RMSE 0.015 against 0.029, EMD 5.75 against 7.56 GeV.
+- It also gives the closest output distributions of every unpaired run:
+  W1 <= 0.06 sigma in the five observables, OT-CFM 0.03-0.18.
+- So the procedure works as an algorithm: it moves the pretrained coupling
+  towards a tighter one and keeps the marginals. That is not a correct
+  physical correspondence: the Schrodinger bridge at eps = 1 in these
+  coordinates is still a random map, its conditional spread comparable to
+  the jets' own variation.
 
 ## Paired noisy-interpolant pilot: does a noisy training path reduce the paired flow's core leakage? (set up 2026-09-28 13:40, before training)
 

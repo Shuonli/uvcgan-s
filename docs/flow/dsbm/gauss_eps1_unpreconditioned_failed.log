@@ -1,0 +1,12 @@
+analytic SB cross-covariance c* = 1.5616 (OT 2.0000, independent 0)
+pretrain    2000  c_fwd 0.5916  c_bwd 0.7246  (c* 1.5616)  var X1_hat 0.879 (target 4.000)  var X0_hat 0.264 (target 1.000)  [7 s]
+pretrain    4000  c_fwd 1.4084  c_bwd 1.3396  (c* 1.5616)  var X1_hat 4.007 (target 4.000)  var X0_hat 0.884 (target 1.000)  [14 s]
+pretrain    6000  c_fwd 1.5218  c_bwd 1.3692  (c* 1.5616)  var X1_hat 4.651 (target 4.000)  var X0_hat 0.931 (target 1.000)  [21 s]
+pretrain    8000  c_fwd 1.5300  c_bwd 1.3784  (c* 1.5616)  var X1_hat 4.700 (target 4.000)  var X0_hat 0.942 (target 1.000)  [28 s]
+pretrain   10000  c_fwd 1.5234  c_bwd 1.3803  (c* 1.5616)  var X1_hat 4.661 (target 4.000)  var X0_hat 0.945 (target 1.000)  [35 s]
+refine      2000  c_fwd 1.9081  c_bwd 1.2948  (c* 1.5616)  var X1_hat 5.974 (target 4.000)  var X0_hat 0.719 (target 1.000)  [103 s]
+refine      4000  c_fwd 2.0643  c_bwd 1.2036  (c* 1.5616)  var X1_hat 6.809 (target 4.000)  var X0_hat 0.637 (target 1.000)  [171 s]
+refine      6000  c_fwd 2.1081  c_bwd 1.1785  (c* 1.5616)  var X1_hat 7.010 (target 4.000)  var X0_hat 0.617 (target 1.000)  [239 s]
+refine      8000  c_fwd 2.0909  c_bwd 1.1927  (c* 1.5616)  var X1_hat 6.844 (target 4.000)  var X0_hat 0.629 (target 1.000)  [307 s]
+refine     10000  c_fwd 2.0608  c_bwd 1.2125  (c* 1.5616)  var X1_hat 6.627 (target 4.000)  var X0_hat 0.644 (target 1.000)  [375 s]
+refine     12000  c_fwd 2.0260  c_bwd 1.2322  (c* 1.5616)  var X1_hat 6.405 (target 4.000)  var X0_hat 0.660 (target 1.000)  [443 s]

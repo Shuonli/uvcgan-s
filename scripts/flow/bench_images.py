@@ -12,7 +12,8 @@ OUTDIR/sphenix/flow/bench/images/<set>/, float32, (N, 24, 64), GeV:
     uvcgan__sig.npy / __bkg.npy       the published UVCGAN-S (EMA
                                       generator), its two channels
     <run>__<setting>__bkg.npy         a flow run at its val-selected
-                                      checkpoint (EMA): the background B_hat
+                                      checkpoint (--step: or its last, or a
+                                      given one; EMA): the background B_hat
     <run>__<setting>__sig.npy         its signal: M - B_hat (one-panel
                                       arms, and the joint arm's residual
                                       readout) ...
@@ -52,6 +53,8 @@ def parse_cmdargs():
     parser.add_argument('--n-events', type = int, default = 20000)
     parser.add_argument('--batch', type = int, default = 1000)
     parser.add_argument('--force', action = 'store_true')
+    parser.add_argument('--step', default = 'best',
+        help = "the runs' checkpoint: 'best' (val-selected), 'last', or a step")
     return parser.parse_args()
 
 def out_dir(name):
@@ -124,7 +127,12 @@ def main():
 
         for run in cmdargs.runs:
             run_dir = os.path.join(fc.out_root(), run)
-            step = best_step(run_dir)
+            if cmdargs.step == 'best':
+                step = best_step(run_dir)
+            elif cmdargs.step == 'last':
+                step = ckpt_step(fc.list_checkpoints(run_dir)[-1])
+            else:
+                step = int(cmdargs.step)
             ckpt = [ c for c in fc.list_checkpoints(run_dir)
                      if ckpt_step(c) == step ][0]
             (method, net, state, config) = fc.load_run(run_dir, ckpt, device, 'ema')

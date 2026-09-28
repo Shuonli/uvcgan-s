@@ -4,5 +4,7 @@
     "unpaired FM": {"color": "#2ca02c"},
     "paired FM": {"color": "#ff7f0e"},
     "joint FM: M - B": {"color": "#d62728"},
-    "joint FM: direct S": {"color": "#d62728", "ls": "--"}
+    "joint FM: direct S": {"color": "#d62728", "ls": "--"},
+    "control (eta 0)": {"color": "#ff7f0e"},
+    "noisy (eta 0.1)": {"color": "#9467bd"}
 }
