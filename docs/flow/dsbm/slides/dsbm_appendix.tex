@@ -1,0 +1,35 @@
+% alpha-DSBM closure test, results appendix (FLOW_NOTES.md, "alpha-DSBM
+% closure test"). Build: cd docs/flow/dsbm/slides && ~/pyext/tectonic_env/bin/tectonic dsbm_appendix.tex
+% Numbers: docs/flow/dsbm/*.csv (dsbm_eval.py, dsbm_gauss_plot.py); figures:
+% docs/flow/dsbm/*.png.
+\documentclass[aspectratio=169,10pt]{beamer}
+\usetheme{default}
+\usefonttheme{professionalfonts}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{footline}{%
+  \hspace{1em}\textcolor{gray}{\tiny Appendix: online $\alpha$-DSBM on the closure test, 2026-09-28}%
+  \hfill\textcolor{gray}{\tiny A\insertframenumber}\hspace{1em}\vspace{0.6em}}
+\setbeamerfont{frametitle}{size=\large,series=\bfseries}
+\setbeamercolor{frametitle}{fg=black}
+\setbeamertemplate{itemize items}{\textbullet}
+\setbeamersize{text margin left=0.9em,text margin right=0.9em}
+
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{array}
+\graphicspath{{../}}
+
+\definecolor{cDSBM}{HTML}{d62728}
+\definecolor{cOT}{HTML}{2ca02c}
+\definecolor{cBr}{HTML}{1f77b4}
+\definecolor{cPai}{HTML}{ff7f0e}
+\newcommand{\dsbm}{\textcolor{cDSBM}{\textbf{$\alpha$-DSBM}}}
+\newcommand{\ot}{\textcolor{cOT}{\textbf{OT-CFM}}}
+\newcommand{\br}{\textcolor{cBr}{\textbf{bridge}}}
+\newcommand{\pai}{\textcolor{cPai}{\textbf{paired}}}
+\newcommand{\snote}[1]{{\scriptsize\textcolor{gray}{#1}}}
+
+\begin{document}
+\input{body.tex}
+\end{document}

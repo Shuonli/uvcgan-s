@@ -2668,6 +2668,71 @@ GeV per jet.
   coordinates is still a random map, its conditional spread comparable to
   the jets' own variation.
 
+### Closure results at eps = 0.25, and the verdict (jobs 20314-20316 training, 20322 scoring)
+
+Triggered by the pre-registered rule (above); everything else unchanged.
+Training: pretraining 27.0k updates in 30 min (selected at 10 min on val,
+0.207; the later stages start from its 30-min checkpoint, as at eps = 1);
+alpha-DSBM 8.7k refinement updates (1.61/s, 89% in rollouts); the continued
+bridge 81.2k. Validation: alpha-DSBM 0.217 -> 0.154 after 1k refinement
+updates, 0.124, 0.109, 0.098, 0.091, 0.087, 0.083, 0.080, 0.077 at 90 min,
+**still falling by 0.0025 per 10 min**; the continued bridge flat at 0.218.
+
+Test (20k pairs, one sample per jet; the full table, both noise levels and
+every reference: `docs/flow/dsbm/closure_test.csv`, slides A2):
+
+| | shape EMD: mean / median / p90 / p99 | EMD, GeV | E_out / E_in | E RMSE, GeV | towers > 5 GeV, GeV | mass / girth change RMSE |
+| :--- | :--- | ---: | :--- | ---: | :--- | :--- |
+| identity | 0.032 / 0.032 / 0.039 / 0.047 | 7.03 | 1 | 6.61 | +4.05 / 4.45 | 1.01 / 0.0044 |
+| OT-CFM, UVCGAN, L2 (matched) | 0.092 / 0.079 / 0.152 / 0.284 | 4.02 | 0.778 +- 0.102 | 3.65 | -1.49 / 3.60 | 0.69 / 0.0145 |
+| OT-CFM U-Net, shape + E, pool 1024 + | 0.076 / 0.070 / 0.117 / 0.188 | 2.37 | 0.802 +- 0.032 | 1.10 | -0.50 / 1.61 | 0.47 / 0.0113 |
+| alpha-DSBM, eps = 1 | 0.097 / 0.090 / 0.142 / 0.224 | 5.75 | 0.818 +- 0.170 | 5.49 | -1.45 / 4.18 | 0.79 / 0.0152 |
+| bridge, continued, eps = 0.25 | 0.217 / 0.165 / 0.445 / 0.757 | 7.53 | 0.781 +- 0.145 | 4.82 | -3.07 / 5.19 | 0.76 / 0.0320 |
+| **alpha-DSBM, eps = 0.25** | 0.077 / 0.068 / 0.124 / 0.237 | 4.42 | 0.796 +- 0.129 | 4.34 | -0.44 / 3.38 | 0.67 / 0.0122 |
+
+Distributions (W1 / sigma: E, mass, girth, p_T^D, z_lead): alpha-DSBM eps =
+0.25: 0.08, **0.35**, 0.08, 0.24, 0.20; eps = 1: 0.02, 0.06, 0.03, 0.04,
+0.03; OT-CFM UVCGAN: 0.18, 0.12, 0.03, 0.15, 0.12. On average the eps = 0.25
+model changes the jet mass by 1.38x the true change and the girth by 0.10x
+(truth 1, 1; eps = 1: 1.06, 0.60).
+
+Spread (step check, 1000 val pairs; 8 samples of 1000 test jets): two
+samples of a jet differ by 0.062 against 0.079 to T(J) (ratio 0.79; eps =
+1: 1.17); the mean of 8 samples scores 0.064 against 0.077 for one sample
+(eps = 1: 0.058 against 0.096); 30 against 60 steps with the same noise:
+0.006. The per-jet energy spread falls from 0.70 to 0.45 of the population
+spread.
+
+**Verdict (pre-registered gate): not promising at either noise level; the
+test stops here.**
+- eps = 0.25 has the lowest single-sample shape EMD of the UVCGAN-backbone
+  runs (0.077; the matched OT-CFM 0.092) and keeps the hard core best
+  (-0.44 GeV mean error; OT-CFM -1.49). That is at the historical 4x-pool
+  OT-CFM's level (0.076), not "clearly below" OT-CFM, and it is 2.4x the
+  identity. Its distributions are worse than OT-CFM's (mass, p_T^D, z_lead),
+  so the gate fails on two of its conditions.
+- eps = 1 fails as reported above.
+- No second seed and no M -> B pilot (both were conditional on the gate).
+  The eps = 0.25 curve had not flattened at 2 GPU h, so its limit at a
+  larger budget is **inconclusive**. Even at its final, slowing rate
+  (-0.0025 per 10 min; -0.031 over the last hour) it would need at least 3
+  more GPU hours to reach the identity's 0.032.
+
+**Measured, and what it means.**
+- Algorithmic: at both noise levels the online refinement halves the error
+  of continued independent-pair training at the same cost (0.097 against
+  0.195; 0.077 against 0.217). A smaller eps makes the single samples less
+  random (spread 0.12 -> 0.06).
+- Its error then becomes systematic: the mass change overshoots and the
+  broadening is missing. The Gaussian check showed that the online loop
+  amplifies the network's approximation error (MLP: +3-7% coupling, +5-13%
+  variance); the same mechanism here is a hypothesis, not tested.
+- Physical correspondence is a separate question: the Schrodinger bridge of
+  |x - y|^2 / 2 in log-energy coordinates is a mathematical choice of
+  coupling. T(J) is not that coupling's answer (the identity's own error,
+  0.032, is well below what any unpaired coupling reached), so even a
+  converged bridge would not be evidence of the physical modification.
+
 ## Paired noisy-interpolant pilot: does a noisy training path reduce the paired flow's core leakage? (set up 2026-09-28 13:40, before training)
 
 **Why.** In the consolidated benchmark the *paired* background-only flow
@@ -2935,28 +3000,65 @@ and end-to-end times), `inline_eval.csv`, `evals/{val,jewel}_truth.csv`
 (one row per checkpoint, network and inference setting) and the per-event
 jet energies `evals/*_truth/*.npy`.
 
-## Status (2026-09-28 01:30)
+alpha-DSBM closure test (`dsbm.py`, `dsbm_eval.py`; per run
+`OUTDIR/sphenix/flow/<label>/`: `config.json` with eps, the midpoint noise
+sd and the endpoint variances, `history.csv`, `summary.json` with rollout
+time and NFE, `checkpoints/`, `evals/closure_{val,train}_sde30.csv`):
 
-All runs and benchmark jobs have ended; nothing of this study is running.
+    $PYTHON scripts/flow/dsbm_gauss.py --out docs/flow/dsbm/diag_L3 --model linear \
+        --precond-scales --refine 20000 --refine-lr 3e-5 --batch 512 --warmup 1000
+    j=$(LABEL=dsbm_pre_e1_s0 STAGE=pretrain MINUTES=30 EPS=1.0 SEED=0 \
+        sbatch -w dahlia scripts/flow/dsbm_run.sbatch | awk '{print $4}')
+    LABEL=dsbm_ref_e1_s0 STAGE=refine INIT=dsbm_pre_e1_s0 MINUTES=90 EPS=1.0 \
+        sbatch -w dahlia --dependency=afterok:$j scripts/flow/dsbm_run.sbatch
+    LABEL=dsbm_cont_e1_s0 STAGE=continue INIT=dsbm_pre_e1_s0 MINUTES=90 EPS=1.0 \
+        sbatch -w dahlia --dependency=afterok:$j scripts/flow/dsbm_run.sbatch
+    # (eps 0.25: the same with EPS=0.25 and labels dsbm_*_e025_s0)
+    LABEL=closure_uvcgan_l2_s0 COST=l2 SEED=0 MINUTES=120 \
+        EVAL_ARGS="--setting 32:midpoint --train-n 5000" sbatch -w dahlia \
+        scripts/flow/closure_run.sbatch --backbone uvcgan
+    RUNS="closure_paired_s0 ... dsbm_ref_e025_s0" LABELS="..." \
+        OUT=docs/flow/dsbm/closure_test FIG_RUNS="..." FIG_LABELS="..." \
+        sbatch -w dahlia scripts/flow/dsbm_report.sbatch   # the job 20322 list
+    $PYTHON scripts/flow/dsbm_tables.py; $PYTHON scripts/flow/dsbm_curves.py ...
+    $PYTHON scripts/flow/dsbm_gauss_plot.py LABEL=docs/flow/dsbm/diag_X ...
+    cd docs/flow/dsbm/slides && ~/pyext/tectonic_env/bin/tectonic dsbm_appendix.tex
 
-- **Latest, the consolidated benchmark** (section above; deck
+Paired noisy-interpolant pilot: `docs/flow/bench/README.md` (end).
+
+## Status (2026-09-28 17:00)
+
+All runs of this study have ended; nothing is running.
+
+- **Latest: two single-question experiments, both negative, both stopped as
+  pre-registered.**
+  - **Online alpha-DSBM on the closure test** (section above; appendix
+    `docs/flow/dsbm/slides/dsbm_appendix.pdf`). The code reproduces the
+    analytic Schrodinger bridge on Gaussians. On the closure test, learning
+    the coupling online halves the error of an unlearned bridge at equal
+    cost. Single samples are 0.097 (eps = 1) and 0.077 (eps = 0.25) in
+    shape EMD, against 0.092 for OT-CFM with the same backbone, 0.032 for
+    doing nothing and 0.0002 for the paired control. At eps = 1 the
+    sampling spread dominates; at eps = 0.25 a systematic mass and girth
+    error. Gate failed; no second seed, no M -> B pilot.
+  - **Paired noisy-interpolant pilot** (section above; deck slides 11-13).
+    A sine-shaped noisy training path (eta = 0.1) changes nothing
+    measurable in the paired background-only flow: the core in B_hat stays
+    at 23% (accurate solve). The trajectory diagnostic shows the core is
+    lost even from states on the true path. Stopped; JEWEL untouched.
+- **Consolidated benchmark** (still the reference; deck
   `docs/flow/bench/slides/bench_deck.pdf`):
-  - no flow arm is as faithful as UVCGAN-S; after a frozen calibration the
-    background-only flows match its jet energy resolution;
+  - no flow arm is as faithful as UVCGAN-S;
   - predicting the background alone loses 12-25% of the hardest towers'
     energy, paired or not; predicting both keeps it but drops soft signal
-    and low-pT jets;
-  - pairing improves images, fakes and per-jet substructure, not the core
-    loss;
-  - the unpaired flow's good average resolution coexists with a soft floor
-    (15% fakes) that hides its core loss.
+    and low-pT jets.
 - **Missing:** ICS (fjcontrib), the paper's own analysis code.
-- **Earlier, still valid:**
-  - the teacher-guided coupling adds nothing to few true pairs in the toy;
-  - JEWEL cannot supply shower-level pairs as documented; HYBRID can, but
-    its code is not public (contact the authors).
 - **Open:**
   - a paired HYBRID sample with several medium realisations per vacuum
     shower, to measure how random the modification is;
-  - why the flows do better on JEWEL than on val;
-  - the dependence of unpaired correspondence on the matching cost.
+  - the dependence of unpaired correspondence on the chosen coupling:
+    minibatch OT, the Schrodinger bridge at two noise levels and the
+    teacher all fall short of the identity on the closure test;
+  - why the background-only flow's field stops short in the core. The
+    pilot rules out the missing supervision around the paths at eta = 0.1;
+    the posterior-mean explanation is untested.

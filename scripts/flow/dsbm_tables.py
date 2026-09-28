@@ -21,16 +21,16 @@ import fm_common as fc
 TEX = {
     'identity F(J) = J' : (r'identity $F(J) = J$', False),
     'paired control' : (r'\pai{} control', True),
-    'OT-CFM U-Net l2' : (r'\ot{}, U-Net, $L^2$', True),
-    'OT-CFM U-Net shape+E' : (r'\ot{}, U-Net, shape + $E$', True),
-    'OT-CFM U-Net shape+E pool 1024' : (r'\ot{}, U-Net, shape + $E$, pool 1024', True),
-    'OT-CFM UVCGAN l2' : (r'\ot{}, UVCGAN, $L^2$', False),
-    'bridge pretrained eps 1' : (r'\br{} pretrained, $\varepsilon = 1$', False),
-    'bridge continued eps 1' : (r'\br{} continued, $\varepsilon = 1$', False),
-    'alpha-DSBM eps 1' : (r'\dsbm{}, $\varepsilon = 1$', False),
-    'bridge pretrained eps 0.25' : (r'\br{} pretrained, $\varepsilon = 0.25$', False),
-    'bridge continued eps 0.25' : (r'\br{} continued, $\varepsilon = 0.25$', False),
-    'alpha-DSBM eps 0.25' : (r'\dsbm{}, $\varepsilon = 0.25$', False),
+    'OT-CFM U-Net l2' : (r'\ot{} U-Net, $L^2$', True),
+    'OT-CFM U-Net shape+E' : (r'\ot{} U-Net, shape+$E$', True),
+    'OT-CFM U-Net shape+E pool 1024' : (r'\ot{} U-Net, s+$E$, pool 1024', True),
+    'OT-CFM UVCGAN l2' : (r'\ot{} UVCGAN, $L^2$', False),
+    'bridge pretrained eps 1' : (r'\br{} pretrained, $\varepsilon$ 1', False),
+    'bridge continued eps 1' : (r'\br{} continued, $\varepsilon$ 1', False),
+    'alpha-DSBM eps 1' : (r'\dsbm{}, $\varepsilon$ 1', False),
+    'bridge pretrained eps 0.25' : (r'\br{} pretrained, $\varepsilon$ 0.25', False),
+    'bridge continued eps 0.25' : (r'\br{} continued, $\varepsilon$ 0.25', False),
+    'alpha-DSBM eps 0.25' : (r'\dsbm{}, $\varepsilon$ 0.25', False),
 }
 
 def parse_cmdargs():
@@ -52,10 +52,11 @@ def write(path, lines):
     print(f'wrote {path}')
 
 def fidelity_table(df, path):
-    lines = [ r'\scriptsize', r'\begin{tabular}{lrrrrrrrr}', r'\toprule',
+    lines = [ r'\scriptsize', r'\setlength{\tabcolsep}{3pt}', r'\begin{tabular}{lrrrrrrrr}',
+              r'\toprule',
               r' & \multicolumn{4}{c}{shape EMD to $T(J)$} & EMD & $E_{out}/E_{in}$ & $E$ RMSE'
-              r' & towers $>$ 5 GeV \\',
-              r' & mean & median & p90 & p99 & GeV & (0.8) & GeV & mean / rms, GeV \\',
+              r' & towers $>$5 GeV \\',
+              r' & mean & median & p90 & p99 & GeV & (0.8) & GeV & mean/rms, GeV \\',
               r'\midrule' ]
     for (_, r) in df.iterrows():
         lines.append(
@@ -85,7 +86,8 @@ def observables_table(df, path):
 def spread_table(steps, multi, path):
     m = multi.set_index('model')
     s = steps.set_index('model')
-    lines = [ r'\scriptsize', r'\begin{tabular}{lrrrrrrr}', r'\toprule',
+    lines = [ r'\scriptsize', r'\setlength{\tabcolsep}{3pt}', r'\begin{tabular}{lrrrrrrr}',
+              r'\toprule',
               r' & \multicolumn{3}{c}{val, 1000 jets: shape EMD} &'
               r' \multicolumn{4}{c}{test, 1000 jets, 8 samples each} \\',
               r' & to $T(J)$ & 2 samples & 30 vs 60 steps & one sample & 2 samples'
@@ -141,14 +143,15 @@ def cost(df):
     return pd.DataFrame(rows)
 
 def cost_table(tab, path):
-    lines = [ r'\scriptsize', r'\begin{tabular}{lrrrrrrrr}', r'\toprule',
-              r' & GPU h & updates & updates/s & rollout share & peak GB & selected at'
-              r' & inference NFE & ms / jet \\', r'\midrule' ]
+    lines = [ r'\scriptsize', r'\setlength{\tabcolsep}{3pt}', r'\begin{tabular}{lrrrrrrr}',
+              r'\toprule',
+              r' & GPU h & updates & updates/s & peak GB & selected at'
+              r' & NFE & ms / jet \\', r'\midrule' ]
     for (_, r) in tab.iterrows():
         lines.append(
             f"{name(r.model)} & {f(r.gpu_h_total, 2)} & {r.updates_total / 1000:.1f}k"
-            f" & {f(r.updates_per_s, 2)} & {f(r.rollout_share, 2)} & {f(r.peak_mem_gb, 1)}"
-            f" & {f(r.selected_gpu_h, 2)} h & {int(r.nfe)} & {f(r.ms_per_jet, 3)} \\\\")
+            f" & {f(r.updates_per_s, 1)} & {f(r.peak_mem_gb, 1)}"
+            f" & {f(r.selected_gpu_h, 2)} h & {int(r.nfe)} & {f(r.ms_per_jet, 2)} \\\\")
     lines += [ r'\bottomrule', r'\end{tabular}' ]
     write(path, lines)
 

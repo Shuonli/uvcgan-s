@@ -1,0 +1,15 @@
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrrrrrr}
+\toprule
+ & \multicolumn{3}{c}{val, 1000 jets: shape EMD} & \multicolumn{4}{c}{test, 1000 jets, 8 samples each} \\
+ & to $T(J)$ & 2 samples & 30 vs 60 steps & one sample & 2 samples & mean image & spread $E/\sigma_E$ \\
+\midrule
+\br{} pretrained, $\varepsilon$ 1 & 0.192 & 0.222 & 0.016 & 0.191 & 0.220 & 0.130 & 0.706 \\
+\br{} continued, $\varepsilon$ 1 & 0.193 & 0.224 & 0.015 & 0.192 & 0.221 & 0.132 & 0.669 \\
+\dsbm{}, $\varepsilon$ 1 & 0.099 & 0.116 & 0.013 & 0.096 & 0.118 & 0.057 & 0.700 \\
+\br{} pretrained, $\varepsilon$ 0.25 & 0.201 & 0.195 & 0.012 & 0.200 & 0.191 & 0.158 & 0.531 \\
+\br{} continued, $\varepsilon$ 0.25 & 0.211 & 0.209 & 0.015 & 0.212 & 0.204 & 0.167 & 0.507 \\
+\dsbm{}, $\varepsilon$ 0.25 & 0.079 & 0.062 & 0.006 & 0.077 & 0.064 & 0.064 & 0.449 \\
+\bottomrule
+\end{tabular}

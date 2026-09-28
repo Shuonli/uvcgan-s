@@ -66,6 +66,8 @@ def parse_cmdargs():
     parser.add_argument('--steps-check', action = 'store_true')
     parser.add_argument('--multi', type = int, default = 0)
     parser.add_argument('--figure', default = None)
+    parser.add_argument('--fig-quantiles', default = '0.25,0.5,0.75,0.95',
+        help = 'source-energy quantiles of the displayed test jets')
     parser.add_argument('--steps', type = int, default = 30)
     parser.add_argument('--seed', type = int, default = 0)
     parser.add_argument('--ode-setting', default = '32:midpoint')
@@ -334,7 +336,8 @@ def figure(cmdargs, device):
     pairs = load_pairs('test', cmdargs.n or 2000)
     jets  = Jets(pairs['row'], device)
     e     = pairs['src'][:, OFFSET:OFFSET + 9, OFFSET:OFFSET + 9].sum((1, 2))
-    pick  = [ int(np.argmin(np.abs(e - np.quantile(e, q)))) for q in (0.25, 0.5, 0.75, 0.95) ]
+    pick  = [ int(np.argmin(np.abs(e - np.quantile(e, float(q)))))
+              for q in cmdargs.fig_quantiles.split(',') ]
     sel   = { k : v[pick] for (k, v) in pairs.items() }
     jsel  = Jets(sel['row'], device)
     columns = [ ('J', sel['src']), ('T(J)', sel['tgt']) ]

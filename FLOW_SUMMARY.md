@@ -1,10 +1,11 @@
 # Summary: speeding up UVCGAN-S, and flow matching for sPHENIX background subtraction
 
-*As of 2026-09-28, 01:30. Branch `ddp` of github.com/Shuonli/uvcgan-s.
+*As of 2026-09-28, 17:00. Branch `ddp` of github.com/Shuonli/uvcgan-s.
 This file is the short version. The full logs, with job numbers and
 commands, are `SCALING_NOTES.md` (UVCGAN-S training) and `FLOW_NOTES.md`
-(flow matching). The latest result, the consolidated comparison with its
-slides, is Part 9.*
+(flow matching). The consolidated comparison with its slides is Part 9;
+the two latest, single-question experiments (a learned pairing, a noisy
+training path) are Parts 10 and 11. Both came out negative.*
 
 ## The task
 
@@ -602,6 +603,58 @@ A sequence of cheap diagnostics, then controls:
   figures `docs/flow/bench/`; details `FLOW_NOTES.md`, "Consolidated
   benchmark".
 
+## Part 10: can the model learn the pairing itself? (online alpha-DSBM, closure test)
+
+- **Question:** in the closure test of Parts 5-8, unpaired flow matching
+  loses each jet's fine structure because it pairs each jet with another
+  real jet. Does it help if the model learns the pairing itself, training
+  on partners it generates instead of partners picked from real jets?
+- **Method:** online alpha-DSBM (De Bortoli et al., 2024). One UVCGAN-S
+  network learns both directions of a noisy bridge between the two sets of
+  jets:
+  - first from random pairs;
+  - then from its own generated partners.
+  - It aims at the Schrodinger bridge, the "least effort" random pairing
+    at a chosen noise level. It is not an estimate of the physical
+    modification.
+  - The code was first checked on Gaussians, where the right answer is
+    known exactly. It reaches that answer within 1-3% when the network can
+    represent it; a small MLP overshoots by 3-7%.
+- **Test:** the same toy and data as Parts 5-8, 2 GPU hours per model, one
+  seed, one output per jet. The noise level was fixed in advance (1). One
+  lower level (0.25) was allowed only if the first failed through its
+  randomness, which it did.
+
+| model (shape error, lower is better) | shape error | energy error, GeV |
+| :--- | ---: | ---: |
+| doing nothing | 0.032 | 6.6 |
+| paired control (true pairs) | 0.0002 | 0.02 |
+| OT-CFM, same network | 0.092 | 3.6 |
+| bridge without learning the pairing | 0.195-0.217 | 4.8-5.4 |
+| **learned pairing, noise 1** | 0.097 | 5.5 |
+| **learned pairing, noise 0.25** | 0.077 | 4.3 |
+
+- **Learning the pairing helps.** It halves the error of the same bridge
+  trained on random pairs for the same time. At noise 1 it also gives the
+  most realistic jets as a population.
+- **But no single output is close to its true modified jet.**
+  - At noise 1, two outputs for the same jet differ more than either
+    differs from the truth: it draws a random jet with roughly the right
+    energy, not the jet's own modification.
+  - At noise 0.25 the randomness halves, and a systematic error takes
+    over: jet masses change 1.4x too much and the broadening is missing.
+  - Both stay 2.4-3x worse than doing nothing, the same as OT-CFM.
+- **Decision:** stopped as fixed in advance: no second seed, no test on the
+  real background problem. The noise-0.25 model was still improving at 2
+  hours, so how far it could go is open, but it would need at least 3 more
+  hours even to match doing nothing.
+- **Caveat:** even a perfect Schrodinger bridge is a mathematical choice of
+  pairing; matching the distributions does not make it the physical
+  modification.
+- **Where:** `FLOW_NOTES.md`, "alpha-DSBM closure test"; results and
+  figures `docs/flow/dsbm/`; a 4-slide appendix
+  `docs/flow/dsbm/slides/dsbm_appendix.pdf`.
+
 ## Part 11: does a noisy training path stop the paired flow losing the jet core?
 
 - **The problem (Part 9):** even when every training mixture comes with its
@@ -652,14 +705,19 @@ A sequence of cheap diagnostics, then controls:
     `readout_events_val.png`;
   - each run's config and scores, under `docs/flow/runs/`.
 - `docs/flow/bench/`: the consolidated benchmark (Part 9): the deck
-  (`slides/bench_deck.pdf`), paper-style figures, tables, run manifest
-  (`README.md` lists them).
+  (`slides/bench_deck.pdf`, slides 11-13: Part 11), paper-style figures,
+  tables, run manifest (`README.md` lists them); `noisy/`: Part 11.
+- `docs/flow/dsbm/`: the learned-pairing closure test (Part 10): the
+  Gaussian check, test tables and figures, the appendix
+  (`slides/dsbm_appendix.pdf`).
 - `scripts/flow/`: all code:
   - `fm_common.py`: the models;
   - `fm_train.py`, `fm_eval.py`, `fm_compare.py`: train, score, compare;
   - `readout_test.py`, `substructure.py`, `jet_fidelity.py`: read-outs and
     the jet-level benchmarks;
-  - the coupling diagnostics.
+  - the coupling diagnostics;
+  - `dsbm*.py`: the learned pairing (Part 10); `noisy_*.py`,
+    `sine_path_check.py`: the noisy-path pilot (Part 11).
 - `outdir/sphenix/flow/<run>/`: checkpoints, training histories and
   per-event outputs (not in git).
 
@@ -671,4 +729,9 @@ A sequence of cheap diagnostics, then controls:
 - Why OT-CFM does better on JEWEL than on val.
 - Any unpaired correspondence depends on the chosen matching cost. That is
   a method dependence to study, which agreement of the output distributions
-  cannot resolve.
+  cannot resolve. On the closure test no unpaired pairing tried so far
+  (minibatch OT, a teacher, the Schrodinger bridge at two noise levels)
+  beats doing nothing jet by jet.
+- Why the background-only flow stops short in the jet core, even from the
+  true path (Part 11). A noisy path does not change it; an explanation by
+  posterior averaging is untested.
