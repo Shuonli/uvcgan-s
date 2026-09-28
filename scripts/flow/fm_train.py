@@ -78,6 +78,13 @@ def parse_cmdargs():
         help = 'jetflow semi: share of each batch that is true pairs')
     parser.add_argument('--sigma', type = float, default = None,
         help = 'path noise: 0 for otcfm and condcfm, 1 for sbcfm')
+    parser.add_argument('--path', default = 'straight', choices = fc.PATHS,
+        help = 'training path of the flow methods (sigma 0): straight, or'
+               ' sine = straight + eta sin(pi t) eps with the target'
+               ' b - a + eta pi cos(pi t) eps (fm_common.Method.sine_path)')
+    parser.add_argument('--eta', type = float, default = 0.0,
+        help = '--path sine: the largest noise sd, at t = 1/2, in the'
+               ' standardised log-energy coordinates')
     parser.add_argument('--backbone', default = 'unet',
         choices = [ 'unet', 'uvcgan' ],
         help = 'velocity network: the ADM U-Net, or the UVCGAN-S generator'
@@ -90,6 +97,9 @@ def parse_cmdargs():
         help = 'training time budget of the run, in total')
     parser.add_argument('--max-steps', type = int, default = None)
     parser.add_argument('--ckpt-minutes', type = float, default = 2.5)
+    parser.add_argument('--ckpt-steps', type = int, default = None,
+        help = 'checkpoint every N updates instead (a multiple of 10), so'
+               ' that runs are compared at the same updates')
     parser.add_argument('--log-steps', type = int, default = 100)
     parser.add_argument('--inline-events', type = int, default = 2000,
         help = 'val events scored at each checkpoint, 0 for none')
@@ -142,11 +152,13 @@ def write_config(run_dir, cmdargs, n_params):
         old.setdefault('ot_pool', None)
         old.setdefault('paired_n', None)
         old.setdefault('paired_share', 0.5)
+        old.setdefault('path', 'straight')
+        old.setdefault('eta', 0.0)
         for key in [ 'method', 'batch', 'lr', 'sigma', 'channels',
                      'res_blocks', 'attn', 'seed', 'ema', 'warmup',
                      'cosine_steps', 'log_bias', 'augment', 'backbone',
                      'cost', 'cost_lambda', 'pairing', 'target_domain',
-                     'ot_pool', 'paired_n', 'paired_share' ]:
+                     'ot_pool', 'paired_n', 'paired_share', 'path', 'eta' ]:
             if old.get(key) != config.get(key):
                 raise RuntimeError(
                     f"resuming '{run_dir}' with {key} = {config.get(key)},"
@@ -235,10 +247,16 @@ def main():
         )
     method = fc.Method(cmdargs.method, norm, cmdargs.sigma, cmdargs.augment,
                        cmdargs.cost, cmdargs.cost_lambda, cmdargs.pairing,
-                       cmdargs.target_domain, cmdargs.paired_n)
+                       cmdargs.target_domain, cmdargs.paired_n, cmdargs.path,
+                       cmdargs.eta)
     if cmdargs.pairing == 'semi':
         method.n_paired = int(round(cmdargs.paired_share * cmdargs.batch))
     cmdargs.sigma = method.sigma
+    if cmdargs.path == 'sine':
+        assert method.matcher is not None and method.sigma == 0, \
+            '--path sine: a flow method with sigma 0'
+    assert cmdargs.ckpt_steps is None or cmdargs.ckpt_steps % 10 == 0, \
+        '--ckpt-steps: a multiple of 10 (the loop checks every 10 steps)'
 
     torch.manual_seed(cmdargs.seed)
     net = fc.construct_net(
@@ -280,6 +298,10 @@ def main():
 
     t0   = time.perf_counter()
     data = fc.GPUData(method.domains, device, cmdargs.seed, stats['step'])
+    # eps of the sine path: its own stream, like the data's, so that the
+    # global RNG draws (times, the matcher's) do not depend on the path
+    method.path_gen = torch.Generator(device = device)
+    method.path_gen.manual_seed(2_000_029 * cmdargs.seed + 7 + stats['step'])
     torch.cuda.synchronize()
     stats['load_time'] = stats.get('load_time', 0.0) + time.perf_counter() - t0
     print(f"data in GPU memory: {data.sizes()},"
@@ -409,7 +431,10 @@ def main():
             (cmdargs.max_steps is not None)
             and (stats['step'] >= cmdargs.max_steps)
         )
-        at_ckpt = (stats['train_time'] >= next_ckpt) or done
+        if cmdargs.ckpt_steps:
+            at_ckpt = (stats['step'] % cmdargs.ckpt_steps == 0) or done
+        else:
+            at_ckpt = (stats['train_time'] >= next_ckpt) or done
 
         if at_log or at_ckpt:
             row = {

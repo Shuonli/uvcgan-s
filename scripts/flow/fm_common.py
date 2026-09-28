@@ -79,6 +79,7 @@ Nothing here reads the index files: the domains are drawn independently.
 
 import copy
 import json
+import math
 import os
 import sys
 
@@ -106,6 +107,9 @@ JET_SHAPE = (16, 16)
 METHODS   = [ 'otcfm', 'sbcfm', 'condcfm', 'regress', 'regress_l1',
               'otcfm1', 'otcfm_pieces', 'postflow', 'regress_mse',
               'jetflow', 'otcfm1_paired', 'joint_paired' ]
+
+# training paths (Method.sine_path)
+PATHS = ('straight', 'sine')
 
 # methods whose flow starts from the mixture and uses a minibatch OT plan
 OT_METHODS = ('otcfm', 'sbcfm', 'otcfm1', 'otcfm_pieces', 'jetflow')
@@ -676,13 +680,22 @@ class Method:
 
     def __init__(self, name, norm, sigma = None, augment = 'none',
                  cost = 'l2', cost_lambda = 1.0, pairing = 'unpaired',
-                 target = 'closure_tgt', paired_n = None):
+                 target = 'closure_tgt', paired_n = None, path = 'straight',
+                 eta = 0.0):
         # pylint: disable=too-many-arguments
         assert name in METHODS, name
         assert augment in ('none', 'jets'), augment
         assert cost in ('l2', 'shape_energy'), cost
         assert pairing in ('unpaired', 'paired', 'semi'), pairing
+        assert path in PATHS, path
+        assert (path == 'sine') or (eta == 0), 'eta needs --path sine'
         self.pairing  = pairing
+        # training path (training only): 'straight', the matcher's; 'sine',
+        # the matcher's straight path plus eta sin(pi t) eps (sine_path);
+        # path_gen, its own generator of eps, is set by the trainer
+        self.path     = path
+        self.eta      = float(eta)
+        self.path_gen = None
         self.modify   = None
         # the jets with a known pair: the first paired_n of the source pool
         self.paired_n = paired_n
@@ -886,6 +899,24 @@ class Method:
         self.recovery = []
         return value
 
+    def sine_path(self, t, xt, ut):
+        """The noisy interpolant of `--path sine`, a stochastic interpolant
+        (Albergo, Boffi and Vanden-Eijnden, JMLR 26, 2025) with the straight
+        mean: x_t = (1 - t) a + t b + gamma(t) eps and u_t = (b - a) +
+        gamma'(t) eps, gamma(t) = eta sin(pi t), the same eps in both, added
+        to the straight path (xt, ut) of the sigma = 0 matcher. gamma is
+        evaluated as eta sin(pi min(t, 1 - t)), exactly 0 at t = 0 and 1 in
+        float32. eps comes from the method's own generator, so the global RNG
+        streams (the sampled times, the matcher's draws) are those of eta =
+        0. No clipping."""
+        assert self.sigma == 0, 'the sine path replaces the constant sigma'
+        eps    = torch.randn(xt.shape, device = xt.device, dtype = xt.dtype,
+                             generator = self.path_gen)
+        tt     = t.reshape(-1, *([ 1 ] * (xt.dim() - 1))).to(xt.dtype)
+        gamma  = self.eta * torch.sin(math.pi * torch.minimum(tt, 1 - tt))
+        dgamma = self.eta * math.pi * torch.cos(math.pi * tt)
+        return (xt + gamma * eps, ut + dgamma * eps)
+
     def loss(self, net, x0, x1, cond):
         if self.name == 'regress_mse':
             t     = torch.zeros(x1.shape[0], device = x1.device)
@@ -910,6 +941,8 @@ class Method:
         (t, xt, ut) = ConditionalFlowMatcher.sample_location_and_conditional_flow(
             self.matcher, x0, x1
         )
+        if self.path == 'sine':
+            (xt, ut) = self.sine_path(t, xt, ut)
 
         inp = xt if cond is None else torch.cat((xt, cond), dim = 1)
         if self.name == 'joint_paired':

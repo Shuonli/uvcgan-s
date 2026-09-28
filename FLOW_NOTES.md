@@ -2516,6 +2516,152 @@ single-sample shape EMD to T(J). (For a Euclidean distance, the spread then
 makes at least half of the squared error.) Otherwise the error is mostly
 systematic, not the noise level's, and the test stops at eps = 1.
 
+### Gaussian check results (jobs 20238-20270, 2026-09-28)
+
+`dsbm_gauss.py`, pi0 = N(0, I_16), pi1 = N(0, s1^2 I_16), eps = 1, 30
+Euler-Maruyama steps, 10k pretraining updates (Adam 1e-4, batch 256), then
+online refinement; 10k samples per measurement. Values relative to the
+analytic SB answer (coupling c* per dimension; variance s^2), after
+refinement; `docs/flow/dsbm/gauss_check.{png,csv}`, per-run histories
+`docs/flow/dsbm/diag_*.{csv,json}`:
+
+| variant (s1 = 2 unless noted) | network | coupling fwd / bwd | Var X1_hat | Var X0_hat | passes (5%) |
+| :--- | :--- | ---: | ---: | ---: | :---: |
+| pretrained only (every variant), network-free value 0.878 / 0.94 / 0.93 | | 0.86-0.89 | 0.93-0.95 | 0.92-0.95 | no |
+| no preconditioning (endpoint regression, job 20238; stopped) | MLP | 1.30 / 0.79 | 1.60 | 0.66 | no |
+| unit-variance preconditioning (jobs 20245-20258; lr 2e-5 shown) | MLP | 0.75 / 1.51 | 0.63 | 2.03 | no |
+| unit-variance preconditioning | **linear in x** | 1.002 / 1.008 | 0.98 | 0.99 | **yes** |
+| per-direction variances (as the closure) | **linear in x** | 1.004 / 1.031 | 0.99 | 1.03 | **yes** |
+| same, lr 3e-5, batch 512, 20k updates | **linear in x** | 0.991 / 1.019 | 0.97 | 1.01 | **yes** |
+| per-direction variances | MLP (paper K.2) | 1.065 / 1.043 | 1.13 | 1.08 | no |
+| same, lr 3e-5, batch 512, 20k updates | MLP | 1.030 / 1.032 | 1.05 | 1.05 | no (still falling) |
+| s1 = 1 (symmetric) | MLP | 1.047 / 1.044 | 1.07 | 1.07 | no |
+| s1 = 1, lr 3e-5, batch 512, 20k updates | MLP | 1.045 / 1.042 | 1.07 | 1.06 | no (still falling) |
+
+- **The conventions are right.** Pretraining reproduces the network-free
+  iteration (`imf_exact.py`: exact linear projections, the same 30-step
+  sampler) to <= 1% in the preconditioned MLP runs. With a network that can
+  represent the exact drift (linear in x, any function of time and
+  direction), online refinement converges to the analytic coupling and
+  marginals within 1-3%, and stays there at 20k updates. The discretised
+  exact fixed point is 1.007 / 1.002 (variances 0.996 / 0.984), so the
+  30-step sampler itself costs < 1%.
+- **The check discriminates.** The pretrained-only sampler matches both
+  marginals within 6-8% but its coupling is 12% short; a sampler with the
+  wrong-sign coupling (c = -2.00) fails; 30 against 60 steps with the same
+  Brownian path changes c by <= 1% (rms difference of the outputs 0.13).
+- **Two parameterisations failed and were replaced before the closure
+  runs:** plain endpoint regression (no skip; the pretrained forward
+  variance is already 17% high and refinement runs away), and Appendix J's
+  unit-variance preconditioning with unequal endpoint scales (a wrong fixed
+  point in every variant tried: warm-up, online-network rollouts, 100 steps,
+  lr 2e-5).
+- **The online loop amplifies function-approximation error.** The paper's
+  concatenation MLP overshoots: the coupling 3-7% and the variances 5-13%
+  high, shrinking only slowly with a 3x smaller learning rate and 2.5x more
+  updates (M3, S3 above). This is a property of the online procedure with a
+  network that can't represent the drift exactly (Appendix I discusses
+  error accumulation), not of the conventions. The UVCGAN backbone is not
+  linear either, so the closure's marginals are checked against the target.
+- Cost of the check and its diagnostics: 15 jobs, 2.1 GPU-hours on one
+  A6000 each (sacct).
+
+## Paired noisy-interpolant pilot: does a noisy training path reduce the paired flow's core leakage? (set up 2026-09-28 13:40, before training)
+
+**Why.** In the consolidated benchmark the *paired* background-only flow
+(`otcfm1_paired`, M -> B with each mixture's own background) still puts
+part of the jet core into the background: jet scale 0.828 with 4 Euler steps
+and 0.751 with the accurate solve; 16% / 23% of the true signal energy of
+towers with S > 10 GeV goes into B_hat (24% / 31% at S 5-10 GeV). Correct
+training pairs alone did not fix it. Sign: with S_hat = M - B_hat, lost
+signal means B_hat is too *high*; the flow stops short of the true
+background in the core, it does not subtract too much.
+
+**Hypothesis (not an established explanation).** Training only on
+noiseless straight interpolants supervises the velocity field only on the
+segments between (z(M), z(B)) pairs; the states the ODE visits at
+inference drift off them, where the field is extrapolated. A noisy
+interpolant that returns exactly to the endpoints trains the field in a
+neighbourhood of the paths. Caveats: even an exactly learned marginal
+transport need not be the best event-specific estimator; noisy training
+paths do not make this a posterior sampler or a solved Schrodinger bridge.
+
+**Path** (stochastic interpolants, Albergo, Boffi and Vanden-Eijnden, JMLR
+26, 2025; flow matching, Lipman et al., arXiv:2210.02747), with a =
+z_bkg(M), b = z_bkg(B_true), t ~ U[0, 1), eps ~ N(0, I) of a's shape:
+gamma(t) = eta sin(pi t); x_t = (1 - t) a + t b + gamma(t) eps; u_t = (b -
+a) + eta pi cos(pi t) eps (the same eps); loss mean((v(t, x_t) - u_t)^2).
+eta is the largest noise sd, at t = 1/2, in the standardised log-energy
+coordinates (not GeV); gamma(0) = gamma(1) = 0. `fm_train.py --path sine
+--eta ETA` adds gamma eps and gamma' eps to the straight path of the
+existing sigma = 0 matcher (`fm_common.Method.sine_path`); eps comes from
+its own generator, so initial weights, mixture order and sampled times
+are those of eta = 0. No clipping of the noisy states.
+
+**Checks before training** (`sine_path_check.py`, CPU, 64 real training
+pairs; `docs/flow/bench/noisy/path_check.json`): eta = 0 reproduces the
+straight path's times, states and targets bit for bit and leaves the global
+RNG state unchanged; eta = 0.1 keeps the times and the RNG stream; x_0 = a
+and x_1 = b exactly; u_t equals the central difference of x_t (float64, at
+fixed a, b, eps) to 3e-10 (|u| up to 6.7); the added noise has sd
+gamma(t) (ratio 0.999).
+
+**Arms** (seed 0, one A6000 each, run side by side on dahlia; only the path
+differs): control eta = 0 (`--path sine --eta 0`, identical to the
+existing straight path), treatment eta = 0.1. Everything else as the
+benchmark's paired arm: `otcfm1_paired`, the UVCGAN-S velocity backbone,
+log(E + 0.1) standardised, the same 633k training mixtures and val events,
+Adam 2e-4, warm-up 1000, clip 1, EMA 0.9999, batch 256. **Budget: exactly
+32,640 updates** (8 x 4080; the benchmark's seed 0 made 32,620 in its 2 h),
+checkpoints every 4080 updates (the benchmark run's own checkpoint steps,
+so the fresh control can be checked against it), inline val curves (1000
+events, 4 Euler) and the per-checkpoint val cone scores as in the
+benchmark. Wall time recorded. No new conditioning, matching,
+discriminator, endpoint, shape or joint loss.
+
+**Evaluation** (PYTHIA val only; JEWEL frozen until the comparison and
+choices are fixed, and then only if the pilot merits a follow-up):
+- **Primary: the final update (32,640) of both arms**, EMA, deterministic
+  ODE from z_bkg(M), S_hat = M - B_hat, the accurate solve (midpoint, 32
+  network evaluations = 16 steps). Checked against 64 evaluations on the
+  same 1000 val events for both arms; a finer solve only if the 32/64
+  difference is material next to the treatment effect. 4 Euler steps
+  reported separately as the fast readout; a gain only at 4 steps is not
+  evidence of a better continuous flow. Any secondary checkpoint choice
+  uses one declared rule for both arms (none planned).
+- **The benchmark's analysis, unchanged:** background error B_hat - B by
+  true signal energy of the tower with the energy-weighted leakage share
+  (S 5-10 and > 10 GeV bins the key ones); raw jet scale, calibrated
+  resolution (frozen val calibration), efficiency and fake rate; per-jet
+  bias / RMSE and distribution W1 of the substructure observables, kept
+  apart; per-tower error, the off-signal (S = 0) residual and the event
+  energy bias; the fixed event displays. References: the published
+  UVCGAN-S (its ~105 h budget and the val-signal overlap caveat) and the
+  benchmark's paired arm (selected checkpoint; context only, not the
+  comparison).
+- **Trajectory diagnostic** (`noisy_traj.py`, the first 256 val events,
+  out of training and selection): (1) the ordinary ODE path in hard towers
+  (S > 5 GeV): does the decoded background B(x_t) ever fall below the true
+  B, or stay above it? (2) at t0 = 0.25, 0.5, 0.75, start from the clean
+  reference interpolant (1 - t0) a + t0 b, unperturbed and with +/- a fixed
+  small perturbation (identical for both models), integrate the rest
+  accurately, and measure the endpoint response and its error against the
+  event's true B. Contraction alone is not success (a field can be
+  insensitive by smoothing away structure).
+
+**Decision (fixed now).** Seed half ranges of the benchmark's paired arm
+(32 NFE, val): leakage share 0.001 (S 5-10) and 0.0006 (> 10); scale
+0.002; efficiency 0.001; per-jet substructure RMSE <= 0.008 in the
+observable's units. A difference counts if it exceeds 3x the larger of
+that half range and the statistical error. **Promising** only if, at the
+accurate solve: the leakage share falls in both hard bins (S 5-10, > 10
+GeV); at least two substructure observables improve (per-jet RMSE or W1)
+and none worsens; and nothing offsets it (scale not lower, efficiency not
+lower, fake rate not higher, no added off-signal or event energy). Then
+seeds 1 and 2 of both arms before any claim. **Clearly fails** (no leakage
+reduction at the accurate solve, or a gain only at 4 steps): stop; no
+noise or path sweep. A negative result rules out only this setting.
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything
