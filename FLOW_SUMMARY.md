@@ -1,9 +1,10 @@
 # Summary: speeding up UVCGAN-S, and flow matching for sPHENIX background subtraction
 
-*As of 2026-09-26, 23:30. Branch `ddp` of github.com/Shuonli/uvcgan-s.
+*As of 2026-09-28, 01:30. Branch `ddp` of github.com/Shuonli/uvcgan-s.
 This file is the short version. The full logs, with job numbers and
 commands, are `SCALING_NOTES.md` (UVCGAN-S training) and `FLOW_NOTES.md`
-(flow matching).*
+(flow matching). The latest result, the consolidated comparison with its
+slides, is Part 9.*
 
 ## The task
 
@@ -534,6 +535,73 @@ A sequence of cheap diagnostics, then controls:
   of each vacuum shower, to measure how random the change really is before
   building more models.
 
+## Part 9: one controlled comparison, and the slides
+
+- **Question:** a mixed event is signal plus background, M = S + B. Is it
+  better to predict only the background and take S = M - B, or to predict
+  both pieces? And how much does it help to train each mixture with its own
+  background, which only simulation knows?
+- **Three flow models,** identical except for this: the same network (the
+  UVCGAN-S generator), the same 633k training mixtures, the same settings,
+  2 hours on one GPU, three seeds each:
+  1. **unpaired:** learns to turn a mixture into *some* background (matched
+     by minibatch optimal transport); signal = M - B;
+  2. **paired:** learns to turn each mixture into *its own* background;
+     signal = M - B;
+  3. **joint:** learns each mixture's background *and* signal; its signal is
+     read two ways, directly and as M - B, and reported separately.
+- **References:** the published UVCGAN-S (about 105 h of training; it also
+  learns from synthetic sums of a known background and signal) and the
+  standard Area subtraction.
+- **How it was judged:**
+  - the paper's jet analysis, rebuilt: jets found in the output image and
+    matched to the true jets;
+  - energy scale and resolution, efficiency, fake jets, six substructure
+    observables;
+  - plus jet-by-jet errors, per-tower errors, where the background error
+    goes, event images, JEWEL and cost.
+- **Results** (PYTHIA val, R = 0.4 jets of 20-30 GeV):
+
+| | jet energy scale | resolution after a frozen calibration | fake jets at 14-20 GeV | energy of the hardest towers put into the background |
+| :--- | ---: | ---: | ---: | ---: |
+| UVCGAN-S | 0.98 | 0.153 | 3% | 1% |
+| unpaired flow | 0.99 | 0.150 | 15% | 12% |
+| paired flow | 0.83 | 0.154 | 0.5% | 16% |
+| joint flow, S = M - B | 0.91 | 0.161 | 3% | -1% |
+| Area | 0.88 | 0.261 | 19% | |
+
+- **What this means:**
+  - **Predicting only the background loses part of the jet core,** with or
+    without pairing: 12-25% of the energy in the hardest towers ends up in
+    the background.
+  - **The unpaired flow's good average hides its errors.** It looks
+    unbiased only because it also leaves a thin layer of fake energy
+    everywhere (+112 GeV per event), which makes 15% fake jets.
+  - **Predicting both pieces keeps the core** but loses soft signal and
+    some low-energy jets, and varies more between seeds.
+  - **Neither choice wins overall.** The paired background-only flow has the
+    smallest jet-by-jet substructure errors of all models, including
+    UVCGAN-S, but its jets come out 17% low in energy. The joint flow has
+    the better energy scale in small cones and on JEWEL, but lower
+    efficiency.
+  - **Pairing** makes cleaner images (3x smaller per-tower error) and 30x
+    fewer fake jets, but it does not fix the lost core. It also needs
+    simulation truth for every training event.
+  - **UVCGAN-S is still the most faithful:** its substructure distributions
+    are 2-7x closer to the truth. The flows reach its calibrated energy
+    resolution in 2 hours instead of about 105.
+  - **On JEWEL,** every method keeps 60-80% of the true change in jet girth
+    and leading-fragment momentum.
+  - **The joint flow's set-up has a quirk:** starting from (M, 0), its signal
+    channel gives the answer away as soon as the flow starts moving. It is
+    decided in its first step and learns only from the start of the path.
+- **Not done:** the ICS baseline (its software is not installed here); the
+  paper's own analysis code is not public, so the analysis was rebuilt from
+  the text.
+- **Where:** slides `docs/flow/bench/slides/bench_deck.pdf`; tables and
+  figures `docs/flow/bench/`; details `FLOW_NOTES.md`, "Consolidated
+  benchmark".
+
 ## Where everything is
 
 - `FLOW_NOTES.md`: the full log of the flow study (pre-registration,
@@ -545,6 +613,9 @@ A sequence of cheap diagnostics, then controls:
   - figures: `compare_report.png`, `compare_nfe.png`, `substructure.png`,
     `readout_events_val.png`;
   - each run's config and scores, under `docs/flow/runs/`.
+- `docs/flow/bench/`: the consolidated benchmark (Part 9): the deck
+  (`slides/bench_deck.pdf`), paper-style figures, tables, run manifest
+  (`README.md` lists them).
 - `scripts/flow/`: all code:
   - `fm_common.py`: the models;
   - `fm_train.py`, `fm_eval.py`, `fm_compare.py`: train, score, compare;
@@ -559,8 +630,6 @@ A sequence of cheap diagnostics, then controls:
 - A small paired HYBRID sample (several medium versions per vacuum shower),
   obtained from the authors, to measure how random the modification is. It
   decides whether the target is a map or a conditional distribution.
-- Jet-level physics with the jets actually found in the extracted image.
-  So far a jet is the cone at the true axis.
 - Why OT-CFM does better on JEWEL than on val.
 - Any unpaired correspondence depends on the chosen matching cost. That is
   a method dependence to study, which agreement of the output distributions

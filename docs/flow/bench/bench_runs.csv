@@ -1,0 +1,11 @@
+run,method,seed,backbone,selected_step,minutes_at_checkpoint,checkpoint,network,n_params,commit,gpu,node
+bb_uvcgan_otcfm1_s0,otcfm1,0.0,uvcgan,24210.0,90.0,OUTDIR/sphenix/flow/bb_uvcgan_otcfm1_s0/checkpoints/step_00024210.pt,ema,32282803.0,affa9fb,NVIDIA RTX A6000,dahlia
+bb_uvcgan_otcfm1_s1,otcfm1,1.0,uvcgan,28010.0,105.0,OUTDIR/sphenix/flow/bb_uvcgan_otcfm1_s1/checkpoints/step_00028010.pt,ema,32282803.0,544c373,NVIDIA RTX A6000,dahlia
+bb_uvcgan_otcfm1_s2,otcfm1,2.0,uvcgan,31870.0,120.0,OUTDIR/sphenix/flow/bb_uvcgan_otcfm1_s2/checkpoints/step_00031870.pt,ema,32282803.0,544c373,NVIDIA RTX A6000,dahlia
+bench_joint_s0,joint_paired,0.0,uvcgan,28540.0,105.0,OUTDIR/sphenix/flow/bench_joint_s0/checkpoints/step_00028540.pt,ema,32283764.0,544c373,NVIDIA RTX A6000,dahlia
+bench_joint_s1,joint_paired,1.0,uvcgan,32320.0,120.0,OUTDIR/sphenix/flow/bench_joint_s1/checkpoints/step_00032320.pt,ema,32283764.0,544c373,NVIDIA RTX A6000,dahlia
+bench_joint_s2,joint_paired,2.0,uvcgan,32630.0,120.0,OUTDIR/sphenix/flow/bench_joint_s2/checkpoints/step_00032630.pt,ema,32283764.0,544c373,NVIDIA RTX A6000,dahlia
+bench_paired_bkg_s0,otcfm1_paired,0.0,uvcgan,8160.0,30.0,OUTDIR/sphenix/flow/bench_paired_bkg_s0/checkpoints/step_00008160.pt,ema,32282803.0,544c373,NVIDIA RTX A6000,dahlia
+bench_paired_bkg_s1,otcfm1_paired,1.0,uvcgan,8170.0,30.0,OUTDIR/sphenix/flow/bench_paired_bkg_s1/checkpoints/step_00008170.pt,ema,32282803.0,544c373,NVIDIA RTX A6000,dahlia
+bench_paired_bkg_s2,otcfm1_paired,2.0,uvcgan,12370.0,45.0,OUTDIR/sphenix/flow/bench_paired_bkg_s2/checkpoints/step_00012370.pt,ema,32282803.0,544c373,NVIDIA RTX A6000,dahlia
+UVCGAN-S published,uvcgan-s,,,,,OUTDIR/sphenix/pretrained/model_m(uvcgan-s)_d(resnet)_g(vit-modnet)_sgn_bkg_sub,ema_gen_ba,,,,

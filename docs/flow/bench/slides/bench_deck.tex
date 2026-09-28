@@ -1,0 +1,39 @@
+% Consolidated subtraction benchmark (FLOW_NOTES.md, "Consolidated benchmark").
+% Build: cd docs/flow/bench/slides && ~/pyext/tectonic_env/bin/tectonic bench_deck.tex
+% Tables: tables/*.tex, written by scripts/flow/bench_tables.py from the CSVs
+% in docs/flow/bench; figures: docs/flow/bench/*.png.
+\documentclass[aspectratio=169,10pt]{beamer}
+\usetheme{default}
+\usefonttheme{professionalfonts}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{footline}{%
+  \hspace{1em}\textcolor{gray}{\tiny Flow matching vs UVCGAN-S: background subtraction benchmark, 2026-09-28}%
+  \hfill\textcolor{gray}{\tiny\insertframenumber}\hspace{1em}\vspace{0.6em}}
+\setbeamerfont{frametitle}{size=\large,series=\bfseries}
+\setbeamercolor{frametitle}{fg=black}
+\setbeamertemplate{itemize items}{\textbullet}
+\setbeamersize{text margin left=0.9em,text margin right=0.9em}
+
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{array}
+\graphicspath{{../}}
+
+\definecolor{cUV}{HTML}{1f77b4}
+\definecolor{cArea}{HTML}{7f7f7f}
+\definecolor{cUnp}{HTML}{2ca02c}
+\definecolor{cPai}{HTML}{ff7f0e}
+\definecolor{cJnt}{HTML}{d62728}
+\newcommand{\uv}{\textcolor{cUV}{\textbf{UVCGAN-S}}}
+\newcommand{\area}{\textcolor{cArea}{\textbf{Area}}}
+\newcommand{\unp}{\textcolor{cUnp}{\textbf{unpaired FM}}}
+\newcommand{\pai}{\textcolor{cPai}{\textbf{paired FM}}}
+\newcommand{\jnt}{\textcolor{cJnt}{\textbf{joint FM}}}
+\newcommand{\Bh}{\hat B}
+\newcommand{\Sh}{\hat S}
+\newcommand{\snote}[1]{{\scriptsize\textcolor{gray}{#1}}}
+
+\begin{document}
+\input{body.tex}
+\end{document}

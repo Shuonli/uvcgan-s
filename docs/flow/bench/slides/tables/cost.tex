@@ -1,0 +1,14 @@
+\scriptsize
+\begin{tabular}{lrrrrrrr}
+\toprule
+ & best val res. & at 2 h & h to 3.70 & updates/s & peak GB & ms/event, 4 NFE & 32 NFE \\
+\midrule
+\unp & 3.67$\pm$0.01 & 3.67$\pm$0.01 & 0.5/0.5/0.5 & 4.45$\pm$0.03 & 19.1 & 1.08 & 8.8 \\
+\pai & 3.95$\pm$0.00 & 4.02$\pm$0.01 & --/--/-- & 4.55$\pm$0.03 & 18.1 & 1.10 & 8.9 \\
+\jnt & 4.15$\pm$0.04 & 4.19$\pm$0.08 & --/--/-- & 4.52$\pm$0.02 & 18.1 & 1.11 & 8.9 \\
+\uv{} retrained, batch 4 & 3.64$\pm$0.02 & 7.44$\pm$0.70 & 15/17/17 & -- & -- & -- & -- \\
+\uv{} retrained, batch 32 & 3.62$\pm$0.03 & 8.29$\pm$0.24 & 8.4/8.6/15 & -- & -- & -- & -- \\
+\uv{} published (${\sim}$105 h) & 3.59 & -- & -- & -- & -- & 0.27 (1 pass) & -- \\
+\bottomrule
+\end{tabular}
+\par\vspace{0.15em}\snote{One RTX A6000 each; flows 2 h, \uv{} retrained 24 h. val res.: the selection metric (calibrated cone resolution, GeV), seed mean $\pm$ half range. h to 3.70 (T\_acc = published + 3\%): first confirmed checkpoint, per seed. Inference: batch 500. The joint arm's second output costs $<$1\%.}

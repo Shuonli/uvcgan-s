@@ -1,0 +1,19 @@
+\scriptsize
+\begin{tabular}{llrrrrrrrr}
+\toprule
+ & solve & cone res. & JEWEL & scale & res.$_{cal}$ & fake & $g$ RMSE/$\sigma$ & \% $S{>}10$ & MAE \\
+\midrule
+\unp & 4 Euler & 3.67$\pm$0.01 & 3.55$\pm$0.01 & 0.993(1) & 0.150 & 0.146(1) & 0.79 & 12 & 0.150 \\
+ & 32 NFE & 4.10$\pm$0.01 & 3.65$\pm$0.01 & 0.742(2) & 0.155(1) & 0.002 & 0.53 & 24 & 0.051 \\
+\addlinespace[0.2em] &  &  &  &  &  &  &  &  &  \\
+\pai & 4 Euler & 3.95$\pm$0.00 & 3.61$\pm$0.00 & 0.828(2) & 0.154 & 0.005 & 0.55 & 16 & 0.050 \\
+ & 32 NFE & 4.11$\pm$0.01 & 3.66$\pm$0.01 & 0.751(2) & 0.157 & 0.002 & 0.54 & 23 & 0.051 \\
+\addlinespace[0.2em] &  &  &  &  &  &  &  &  &  \\
+\jnt, $M - \Bh$ & 4 Euler & 4.15$\pm$0.04 & 4.12$\pm$0.05 & 0.912(16) & 0.161(3) & 0.029(3) & 0.68(4) & -1 & 0.031 \\
+ & 32 NFE & 4.30$\pm$0.05 & 4.32$\pm$0.08 & 0.877(23) & 0.165(3) & 0.024(6) & 0.95(6) & -3 & 0.030 \\
+\addlinespace[0.2em] &  &  &  &  &  &  &  &  &  \\
+\jnt, direct $\Sh$ & 4 Euler & 5.80$\pm$0.25 & 5.19$\pm$0.19 & 0.780(18) & 0.174(5) & 0.004(1) & 0.86(4) & -13 & 0.033 \\
+ & 32 NFE & 4.59$\pm$0.08 & 4.40$\pm$0.09 & 0.884(22) & 0.164(1) & 0.020(4) & 0.99(6) & -14 & 0.031 \\
+\bottomrule
+\end{tabular}
+\par\vspace{0.15em}\snote{Cone res.: calibrated resolution in the true R = 0.4 cone, GeV (the selection metric), val and JEWEL, seed mean $\pm$ half range. Jets: R = 0.4, 20-30 GeV; fake 14-20 GeV; \% $S{>}10$: energy of towers with $S > 10$ GeV put into $\Bh$; MAE per tower, GeV. Seed 0 at 64 NFE, val cone res.: \unp{} 4.10, \pai{} 4.10, \jnt, $M - \Bh${} 4.34, \jnt, direct $\Sh${} 4.52. Joint $\Bh + \Sh - M$ before clean-up (val): 4 Euler: 0.009 GeV per tower (MAE), -7.7 GeV per event; 32 NFE: 0.003 GeV per tower (MAE), +1.3 GeV per event.}

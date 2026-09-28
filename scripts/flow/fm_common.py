@@ -54,6 +54,18 @@ Methods (c.f. FLOW_NOTES.md):
              batch holds n_paired such true pairs (from the first paired_n
              source jets) next to OT-coupled unpaired pairs.
 
+Paired arms of the consolidated subtraction benchmark (FLOW_NOTES.md,
+"Consolidated benchmark"). They train on the same real training mixtures as
+the unpaired arm, each with its true components (make_pairs.py: cache
+`embed_pairs`, [M, S] per mixture; B = max(M - S, 0)):
+
+    otcfm1_paired  one panel, M -> its own B (the unpaired otcfm1 state,
+             normalisation and path; no matching); read as M - B
+    joint_paired   two panels, (M, 0) -> (B, S), the zero panel standardised
+             as the signal channel; the loss is the separately averaged
+             background and signal terms, weight 1 each, both logged; read
+             directly (S) or as M - B
+
 The log bias of psi can be changed (`Norm(bias = ...)`, fm_train.py
 --log-bias); 0.1 is the baseline's.
 
@@ -93,7 +105,7 @@ SHAPE     = (24, 64)
 JET_SHAPE = (16, 16)
 METHODS   = [ 'otcfm', 'sbcfm', 'condcfm', 'regress', 'regress_l1',
               'otcfm1', 'otcfm_pieces', 'postflow', 'regress_mse',
-              'jetflow' ]
+              'jetflow', 'otcfm1_paired', 'joint_paired' ]
 
 # methods whose flow starts from the mixture and uses a minibatch OT plan
 OT_METHODS = ('otcfm', 'sbcfm', 'otcfm1', 'otcfm_pieces', 'jetflow')
@@ -125,6 +137,11 @@ SELECTION = {
     'regress_mse'  : (1, 'none', 'direct', 1),
     # the OT-CFM inference setting, kept for the jet -> jet flow
     'jetflow'      : (4, 'euler', 'direct', 1),
+    # the benchmark's paired arms: selected as the unpaired arm is (the
+    # residual M - B with 4 Euler steps); both readouts and the accurate
+    # solve are scored at the selected checkpoint
+    'otcfm1_paired' : (4, 'euler', 'mixture', 1),
+    'joint_paired'  : (4, 'euler', 'mixture', 1),
 }
 
 # domains each method draws from; condcfm and regress build their mixtures
@@ -139,6 +156,8 @@ DOMAINS = {
     'postflow'     : ('background', 'signal'),
     'regress_mse'  : ('background', 'signal'),
     'jetflow'      : ('closure_src', 'closure_tgt'),
+    'otcfm1_paired' : ('embed_pairs',),
+    'joint_paired'  : ('embed_pairs',),
 }
 
 # weights of the background and signal L1 terms of regress_l1: those of the
@@ -386,7 +405,7 @@ def construct_net(method, channels = 96, res_blocks = 2, attn = (4,),
         (c_in, c_out) = (1, 1)
     elif is_regression(method):
         (c_in, c_out) = (1, 2)
-    elif method in ('otcfm1', 'jetflow'):
+    elif method in ('otcfm1', 'jetflow', 'otcfm1_paired'):
         (c_in, c_out) = (1, 1)
     elif method == 'postflow':
         (c_in, c_out) = (2, 1)          # signal state and the mixture
@@ -698,7 +717,7 @@ class Method:
             self.matcher.ot_sampler = GPUSinkhornPlanSampler(
                 reg = 2 * self.sigma**2
             )
-        elif name in SAMPLERS:
+        elif name in SAMPLERS + ('otcfm1_paired', 'joint_paired'):
             self.sigma   = 0.0 if sigma is None else sigma
             self.matcher = ConditionalFlowMatcher(sigma = self.sigma)
         else:
@@ -740,7 +759,7 @@ class Method:
     def source(self, mixture):
         """x0 of the flow: the mixture, all of it background (one panel for
         otcfm1, with an empty signal panel otherwise)."""
-        if self.name == 'otcfm1':
+        if self.name in ('otcfm1', 'otcfm1_paired'):
             return self.norm.z(mixture, 'bkg').unsqueeze(1)
         if self.name == 'jetflow':
             return self.norm.z(mixture, 'jet').unsqueeze(1)
@@ -765,6 +784,15 @@ class Method:
             # the energies are kept for a cost computed on them
             self.raw = (src, batch[self.target])
             return (self.source(src), self.source(batch[self.target]), None)
+
+        if self.name in ('otcfm1_paired', 'joint_paired'):
+            pair = batch['embed_pairs']
+            (m, sig) = (pair[:, 0], pair[:, 1])
+            bkg = (m - sig).clamp(min = 0)
+            if self.name == 'otcfm1_paired':
+                return (self.source(m), self.norm.z(bkg, 'bkg').unsqueeze(1),
+                        None)
+            return (self.source(m), self.norm.state(bkg, sig), None)
 
         bkg = batch['background']
 
@@ -884,6 +912,13 @@ class Method:
         )
 
         inp = xt if cond is None else torch.cat((xt, cond), dim = 1)
+        if self.name == 'joint_paired':
+            # each component its own mean, weight 1: the signal channel does
+            # not halve the background term
+            sq = (net(t, inp) - ut)**2
+            self.last_parts = { 'loss_bkg' : sq[:, 0].mean().detach(),
+                                'loss_sig' : sq[:, 1].mean().detach() }
+            return sq[:, 0].mean() + sq[:, 1].mean()
         return torch.mean((net(t, inp) - ut)**2)
 
 @torch.no_grad()
@@ -994,7 +1029,7 @@ class Decomposer(torch.nn.Module):
                 (b, s) = norm.components(x)
                 (bkg, sig) = (bkg + b / self.samples, sig + s / self.samples)
 
-        elif name == 'otcfm1':
+        elif name in ('otcfm1', 'otcfm1_paired'):
             x   = integrate(
                 self.net, self.method.source(m), None, self.nfe, self.solver
             )

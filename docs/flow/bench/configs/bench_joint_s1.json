@@ -1,0 +1,46 @@
+{
+    "method": "joint_paired",
+    "label": "bench_joint_s1",
+    "seed": 1,
+    "batch": 256,
+    "lr": 0.0002,
+    "warmup": 1000,
+    "cosine_steps": null,
+    "ema": 0.9999,
+    "grad_clip": 1.0,
+    "log_bias": 0.1,
+    "augment": "none",
+    "cost": "l2",
+    "cost_lambda": 1.0,
+    "target_domain": "closure_tgt",
+    "ot_pool": null,
+    "pairing": "unpaired",
+    "paired_n": null,
+    "paired_share": 0.5,
+    "sigma": 0.0,
+    "backbone": "uvcgan",
+    "channels": 96,
+    "res_blocks": 2,
+    "attn": [
+        4
+    ],
+    "minutes": 120.0,
+    "max_steps": null,
+    "ckpt_minutes": 15.0,
+    "log_steps": 100,
+    "inline_events": 1000,
+    "inline_nfe": 4,
+    "outdir": null,
+    "n_params": 32283764,
+    "runs": [
+        {
+            "torch": "2.7.1+cu118",
+            "torchcfm": "1.0.7",
+            "pot": "0.9.7.post1",
+            "python": "3.12.11",
+            "gpu": "NVIDIA RTX A6000",
+            "node": "dahlia",
+            "commit": "544c373"
+        }
+    ]
+}

@@ -15,6 +15,10 @@ Models are given as
                                  `mixture` - background
     LABEL=sampler:RUN            a posterior sampler (conditional CFM,
                                  postflow): K samples at 8 NFE
+    LABEL=images:STEM            precomputed signal images of the
+                                 benchmark (bench_images.py:
+                                 bench/images/<set>/STEM.npy, the same
+                                 events in the same order)
 
 (RUN under OUTDIR/sphenix/flow, its val-selected checkpoint, EMA network).
 Read-outs:
@@ -93,6 +97,8 @@ def parse_cmdargs():
     parser.add_argument('--out', default = os.path.join(
         fc.out_root(), 'jet_fidelity'))
     parser.add_argument('--figure', default = None)
+    parser.add_argument('--device', default = 'cuda',
+        help = "'cpu' is enough for the images kind")
     return parser.parse_args()
 
 def threshold(img):
@@ -191,6 +197,8 @@ class Events:
     """Mixtures, truth and jets of one set of events."""
 
     def __init__(self, truth_name, start, n, device, geo):
+        self.truth_name = truth_name
+        self.start      = start
         (embed, signal) = ev.load_pairs(
             os.environ.get('UVCGAN_S_DATA', 'data'), 20000, 0,
             truth = truth_name
@@ -241,13 +249,19 @@ def truth_file(cmdargs, truth_name, events, calib):
 # --- per-model values
 
 def single_values(kind, parts, events, calib, emd, cmdargs, device):
-    def images(embed):
+    def images(ev_set):
+        if kind == 'images':
+            path = os.path.join(fc.out_root(), 'bench', 'images',
+                                ev_set.truth_name, f'{parts[1]}.npy')
+            arr = np.load(path, mmap_mode = 'r')[
+                ev_set.start:ev_set.start + len(ev_set.embed)]
+            return torch.from_numpy(np.ascontiguousarray(arr)).float()
         if kind == 'uvcgan':
-            return uvcgan_images(embed, cmdargs.batch, device)
-        return decoded_images(parts[1], parts[2], embed, cmdargs.batch,
+            return uvcgan_images(ev_set.embed, cmdargs.batch, device)
+        return decoded_images(parts[1], parts[2], ev_set.embed, cmdargs.batch,
                               device)
 
-    img = images(events.embed)
+    img = images(events)
     out = {}
     for (k, v) in events.values(img, emd).items():
         out[f'image|{k}'] = v
@@ -255,7 +269,7 @@ def single_values(kind, parts, events, calib, emd, cmdargs, device):
         out[f'thr0.5|{k}'] = v
 
     if calib is not None:
-        img = images(calib.embed)
+        img = images(calib)
         out['image|calib_e_cone']  = calib.e_cone(img)
         out['thr0.5|calib_e_cone'] = calib.e_cone(threshold(img))
 
@@ -344,7 +358,7 @@ def compute_model(spec, cmdargs, device):
             else None
         truth_file(cmdargs, truth_name, events, calib)
 
-        if kind in ('uvcgan', 'single'):
+        if kind in ('uvcgan', 'single', 'images'):
             out = single_values(kind, parts, events, calib, emd, cmdargs,
                                 device)
         elif kind == 'sampler':
@@ -583,7 +597,7 @@ def plot(obs, jet, out):
 
 def main():
     cmdargs = parse_cmdargs()
-    device  = torch.device('cuda') if cmdargs.models else None
+    device  = torch.device(cmdargs.device) if cmdargs.models else None
 
     for spec in cmdargs.models:
         compute_model(spec, cmdargs, device)

@@ -334,6 +334,7 @@ def main():
                   ) + f'  ({dt:.1f} s)', flush = True)
 
     loss_sum  = torch.zeros((), device = device)
+    parts_sum = {}
     gnorm_sum = torch.zeros((), device = device)
     n_sum     = 0
     next_ckpt = (
@@ -390,6 +391,8 @@ def main():
 
         stats['examples'] += cmdargs.batch
         loss_sum  += loss.detach()
+        for (k, v) in getattr(method, 'last_parts', {}).items():
+            parts_sum[k] = parts_sum.get(k, 0) + v
         gnorm_sum += gnorm.detach()
         n_sum     += 1
 
@@ -420,6 +423,9 @@ def main():
                 'data_time'     : stats['data_time'],
                 'peak_mem_gb'   : torch.cuda.max_memory_allocated() / 2**30,
             }
+            for (k, v) in parts_sum.items():
+                row[k] = float(v) / n_sum
+            parts_sum = {}
             recovery = method.pop_recovery()
             if recovery is not None:
                 row['plan_recovery'] = recovery

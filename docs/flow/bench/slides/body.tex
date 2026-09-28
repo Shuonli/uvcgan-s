@@ -1,0 +1,222 @@
+% Slide bodies of bench_deck.tex. Numbers: docs/flow/bench/*.csv (seed means
+% of 3 unless stated); tables/*.tex are written by scripts/flow/bench_tables.py.
+
+% ---------------------------------------------------------------- 1
+\begin{frame}{Background subtraction $M = S + B$: predict $B$ alone, or $B$ and $S$ together?}
+\small
+\textbf{Question.} Flow matching (FM) from the mixture $M$: predict only the background and read
+$\Sh = M - \Bh$, or predict both components? And what does training each mixture with its
+\emph{own} background (simulation truth) change? Judged on individual jets, not only on the
+average energy resolution.
+
+\vspace{0.4em}
+\textbf{Controlled comparison.} Three FM arms with the same network (the UVCGAN-S generator),
+the same 633k training mixtures and 2 h on one A6000, 3 seeds each; the published
+\uv{} (${\sim}$105 h of training) and \area{} subtraction on the same 20k PYTHIA+HIJING and
+20k JEWEL+HIJING events; the paper's jet analysis rebuilt.
+
+\vspace{0.4em}
+\textbf{Answer} (PYTHIA val, R = 0.4, $20 < p_T < 30$ GeV):
+\begin{itemize}\setlength\itemsep{0.15em}
+\item \textbf{No FM arm is as faithful as \uv{}} (scale 0.98, 3\% fakes, substructure
+  distributions 2-7$\times$ closer than the best FM arm's). After a frozen calibration the jet
+  resolution is the same for \uv{}, \unp{} and \pai{} (0.150-0.154); \jnt{} is 5-7\% worse.
+\item \textbf{Predicting $B$ alone loses part of the jet core}: 12-25\% of the energy in towers
+  with $S > 10$ GeV goes into $\Bh$. \pai{}: jet scale 0.83. \unp{} looks unbiased (0.99) only
+  because a soft floor adds 112 GeV per event: 15\% fake jets at 14-20 GeV.
+\item \textbf{Predicting $B$ and $S$ keeps the hard core} ($\le$3\% lost) but drops soft signal:
+  scale 0.91 at R = 0.4 (0.99 at R = 0.2), efficiency 0.88 at 14-20 GeV, 10$\times$ larger seed
+  spread.
+\item \textbf{Pairing} cuts the per-tower error 3$\times$ and fakes 30$\times$ and gives the
+  smallest per-jet errors of girth, $z_{lead}$ and $r_g$ of all models, but does not fix the
+  jet scale. It needs simulation truth.
+\end{itemize}
+\end{frame}
+
+% ---------------------------------------------------------------- 2
+\begin{frame}{Setup: one network and one budget; only the pairing and the outputs change}
+\scriptsize
+\begin{tabular}{@{}l l p{0.33\textwidth} p{0.13\textwidth} p{0.17\textwidth}@{}}
+\toprule
+arm & flow & training pairs & loss & signal readout \\
+\midrule
+\unp & $M \to B$ & minibatch exact OT: real mixtures $\leftrightarrow$ independent HIJING events & CFM MSE & $\Sh = M - \Bh$ \\
+\pai & $M \to B$ & each mixture with \emph{its own} background ($B = M - S$, bookkeeping) & CFM MSE & $\Sh = M - \Bh$ \\
+\jnt & $(M, 0) \to (B, S)$ & each mixture with its own $(B, S)$ & mean$_B$ + mean$_S$, weight 1 each & direct $\Sh$; $M - \Bh$ (reported separately) \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.5em}
+\begin{columns}[T]
+\column{0.5\textwidth}
+\textbf{Common to the three FM arms}
+\begin{itemize}\setlength\itemsep{0.05em}
+\item velocity net: the UVCGAN-S generator (ViT-ModNet, 32.3M parameters), time added to its style token
+\item $\log(E + 0.1)$ standardised; straight path, $\sigma = 0$; deterministic transports, not samplers
+\item Adam $2\cdot10^{-4}$, batch 256, EMA 0.9999, \textbf{2 h on one A6000}, 3 seeds (32k updates)
+\item the same 633k real embedded training mixtures
+\item one checkpoint per run: lowest val cone resolution (4 Euler steps, $M - \Bh$)
+\item solves: 4 Euler steps and midpoint 32 NFE (= 64 NFE on val); each readout shown at its val-preferred solve, both in the backup
+\end{itemize}
+\column{0.5\textwidth}
+\textbf{References on the same events}
+\begin{itemize}\setlength\itemsep{0.05em}
+\item \uv{} published, one pass: batch 4, 800k updates (${\sim}$105 h); GAN + cycle + \texttt{idt-aa}, i.e.\ also \emph{supervised} on synthetic sums $B + S$
+\item \area{}: FastJet $p_T - \rho A$, no substructure. ICS unavailable (no fjcontrib)
+\end{itemize}
+\textbf{Evaluation}
+\begin{itemize}\setlength\itemsep{0.05em}
+\item development: 20k PYTHIA+HIJING val; frozen test: 20k JEWEL+HIJING
+\item paper's analysis rebuilt: FastJet anti-$k_T$, $R$ = 0.2/0.4/0.5, towers as constituents, one-to-one matching $\Delta R < 0.75R$, soft drop $z_{cut}$ 0.1, $\beta$ 0
+\item raw outputs primary; frozen calibration from val events 10k-20k
+\item \pai{} and \jnt{} use simulation truth: a supervised reference, not an upper bound
+\end{itemize}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------- 3
+\begin{frame}{Cost: 2 h per flow on one GPU; only unpaired FM reaches 3.70 GeV}
+\vspace{-0.4em}
+\begin{center}
+\includegraphics[width=0.7\textwidth]{bench_cost.png}
+\end{center}
+\vspace{-1.1em}
+\input{tables/cost.tex}
+\end{frame}
+
+% ---------------------------------------------------------------- 4
+\begin{frame}{Jets: the background-only flows lose energy or hide the loss under fakes}
+\vspace{-0.5em}
+\begin{center}
+\includegraphics[width=0.8\textwidth]{bench_jets_R04_val.png}
+\end{center}
+\vspace{-1.3em}
+\input{tables/jets.tex}
+
+\vspace{-0.1em}
+{\scriptsize \textbf{The radius separates the failure modes.} Scale at $R$ = 0.2 / 0.4 / 0.5:
+\uv{} 0.99 / 0.98 / 0.98; \unp{} 0.88 / 0.99 / 1.10 (its floor fills larger cones; 67\% fakes
+at $R = 0.5$); \pai{} 0.82 / 0.83 / 0.85; \jnt{} 0.99 / 0.91 / 0.89 (core kept, periphery lost).}
+\end{frame}
+
+% ---------------------------------------------------------------- 5
+\begin{frame}{Substructure: UVCGAN-S matches the distributions, paired FM the single jets}
+\vspace{-0.6em}
+\begin{center}
+\includegraphics[width=0.8\textwidth]{bench_fig6_val.png}
+\end{center}
+\vspace{-1.4em}
+\begin{center}
+\input{tables/sub.tex}
+\end{center}
+\end{frame}
+
+% ---------------------------------------------------------------- 6
+\begin{frame}{JEWEL (frozen test): every method keeps 60-80\% of the girth and $z_{lead}$ shift}
+\begin{columns}[T]
+\column{0.44\textwidth}
+\includegraphics[width=\textwidth]{bench_fig7.png}
+\column{0.56\textwidth}
+\small
+\begin{itemize}\setlength\itemsep{0.2em}
+\item The PYTHIA calibration carries over with a +4\% shift for \uv{} and the background-only
+  flows, +7-8\% for \jnt{}; calibrated resolution stays at 0.151-0.161.
+\item \jnt{} ($M - \Bh$) does better on JEWEL than on PYTHIA (scale 0.98, per-jet girth error
+  the smallest), consistent with its keeping hard towers: JEWEL jets are narrower.
+\item \unp{}: fakes rise to 19\%. \pai{} keeps 0.72 of the girth shift (\uv{} 0.76), the others
+  0.63; the mass shift is kept least (0.22-0.55).
+\end{itemize}
+\end{columns}
+\vspace{0.1em}
+\begin{center}
+\input{tables/jewel.tex}
+\end{center}
+\end{frame}
+
+% ---------------------------------------------------------------- 7
+\begin{frame}{Where the error goes: background-only flows put part of the jet core into $\Bh$}
+\begin{columns}[T]
+\column{0.52\textwidth}
+\includegraphics[width=\textwidth]{bench_displays.png}
+\column{0.48\textwidth}
+\includegraphics[width=\textwidth]{bench_bkgerr.png}
+\input{tables/towers.tex}
+\end{columns}
+\vspace{-0.2em}
+{\tiny Fixed events: the first of each set with a 25-35 GeV leading truth jet (the second:
+\texttt{bench\_displays\_more.png}). In towers with $S < 2$ GeV every model misses 20-60\% of the
+signal, \uv{} included (the 4-step \unp{} floor over-fills the softest).}
+\end{frame}
+
+% ---------------------------------------------------------------- 8
+\begin{frame}{Conclusions}
+\small
+\begin{itemize}\setlength\itemsep{0.3em}
+\item \textbf{Average resolution hides the failure modes.} \unp{} has the best cone resolution of the
+  flows (3.67 GeV) and a jet scale of 0.99, yet puts 12\% of the hardest towers' energy into the
+  background and adds a soft floor: 15\% fakes and the worst substructure distributions.
+\item \textbf{Background-only vs joint (both paired, same budget): neither dominates.} Background-only
+  keeps soft signal and gives the best per-jet substructure but loses 16-23\% of the hard core (scale
+  0.83 / 0.75 by solver). Joint keeps the hard core but loses soft signal and low-$p_T$ jets, and varies
+  more between seeds. With source $(M, 0)$ its signal channel reveals the answer for $t > 0$: the
+  flow is decided in its first step (signal-channel loss 0.51 at $t = 0$, 0.0015 at $t = 0.02$).
+\item \textbf{Pairing is not the fix for the core loss.} It improves images, fakes and per-jet
+  substructure; the jet scale of background-only prediction stays low. It also needs per-mixture
+  simulation truth.
+\item \textbf{UVCGAN-S remains the reference for fidelity}, after ${\sim}$105 h and with its own supervised
+  term. The flows train in 2 h and match its calibrated jet resolution, not its jet scale or distributions.
+\item \textbf{Limits:} one network and 2-h budget for the flows; the analysis is rebuilt from the paper
+  (no public code); ICS missing; \uv{} saw the val signal images in training (unpaired); the JEWEL
+  sample's generator settings are not recorded.
+\end{itemize}
+\end{frame}
+
+% ---------------------------------------------------------------- backup
+\begin{frame}{Backup: both solves for every readout (same checkpoints)}
+\input{tables/solver.tex}
+
+\vspace{0.4em}
+{\scriptsize
+\begin{itemize}\setlength\itemsep{0.1em}
+\item Val prefers 4 Euler steps for every readout except the joint direct $\Sh$ (32 NFE); the main
+  slides use these. The accurate solve lowers the background-only jet scale further (0.83 $\to$ 0.75)
+  and removes the unpaired floor (fakes 0.146 $\to$ 0.002): the floor is a 4-step artefact.
+\item 32 NFE is resolved for the background-only flows (64 NFE: same val cone resolution to 0.01 GeV);
+  for the joint direct readout 64 NFE changes it by 0.1 GeV.
+\item Labelled clean-up (0.5 GeV tower threshold on every output) removes fakes but lowers every
+  scale by a further 11-27\%; it does not restore the core (\texttt{bench\_summary.csv}, \texttt{[thr0.5]}).
+\end{itemize}}
+\end{frame}
+
+\begin{frame}{Backup: comparability, limitations, what is missing}
+\scriptsize
+\begin{columns}[T]
+\column{0.5\textwidth}
+\textbf{Comparability}
+\begin{itemize}\setlength\itemsep{0.1em}
+\item Training time: flows 2 h (32k updates at batch 256); \uv{} ${\sim}$105 h (800k at batch 4). The
+  equal-time view is \uv{} retrained from scratch: 8.4-16.7 h to 3.70 GeV, 6.9-8.6 GeV at 2 h.
+\item Information: \pai{}, \jnt{} use each training mixture's true background; \uv{}'s \texttt{idt-aa} uses
+  synthetic sums of independent $B$ and $S$; \unp{} uses no pairing. Same 633k mixtures for all flows.
+\item One checkpoint per run, selected on val only (cone resolution, 4 Euler, $M - \Bh$); JEWEL never
+  used for a choice. The paired arm's selected checkpoints are early (30-45 min): its cone resolution
+  worsens with training while its per-tower error improves.
+\item Statistical errors (one run) are shown apart from the seed spread (3 seeds).
+\item Supplementary true-axis cone scores (\texttt{bench\_cone*.csv}): same ordering; the shape part of
+  the EMD is smallest for \pai{} (2.93 GeV val) vs \uv{} 3.12.
+\end{itemize}
+\column{0.5\textwidth}
+\textbf{Missing or limited}
+\begin{itemize}\setlength\itemsep{0.1em}
+\item ICS baseline: not available (fjcontrib not installed).
+\item No public analysis code: tower threshold ($>0$), greedy matching, fake rate binned in
+  $p_T^{sub}$, C/A soft-drop reclustering, jets $> 5$ GeV are our choices; Figs.\ 3-7 reproduced
+  (\texttt{docs/flow/bench}), no paper numbers to compare.
+\item The val events' signal images are among \uv{}'s (unpaired) training signals; HIJING parents of
+  the embedded mixtures cannot be checked for train/val overlap (mixture keys are disjoint).
+\item JEWEL sample (Zenodo 17594612): images only, generator version and settings not recorded
+  (the paper states JEWEL 2.3.0 + Geant4).
+\item Joint FM is still improving at 2 h; the budget is the same for all flows by design.
+\end{itemize}
+\end{columns}
+\end{frame}

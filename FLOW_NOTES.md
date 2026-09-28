@@ -9,6 +9,11 @@ Questions: can a flow-based model reach the current UVCGAN-S physics
 performance in fewer GPU-hours; is it more stable across seeds; how do final
 quality and inference cost compare. Treated as hypotheses.
 
+**Latest (2026-09-28):** the section "Consolidated benchmark" (background-only
+against joint subtraction, reconstructed-jet analysis of the paper, 3 seeds
+per arm) and its deck `docs/flow/bench/slides/bench_deck.pdf` close the
+study.
+
 ## Answer (2026-09-25)
 
 **Yes, in fewer GPU-hours -- by two different flows, each with a catch.
@@ -239,7 +244,9 @@ evaluator changed.
 | `smoke_checks.py` | pre-pilot checks |
 | `make_cache.py` | one-off flat copy of the training h5 files |
 | `fm_compare.py` | time-to-target table and figure, flows against the baseline |
-| `*.sbatch` | SLURM wrappers: `fm_smoke`, `fm_run` (train + score), `make_cache` |
+| `*.sbatch` | SLURM wrappers: `fm_smoke`, `fm_run` (train + score), `make_cache`, `bench_post` (benchmark scoring and images of a run) |
+| `make_pairs.py` | the training mixtures with their own signals (by index key), for the paired arms |
+| `bench_images.py`, `bench_jets.py`, `bench_report.py`, `bench_diag.py`, `bench_cost.py`, `bench_loss_t.py`, `bench_tables.py`, `bench_all.sh` | the consolidated benchmark: images, FastJet analysis, paper figures and tables, tower diagnostics and displays, cost, loss against t, deck tables, the whole CPU chain |
 
 **Dependencies.** Not in the `fm4npp` env; installed without their
 dependencies into `~/pyext/flow`, so the shared env is unchanged:
@@ -1995,6 +2002,381 @@ and it destroys the teacher's event-level fidelity.**
         closure_cont_guided_s0 --control --setting 32:midpoint \
         --out outdir/sphenix/flow/closure_teacher_abc_m32
 
+## Consolidated benchmark: background-only against joint subtraction (2026-09-27/28)
+
+**Question.** For M = S + B, is it better to predict the background B alone
+and read the signal as S_hat = M - B_hat, or to predict both components?
+What does training each mixture with its own background (simulation truth)
+change? Judged on individual jets (core, substructure), not only on the
+average energy resolution. This closes the study with one controlled
+comparison and a short deck; no new model proposals.
+
+**Deliverables:** `docs/flow/bench/slides/bench_deck.pdf` (8 slides + 2
+backup; source `bench_deck.tex`, `body.tex`, generated `tables/*.tex`),
+tables and figures in `docs/flow/bench/` (index: `docs/flow/bench/README.md`),
+run manifest `bench_runs.csv` and configurations `configs/*.json`.
+
+### Design
+
+**Three flow arms, one network, one budget.**
+- **Common to all three:**
+  - the UVCGAN-S generator as velocity network (`--backbone uvcgan`, as in
+    the backbone ablation: ViT-ModNet, 32.3M parameters, time added to the
+    style token);
+  - log(E + 0.1) standardised states; the straight path (sigma 0) and the
+    CFM velocity loss;
+  - Adam 2e-4 with 1000 warm-up steps, gradient clip 1, EMA 0.9999, batch
+    256;
+  - 2 h on one RTX A6000 (dahlia), checkpoints every 15 min, 3 seeds;
+  - deterministic transports from the mixture, not posterior samplers.
+
+| arm | method | source -> target | pairing | loss | readouts |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **unpaired FM** | `otcfm1` | M -> B | exact minibatch OT between the batch's real mixtures and independently drawn HIJING events | CFM MSE | S_hat = M - B_hat |
+| **paired FM** | `otcfm1_paired` | M -> B | each mixture with its own background, B = M - S (bookkeeping) | CFM MSE | S_hat = M - B_hat |
+| **joint FM** | `joint_paired` | (M, 0) -> (B, S) | each mixture with its own (B, S) | mean over B + mean over S, weight 1 each; both logged (`loss_bkg`, `loss_sig` in `history.csv`) | direct S_hat, and M - B_hat, reported separately |
+
+- **Controls.**
+  - Unpaired and paired FM differ only in the pairing: the same
+    initialisation, preprocessing, path, loss, optimiser, batch and budget.
+  - The joint arm is aligned with them. Its extra cost (a second output
+    channel and its loss) is reported, not equalised: 961 more parameters,
+    < 1% fewer updates per second, ~1% slower inference.
+- **Training data.**
+  - The same 633k real embedded mixtures (PYTHIA in HIJING, `embed` domain)
+    for every arm.
+  - The paired arms read each mixture's detector-level signal by its index
+    key (`make_pairs.py`, `OUTDIR/sphenix/flow/cache/train_embed_pairs.npy`).
+    B = M - S >= 0 exactly (max S - M = 0, min B = 0 in float32), and no
+    training key is a val key.
+  - The unpaired arm draws its targets from the 986k HIJING events.
+- **Runs.**
+  - `bb_uvcgan_otcfm1_s0` (backbone ablation) is seed 0 of the unpaired
+    arm: same code path, configuration and data.
+  - New runs: `bb_uvcgan_otcfm1_s1,s2`, `bench_paired_bkg_s0-s2`,
+    `bench_joint_s0-s2` (jobs 20205-20211, 20213). They ran from the working
+    tree of commit 544c373 with the changes committed with this section.
+- **The legacy "true pieces" run (`otcfm_pieces`, `ext_pieces_s*`) is not
+  reused.**
+  - It is a joint two-panel flow (mixture, 0) -> (B, S) whose OT batch
+    recovers the true pieces, so effectively paired.
+  - But: ADM U-Net backbone, synthetic mixtures B + S, the loss averaged
+    over both channels (half weight each), selected at 16 midpoint
+    evaluations on the direct readout.
+  - Its outcome is only a prior indication: a clean image, poor and
+    unstable jet energies (5.1-5.3 GeV).
+- **Paired training is a supervised simulation reference.** It is not an
+  unpaired result and not a guaranteed upper bound: it needs the true
+  background of every training mixture, which exists only in simulation.
+  UVCGAN-S's `idt-aa` term uses the same kind of information (known additive
+  mixing of simulated components).
+
+**Selection and solvers.**
+- **Checkpoint:** one per run, the lowest val `jer_cal` of the EMA network at
+  4 Euler steps with the M - B_hat readout (the selection readout fixed for
+  `otcfm1` before this study). Every observable uses that checkpoint; JEWEL
+  is scored only there.
+- **Solves:** 4 Euler steps (the selection readout) and the accurately
+  resolved midpoint solve with 32 network evaluations, checked against 64 on
+  val. Both are reported for every arm and readout.
+- **Main figures:** each readout at its val-preferred solve (val `jer_cal`
+  at the selected checkpoint): 4 Euler steps for every readout except the
+  joint arm's direct S_hat (32 NFE: 4.50-4.66 against 5.61-6.11 GeV). The
+  backup slide has the full common-solver comparison.
+
+**References on the same events.**
+- **UVCGAN-S, published checkpoint** (EMA generator, one pass):
+  - batch 4, lr 5e-5, 800k updates (~105 h on an A6000);
+  - trained on unpaired HIJING and PYTHIA images and real mixtures, with
+    `idt-aa` (the generator decomposes synthetic sums of an independent
+    background and signal, L1 to the pieces: supervised on synthetic
+    mixtures), `idt-bb`, cycle consistency and three adversarial losses;
+  - retrained from scratch (3 seeds each at batch 4 and batch 32,
+    `SCALING_NOTES.md`) for the training-time comparison.
+- **Area** (FastJet 3.5.1):
+  - anti-kT jets of the mixture with active area, pT - rho A;
+  - rho is the median of kT (R 0.4) jets in |y| < 0.7 without the two
+    hardest;
+  - no substructure.
+- ICS needs fjcontrib, not available here.
+
+**Events.**
+- **Development:** the 20k val PYTHIA+HIJING mixtures of every earlier score
+  (`eval_val_truth.load_pairs`, seed-0 draw).
+- **Frozen test:** the 20k JEWEL+HIJING test mixtures of every earlier JEWEL
+  score, scored only after all choices were fixed.
+- **Frozen calibration:** fitted per run on the matched jets (or cones) of
+  val events 10000-19999 and scored on events 0-9999 of val and of JEWEL. On
+  JEWEL it therefore carries the domain shift.
+
+**Analysis (paper arXiv:2510.23717v2, Figs. 3-7).** No analysis code is
+public (LS4GAN/uvcgan-s holds training code only), so `bench_jets.py`
+implements the paper's definitions minimally:
+- FastJet anti-kT, R = 0.2 / 0.4 / 0.5;
+- towers as massless constituents at their centres (E_T = tower value,
+  towers <= 0 dropped); jets > 5 GeV, |eta| < 0.6;
+- truth jets from the detector-level signal image;
+- one-to-one matching, closest first, dR < 0.75 R, all jets;
+- soft drop z_cut 0.1, beta 0 on C/A; substructure at R = 0.4, 20-30 GeV;
+- our choices where the paper is silent: the tower threshold, greedy
+  matching, the fake rate binned in pT_sub, C/A reclustering for soft drop.
+
+Figures: `bench_fig3/4/5/6_{val,jewel}.png`, `bench_fig5_allR_*.png`,
+`bench_fig7.png` (the paper's figure for truth and UVCGAN-S plus the
+JEWEL/PYTHIA ratio of every method); `mid32/` has the same figures with the
+accurate solve.
+
+**Diagnostics beyond the paper.**
+- per matched jet: pT response, bias and RMSE in GeV; per-jet bias and RMSE
+  of z_g, r_g, girth, mass, z_lead and p_T^D;
+- distribution agreement (W1 against all truth jets, with a truth-vs-truth
+  floor from even/odd events), kept apart from per-jet agreement;
+- per tower: MAE, RMSE, event energy bias; background error B_hat - B by the
+  true signal energy of the tower (`bench_diag.py`);
+- joint arm: B_hat + S_hat - M before any clean-up;
+- event displays: fixed events (the first two of each set with a 25-35 GeV
+  leading truth jet), common scales;
+- where the paired flows' training signal lies: the CFM loss against t on
+  held-out pairs (`bench_loss_t.py`);
+- true-axis cone scores (`jet_fidelity.py`, images kind), supplementary:
+  frozen-calibration energy resolution, per-jet observables, EMD and its
+  shape part;
+- cost: val `jer_cal` against training hours, time to T_acc, throughput,
+  peak memory, inference latency on one A6000 (`bench_cost.py`).
+
+**Uncertainties.** Statistical errors of one run on these events (binomial
+or standard errors, `_se` columns) are kept apart from the seed spread (half
+range of 3 seeds). Figures show seed 0 with its statistical errors and the
+seed range as a band.
+
+**Clean-up.** Raw outputs are primary. The only clean-ups, labelled and
+reported separately, are a 0.5 GeV tower threshold on every output
+(`[thr0.5]`, truth unchanged) and the frozen linear calibration (`_cal`).
+
+### Results (jobs 20205-20213 training, 20220-20228 scoring and images, 20229 latency, 20230-20237 analysis)
+
+**Selection metric, val `jer_cal` (GeV) at the selected checkpoints**
+(seeds 0 / 1 / 2; UVCGAN-S published 3.59, JEWEL 3.99):
+
+| arm, readout | selected at | val, 4 Euler | val, 32 NFE (64, seed 0) | JEWEL, 4 Euler | JEWEL, 32 NFE |
+| :--- | :--- | ---: | ---: | ---: | ---: |
+| unpaired, M - B_hat | 90 / 105 / 120 min | 3.66 / 3.68 / 3.67 | 4.10 / 4.11 / 4.09 (4.10) | 3.55 / 3.56 / 3.54 | 3.64 / 3.66 / 3.65 |
+| paired, M - B_hat | 30 / 30 / 45 min | 3.95 / 3.95 / 3.95 | 4.10 / 4.11 / 4.12 (4.10) | 3.60 / 3.61 / 3.61 | 3.65 / 3.66 / 3.67 |
+| joint, M - B_hat | 105 / 120 / 120 min | 4.14 / 4.12 / 4.19 | 4.33 / 4.23 / 4.32 (4.34) | 4.15 / 4.16 / 4.05 | 4.39 / 4.36 / 4.22 |
+| joint, direct S_hat | (same) | 5.61 / 5.68 / 6.11 | 4.62 / 4.50 / 4.66 (4.52) | 5.06 / 5.07 / 5.44 | 4.48 / 4.40 / 4.31 |
+
+- **The accurate solve is resolved.** 64 NFE matches 32 to 0.01 GeV,
+  except for the joint direct readout (0.1 GeV).
+- **Only the unpaired arm reaches T_acc (3.70 GeV)**, after 0.5 h (all
+  seeds).
+- **The paired arm is best after 30-45 min and then worsens** (4.01-4.02 at
+  2 h) while its per-tower MAE keeps improving.
+- **The joint arm is still improving at 2 h.**
+
+**Jets** (`bench_summary.csv`, R = 0.4, 20 < pT_real < 30 GeV, seed means;
+seed half ranges: background-only flows <= 0.002 in scale and <= 0.05 GeV in
+RMSE, joint arm up to 0.023 and 0.4 GeV):
+
+| | val scale | val res. (frozen cal.) | val RMSE, GeV | val eff. 14-20 | val fake 14-20 | JEWEL scale | JEWEL scale (val cal.) | JEWEL res. (val cal.) | JEWEL fake 14-20 |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| UVCGAN-S | 0.982 | 0.153 | 3.59 | 0.972 | 0.030 | 1.022 | 1.046 | 0.151 | 0.080 |
+| Area | 0.881 | 0.261 | 7.37 | 0.865 | 0.192 | 0.904 | 1.016 | 0.269 | 0.231 |
+| unpaired FM | 0.993 | 0.150 | 3.33 | 0.988 | 0.146 | 1.033 | 1.040 | 0.151 | 0.189 |
+| paired FM | 0.828 | 0.154 | 5.51 | 0.968 | 0.005 | 0.863 | 1.040 | 0.158 | 0.015 |
+| joint FM, M - B_hat | 0.912 | 0.161 | 4.41 | 0.881 | 0.029 | 0.981 | 1.072 | 0.154 | 0.075 |
+| joint FM, direct S_hat (32 NFE) | 0.884 | 0.164 | 5.02 | 0.846 | 0.020 | 0.963 | 1.079 | 0.161 | 0.062 |
+
+- **The radius separates the failure modes.** Scale at R = 0.2 / 0.4 / 0.5:
+
+  | | R = 0.2 | R = 0.4 | R = 0.5 |
+  | :--- | ---: | ---: | ---: |
+  | UVCGAN-S | 0.99 | 0.98 | 0.98 |
+  | unpaired FM | 0.88 | 0.99 | 1.10 |
+  | paired FM | 0.82 | 0.83 | 0.85 |
+  | joint FM, M - B_hat | 0.99 | 0.91 | 0.89 |
+
+  - Unpaired FM's floor fills larger cones: its fake rate at 14-20 GeV is
+    67% at R = 0.5 and 82% at 14-16 GeV.
+  - The joint arm keeps the core and loses the periphery: its efficiency at
+    14-20 GeV is 0.81 at R = 0.5.
+- **The accurate solve:**
+  - lowers both background-only scales to 0.74-0.75 (val);
+  - removes the unpaired floor (fakes 0.146 -> 0.002);
+  - leaves the calibrated resolution about the same (0.155-0.157).
+- **The 0.5 GeV threshold** removes fakes but lowers every scale by a
+  further 11-27% (UVCGAN-S 0.87, paired 0.60). It restores no core.
+
+**Substructure** (val, R = 0.4, 20-30 GeV; in units of the spread of all
+truth jets; per-jet: matched pairs):
+
+| | per-jet RMSE / sigma: g, m, z_lead, p_T^D, z_g, r_g | distribution W1 / sigma: g, m, z_lead, p_T^D, z_g, r_g |
+| :--- | :--- | :--- |
+| UVCGAN-S | 0.60, 1.16, 0.38, 0.46, 1.12, 0.94 | 0.07, 0.21, 0.04, 0.06, 0.01, 0.02 |
+| unpaired FM | 0.79, 1.31, 0.48, 0.72, 1.12, 0.97 | 0.59, 0.68, 0.35, 0.60, 0.22, 0.38 |
+| paired FM | **0.55**, 1.17, **0.34**, 0.51, 1.12, **0.85** | 0.22, 0.53, 0.14, 0.36, 0.13, 0.13 |
+| joint FM, M - B_hat | 0.68, 1.31, 0.44, 0.47, 1.18, 1.04 | 0.39, 0.76, 0.22, 0.17, 0.02, 0.50 |
+| joint FM, direct S_hat (32 NFE) | 0.99, 1.67, 0.81, 0.87, 1.22, 1.23 | 0.79, 1.30, 0.64, 0.68, 0.05, 0.77 |
+| truth vs truth (floor) | | 0.03, 0.03, 0.02, 0.02, 0.01, 0.03 |
+
+- **UVCGAN-S has the closest distributions**, 2-7x closer than the best
+  flow for every observable.
+- **Paired FM has the smallest per-jet errors** of girth, z_lead and r_g.
+  Its distributions are shifted: low mass, high xi (the lost core lowers the
+  jet pT).
+- **Per-jet z_g is not reproduced by any model** (RMSE ~1.1 sigma).
+- **Seed half ranges:** <= 0.01 sigma for UVCGAN-S and the background-only
+  flows, up to 0.14 for the joint arm.
+
+**JEWEL** (the same selection; the JEWEL - PYTHIA shift of the mean as a
+fraction of the truth's, stat. error 0.02-0.04):
+
+| | girth | z_lead | mass | p_T^D | r_g |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| UVCGAN-S | 0.76 | 0.80 | 0.55 | 0.76 | 0.70 |
+| unpaired FM | 0.63 | 0.71 | 0.36 | 0.66 | 0.46 |
+| paired FM | 0.72 | 0.80 | 0.36 | 0.79 | 0.69 |
+| joint FM, M - B_hat | 0.63 | 0.73 | 0.23 | 0.72 | 0.71 |
+| joint FM, direct S_hat (32 NFE) | 0.63 | 0.80 | 0.22 | 0.80 | 0.71 |
+
+- **The frozen PYTHIA calibration carries over** with a +4% scale shift for
+  UVCGAN-S and the background-only flows and +7-8% for the joint arm. The
+  calibrated resolutions stay at 0.151-0.161.
+- **The joint M - B_hat readout does better on JEWEL than on PYTHIA:** scale
+  0.98, the smallest per-jet girth error (0.57 sigma; UVCGAN-S 0.63). This
+  is consistent with its keeping hard towers, since JEWEL jets are narrower.
+
+**Towers and where the background error goes** (val, seed means; shares of
+the true signal energy of the towers put into B_hat = M - S_hat):
+
+| | MAE / tower, GeV | S = 0: B_hat - B, GeV | S 0.5-2 | S 5-10 | S > 10 | sum(S_hat - S), GeV / event |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| UVCGAN-S | 0.033 | -0.009 | 48% | 2% | 1% | -7 |
+| unpaired FM | 0.150 | -0.090 | 38% | 17% | 12% | +112 |
+| unpaired FM, 32 NFE | 0.051 | -0.026 | 66% | 33% | 24% | +1 |
+| paired FM | 0.050 | -0.026 | 61% | 24% | 16% | +8 |
+| paired FM, 32 NFE | 0.051 | -0.026 | 65% | 31% | 23% | +2 |
+| joint FM, M - B_hat | 0.031 | -0.006 | 61% | 3% | -1% | -19 |
+| joint FM, direct S_hat (32 NFE) | 0.031 | -0.003 | 66% | -4% | -14% | -25 |
+
+- **Background-only prediction puts part of the jet core into B_hat**,
+  paired or not. Joint prediction and UVCGAN-S (also a two-output
+  generator) keep it; the joint direct readout overshoots the hardest
+  towers.
+- **Every model misses 20-60% of the signal in towers with S < 2 GeV.**
+- **Joint consistency, B_hat + S_hat - M before clean-up (val):**
+  - 4 Euler steps: MAE 0.009 GeV per tower, -7.7 GeV per event;
+  - 32 NFE: 0.003 GeV per tower, +1.3 GeV per event.
+- The JEWEL shares are within 1-3 points of these (`bench_towers_summary.csv`).
+
+**Where the joint arm's training signal lies** (`bench_loss_t.csv`,
+selected checkpoints, 2000 val pairs):
+- The joint flow's signal-channel loss is 0.51 at t = 0 and 0.0015 at
+  t = 0.02; its background-channel loss is 0.042 -> 0.003.
+- The paired one-panel flow's loss rises from 0.040 at t = 0 to 0.081 at
+  t = 0.95.
+- With the source (M, 0) the signal channel of x_t = (1 - t) z(0) + t z(S)
+  exposes S, and with it B, for any t > 0. The joint flow is therefore
+  decided in its first step, and almost all of its training samples carry
+  no loss.
+- This explains its 10-40x smaller training loss. It is consistent with
+  its slower convergence and larger seed spread; that link was not tested
+  separately.
+
+**Cost** (one RTX A6000; `bench_cost*.csv`, `bench_cost.png`):
+
+| | best val `jer_cal` | at 2 h | h to 3.70 | updates / s | peak GB | ms / event, 4 NFE | 32 NFE |
+| :--- | ---: | ---: | :--- | ---: | ---: | ---: | ---: |
+| unpaired FM | 3.67 | 3.67 | 0.5 / 0.5 / 0.5 | 4.45 | 19.1 | 1.08 | 8.8 |
+| paired FM | 3.95 | 4.02 | never | 4.55 | 18.1 | 1.10 | 8.9 |
+| joint FM | 4.15 | 4.19 | never | 4.52 | 18.1 | 1.11 | 8.9 |
+| UVCGAN-S retrained, batch 4 | 3.64 | 7.4 | 14.7 / 16.5 / 16.7 | | | | |
+| UVCGAN-S retrained, batch 32 | 3.62 | 8.3 | 8.4 / 8.6 / 15.2 | | | | |
+| UVCGAN-S published (~105 h) | 3.59 | | | | | 0.27 (1 pass) | |
+
+**Supplementary true-axis cone scores** (`bench_cone*.csv`,
+`bench_cone_s0.png`; 10k events per set, frozen calibration from val). Mean
+EMD to the true jet, GeV, val / JEWEL (shape part in brackets):
+
+| | EMD, val | EMD, JEWEL |
+| :--- | ---: | ---: |
+| UVCGAN-S | 4.75 (3.12) | 4.54 (2.83) |
+| unpaired FM | 5.36 (3.13) | 4.77 (3.07) |
+| paired FM | 8.24 (**2.93**) | 6.83 (**2.59**) |
+| joint FM, M - B_hat | 5.69 (3.56) | 4.80 (2.86) |
+| joint FM, direct S_hat, 32 NFE | 6.49 (4.33) | 5.46 (3.40) |
+
+- Paired FM has the best shape and the worst energy.
+- The frozen-calibration cone resolution on val is UVCGAN-S 3.57, unpaired
+  3.65, paired 3.95, joint 4.14 GeV. On JEWEL it is 4.16 / 3.58 / 3.76 /
+  4.32.
+
+### Verdict
+
+- **No flow arm is as faithful as UVCGAN-S** in jet scale, fakes and
+  substructure distributions. After a frozen calibration, UVCGAN-S and the
+  background-only flows have the same jet energy resolution (0.150-0.154 at
+  20-30 GeV); the joint flow is 5-7% worse.
+- **Predicting B alone loses part of the jet core, paired or not.**
+  12-25% of the energy of towers with S > 10 GeV goes into B_hat.
+  - Paired FM: scale 0.83.
+  - Unpaired FM (4 steps) looks unbiased only because a soft floor adds
+    +112 GeV per event: 15% fake jets at 14-20 GeV and the worst
+    distributions.
+  - Good average resolution coexists with this loss.
+- **Predicting B and S keeps the hard core** but drops soft signal and low-pT
+  jets. In this set-up it also varies more between seeds, and it is decided
+  in its first step.
+- **Neither dominates.**
+  - Background-only (paired) gives the best per-jet substructure and the
+    fewest fakes, with a low scale.
+  - Joint gives a better scale at small R and on JEWEL, with lower
+    efficiency.
+- **Pairing improves the tower accuracy (3x), fakes (30x) and per-jet
+  substructure. It does not fix the core loss.** It needs per-mixture
+  simulation truth.
+- **UVCGAN-S's fidelity comes after ~105 h and with its own supervised
+  term.** The flows train in 2 h and match its calibrated resolution, not
+  its scale or distributions.
+
+**Missing or limited:**
+- the ICS baseline (fjcontrib);
+- the paper's analysis code (rebuilt from the text, so no paper numbers to
+  compare);
+- the val events' signal images are among UVCGAN-S's unpaired training
+  signals;
+- HIJING parents of the embedded mixtures cannot be checked for train/val
+  overlap (the mixture keys are disjoint);
+- the JEWEL sample (Zenodo 17594612) has no generator version or settings
+  recorded (the paper states JEWEL 2.3.0 + Geant4);
+- one network and a 2-h budget for the flows;
+- the joint arm is still improving at 2 h.
+
+**Commands** (also `docs/flow/bench/README.md`):
+
+    $PYTHON scripts/flow/make_pairs.py              # training pairs (once)
+    sub() { METHOD=$1 LABEL=$2 MINUTES=120 SEED=$3 EVAL_DECODE=mixture \
+        EVAL_ARGS="--nfe 4 --solver euler" sbatch -w dahlia --time=03:30:00 \
+        -J $2 scripts/flow/fm_run.sbatch --ckpt-minutes 15 --inline-events 1000 \
+        --inline-nfe 4 --backbone uvcgan; }
+    sub otcfm1 bb_uvcgan_otcfm1_s1 1; sub otcfm1 bb_uvcgan_otcfm1_s2 2
+    for s in 0 1 2; do sub otcfm1_paired bench_paired_bkg_s$s $s; done
+    for s in 0 1 2; do sub joint_paired bench_joint_s$s $s; done
+    # per run: cone scores (val, JEWEL; 4 Euler, 32 NFE; 64 on val for
+    # seed 0) and benchmark images
+    LABEL=bench_joint_s0 JOINT=1 CONVERGENCE=1 sbatch -w dahlia \
+        --dependency=afterok:JOB scripts/flow/bench_post.sbatch
+    $PYTHON scripts/flow/bench_images.py --uvcgan         # UVCGAN-S images
+    $PYTHON scripts/flow/fm_eval.py --latency RUN_DIRS --nfe 4,32 --solver euler,midpoint
+    sbatch -p a6k -w saturn -c 64 --mem=160G scripts/flow/bench_all.sh
+    $PYTHON scripts/flow/bench_tables.py
+    cd docs/flow/bench/slides && ~/pyext/tectonic_env/bin/tectonic bench_deck.tex
+
+**Tools installed for this benchmark (outside the env):**
+- FastJet 3.5.1 Python bindings: `pip --target ~/pyext/jets`, its numpy,
+  awkward and other dependencies removed, so the env's numpy 2.3.1 is used.
+- Tectonic 0.17.0 and poppler in the conda environment
+  `~/pyext/tectonic_env`.
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything
@@ -2049,26 +2431,28 @@ and end-to-end times), `inline_eval.csv`, `evals/{val,jewel}_truth.csv`
 (one row per checkpoint, network and inference setting) and the per-event
 jet energies `evals/*_truth/*.npy`.
 
-## Status (2026-09-26 23:30)
+## Status (2026-09-28 01:30)
 
 All runs and benchmark jobs have ended; nothing of this study is running.
 
-- **Latest, the teacher-guided coupling:**
-  - even a perfect teacher can only point to other real jets (the audit);
-  - guided unpaired training destroys the 2k-pair teacher's fidelity (shape
-    EMD 0.0009 -> 0.079);
-  - paired-only continuation adds nothing.
-  - So unpaired data has no useful role in this toy, whether minibatch-OT
-    coupled or teacher-guided.
-- **Physical pairs:**
-  - JEWEL, as documented, cannot supply shower-level pairs;
-  - HYBRID can, by design, with a stochastic medium part, but its code is
-    not public (contact the authors).
-- **Next:** obtain a small paired HYBRID sample with several medium
-  realisations per vacuum shower. That measures how random the
-  modification is, and whether the target is a map or a conditional
-  distribution, before any further model work.
-- **Also open:**
-  - jet-level physics on extracted images;
-  - why OT-CFM is better on JEWEL than on val;
-  - the dependence of unpaired correspondence on the cost.
+- **Latest, the consolidated benchmark** (section above; deck
+  `docs/flow/bench/slides/bench_deck.pdf`):
+  - no flow arm is as faithful as UVCGAN-S; after a frozen calibration the
+    background-only flows match its jet energy resolution;
+  - predicting the background alone loses 12-25% of the hardest towers'
+    energy, paired or not; predicting both keeps it but drops soft signal
+    and low-pT jets;
+  - pairing improves images, fakes and per-jet substructure, not the core
+    loss;
+  - the unpaired flow's good average resolution coexists with a soft floor
+    (15% fakes) that hides its core loss.
+- **Missing:** ICS (fjcontrib), the paper's own analysis code.
+- **Earlier, still valid:**
+  - the teacher-guided coupling adds nothing to few true pairs in the toy;
+  - JEWEL cannot supply shower-level pairs as documented; HYBRID can, but
+    its code is not public (contact the authors).
+- **Open:**
+  - a paired HYBRID sample with several medium realisations per vacuum
+    shower, to measure how random the modification is;
+  - why the flows do better on JEWEL than on val;
+  - the dependence of unpaired correspondence on the matching cost.
