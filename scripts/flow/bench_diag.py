@@ -215,7 +215,7 @@ def plot_bkg(df, sets, out, labels = None):
     # the main readouts; the others are in the tables
     labels = [ l for l in dict.fromkeys(df.label)
                if (l in labels if labels else '[' not in l) ]
-    (fig, axes) = plt.subplots(2, len(sets), figsize = (3.3 * len(sets), 4.2),
+    (fig, axes) = plt.subplots(2, len(sets), figsize = (max(3.3 * len(sets), 5.0), 4.2),
                                squeeze = False, sharex = True)
     w = 0.8 / len(labels)
     for (col, s) in enumerate(sets):
@@ -248,7 +248,7 @@ def plot_bkg(df, sets, out, labels = None):
                 ax.set_xticklabels(order)
                 ax.set_xlabel('true signal energy S of the tower, GeV')
     axes[0][0].legend(fontsize = 5.5)
-    fig.suptitle('Background error by true signal energy of the tower '
+    fig.suptitle('Background error by true signal energy of the tower\n'
                  '($\\hat B = M - \\hat S$; seed mean, whiskers: seed range)',
                  fontsize = 7.5)
     fig.tight_layout()

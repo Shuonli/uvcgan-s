@@ -602,6 +602,44 @@ A sequence of cheap diagnostics, then controls:
   figures `docs/flow/bench/`; details `FLOW_NOTES.md`, "Consolidated
   benchmark".
 
+## Part 11: does a noisy training path stop the paired flow losing the jet core?
+
+- **The problem (Part 9):** even when every training mixture comes with its
+  own true background, the background-only flow puts part of the jet core
+  into the background. Jet energy scale 0.83 with the fast solve, 0.75 with
+  the accurate one; 16-23% of the energy of the hardest signal towers ends
+  up in the predicted background. Lost signal means the predicted
+  background is too *high* there.
+- **Idea tested:** the flow is trained only on straight lines from each
+  mixture to its background. While solving, it may wander off those lines
+  into places where it was never trained. Adding a little noise to the
+  training path (zero at both ends, largest halfway) trains it around the
+  lines too.
+- **Test:** two otherwise identical 2-hour runs: same seed, data order and
+  32,640 updates, one with the usual straight path, one with noise of size
+  0.1 (in the standardised log-energy units). Scored at the last update
+  with the unchanged benchmark and its fixed events, PYTHIA val only.
+- **Result: no measurable difference anywhere.**
+  - Core in the background: 23.1% against 23.2% (accurate solve).
+  - Jet scale 0.753 against 0.753; efficiency, fakes, resolution and all
+    six substructure observables within the run-to-run spread.
+  - The fast 4-step solve is unchanged as well.
+- **Why, from a step-by-step look at the solve** (256 events):
+  - in the hardest towers the predicted background never drops below the
+    truth; it just stops about a quarter short;
+  - started exactly on the correct straight line halfway, the solve still
+    ends with 18% of the core in the background, in both runs.
+  - So the flow does not fail by wandering off its training lines. It fails
+    in what it learns on them: most likely an average over all the
+    backgrounds that could explain the partly subtracted image, which is
+    too high in the core (a hypothesis).
+- **Decision:** the pilot is stopped, as fixed before training: no more
+  seeds, no sweep of the noise size, JEWEL left untouched. This rules out
+  only this setting.
+- **Where:** `FLOW_NOTES.md`, "Paired noisy-interpolant pilot"; tables and
+  figures `docs/flow/bench/noisy/`; three slides at the end of
+  `docs/flow/bench/slides/bench_deck.pdf`.
+
 ## Where everything is
 
 - `FLOW_NOTES.md`: the full log of the flow study (pre-registration,

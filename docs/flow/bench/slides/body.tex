@@ -220,3 +220,87 @@ signal, \uv{} included (the 4-step \unp{} floor over-fills the softest).}
 \end{itemize}
 \end{columns}
 \end{frame}
+
+% ================================================================ follow-up
+% Paired noisy-interpolant pilot (FLOW_NOTES.md, "Paired noisy-interpolant
+% pilot"); numbers: docs/flow/bench/noisy/*.csv, tables/noisy_*.tex.
+
+% ---------------------------------------------------------------- F1
+\begin{frame}{Follow-up: does a noisy training path stop the paired flow's core leakage?}
+\small
+\textbf{The failure.} \pai{} background-only FM puts part of the jet core into $\Bh$ although every
+training mixture comes with its own background: jet scale 0.83 (4 Euler) / 0.75 (accurate solve);
+16\% / 23\% of the signal energy of towers with $S > 10$ GeV ends in $\Bh$. With $\Sh = M - \Bh$, lost
+signal means $\Bh$ is \emph{too high}: the flow stops short of the true background in the core.
+
+\vspace{0.3em}
+\textbf{Hypothesis} (not an established explanation). Noiseless straight interpolants supervise the
+velocity only on the segments between $(z(M), z(B))$ pairs; the states the ODE visits drift off them.
+A noisy interpolant that returns exactly to the endpoints trains the field around the paths. Caveat: an
+exactly learned marginal transport need not be the best estimator for single events.
+
+\vspace{0.2em}
+\begin{columns}[T]
+\column{0.48\textwidth}
+\footnotesize
+\textbf{Path} (stochastic interpolant, Albergo, Boffi \& Vanden-Eijnden 2025), $a = z(M)$, $b = z(B)$:
+\[ x_t = (1-t)\,a + t\,b + \eta \sin(\pi t)\,\varepsilon, \quad u_t = (b - a) + \eta\pi\cos(\pi t)\,\varepsilon, \]
+the same $\varepsilon \sim N(0, I)$; $\eta$ = largest noise sd ($t = \tfrac12$), standardised $\log E$ units;
+exact endpoints. Inference unchanged: deterministic ODE from $z(M)$, $\Sh = M - \Bh$.
+\column{0.52\textwidth}
+\footnotesize
+\textbf{Controlled pilot} (seed 0): $\eta = 0$ against $\eta = 0.1$; same endpoint pairs, UVCGAN-S net,
+633k mixtures, optimiser, EMA, readout; $\varepsilon$ from its own RNG (same weights, mixture order,
+times); \textbf{32{,}640 updates each}, compared at the final update.
+\begin{itemize}\setlength\itemsep{0.02em}
+\item checks: $\eta = 0$ = old path bit for bit; exact endpoints; $u_t = \partial_t x_t$ to $3\cdot10^{-10}$;
+  the fresh control repeats the benchmark run's loss curve
+\item primary: accurate solve (midpoint 32 NFE; 64 checked); 4 Euler shown apart
+\end{itemize}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------- F2
+\begin{frame}{Pilot result: $\eta = 0.1$ changes nothing measurable (seed 0, 32{,}640 updates, val)}
+\vspace{-0.5em}
+\begin{columns}[T]
+\column{0.56\textwidth}
+\input{tables/noisy_main.tex}
+
+\vspace{0.4em}
+{\scriptsize Substructure (per-jet RMSE$/\sigma$ and W1$/\sigma$ of $g, m, z_{lead}, p_T^D, z_g, r_g$):
+$\eta = 0$ and $0.1$ agree to $\le 0.007\sigma$ at both solves (\texttt{noisy/noisy\_compare.csv}).
+\uv{} for reference: scale 0.98, 0.8\% of the core in $\Bh$.}
+\column{0.44\textwidth}
+\vspace{-0.3em}
+\includegraphics[width=\textwidth]{noisy/bench_bkgerr.png}
+\end{columns}
+\vspace{-0.2em}
+{\scriptsize \textbf{All 58 pre-registered comparisons are within 3$\times$ the seed or statistical
+spread} (largest core change $+0.0007$, threshold 0.0019). 64 NFE agrees with 32 to 0.0004 GeV per
+tower. The 4-step readout keeps its trade-off in both arms: less core in $\Bh$, higher scale, +6 GeV
+per event of spurious signal.}
+\end{frame}
+
+% ---------------------------------------------------------------- F3
+\begin{frame}{Why not: the core stays in $\Bh$ even when the solve starts on the true path}
+\vspace{-0.6em}
+\begin{center}
+\includegraphics[width=0.92\textwidth]{noisy/traj.png}
+\end{center}
+\vspace{-0.9em}
+{\scriptsize 256 val events, 592 towers with $S > 5$ GeV, final update, midpoint. Left: the ODE never
+undershoots (no hard tower goes below the true $B$), follows the clean interpolant to $t \approx 0.2$
+and stalls at 27\% after $t \approx 0.7$. Middle: started exactly on the true path at $t_0$, the rest of
+the solve still leaves 26\% / 18\% / 7\% of the core in $\Bh$. Right: a displaced core is kept, not
+restored. Both arms agree to 0.003.}
+
+\vspace{0.2em}
+\small
+\textbf{Answer.} Noisy interpolation ($\eta = 0.1$) improved neither the accurately solved background
+nor the jets, and did not shift the numerical trade-off either: both solves are unchanged. The loss
+comes from the learned field on the paths, not from a lack of supervision around them
+(hypothesis: the regression $E[b - a \mid x_t]$ averages over backgrounds the partly subtracted state
+cannot tell apart). Pilot stopped: no seeds 1-2, no sweep, JEWEL untouched. This rules out only this
+setting and says nothing about unpaired vacuum-to-medium transfer.
+\end{frame}

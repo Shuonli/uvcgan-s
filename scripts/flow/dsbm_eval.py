@@ -269,12 +269,16 @@ OBS_SPREAD = [ 'E', 'mass', 'girth', 'ptd', 'zlead' ]
 def colour(label):
     """One colour per arm in every figure (the slides' colours)."""
     low = label.lower()
-    for (key, c) in [ ('identity', '#7f7f7f'), ('alpha-dsbm', '#d62728'),
-                      ('pretrained', '#9ecae1'), ('bridge', '#1f77b4'),
-                      ('ot-cfm', '#2ca02c'), ('paired', '#ff7f0e') ]:
+    if 'ot-cfm' in low and 'u-net' in low:
+        return '#98df8a'           # the historical U-Net references
+    small = '0.25' in low          # the second noise level: darker
+    for (key, c, c_small) in [ ('identity', '#7f7f7f', None),
+                               ('alpha-dsbm', '#d62728', '#8c1d1d'),
+                               ('pretrained', '#9ecae1', '#6baed6'),
+                               ('bridge', '#1f77b4', '#08306b'),
+                               ('ot-cfm', '#2ca02c', None), ('paired', '#ff7f0e', None) ]:
         if key in low:
-            # a second noise level of the same arm: darker
-            return '#8c1d1d' if (key == 'alpha-dsbm' and '0.25' in low) else c
+            return c_small if (small and c_small) else c
     return 'k'
 
 def multi(cmdargs, device):

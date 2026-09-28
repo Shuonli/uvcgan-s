@@ -25,6 +25,7 @@ published UVCGAN-S and the Area method. Design, results and caveats:
 | `bench_displays*.png`, `bench_bkgerr.png` | event displays; background error by tower |
 | `bench_cost.png` | val resolution against training hours; inference latency |
 | `bench_cone_s0.png`, `bench_cone_s0*.csv` | supplementary cone scores, seed 0 of every arm, both solves |
+| `noisy/` | the paired noisy-interpolant pilot (`FLOW_NOTES.md`, "Paired noisy-interpolant pilot"; deck slides 11-13): the same benchmark files for eta = 0 and eta = 0.1 at their final update (val only), `noisy_compare.csv` (every decision metric with its threshold), `noisy_curves.*` (val curves), `traj*` (solver check, trajectory and perturbation diagnostic), `path_check.json` (checks of the training path) |
 
 Labels: `[mid32]` = the accurate solve (midpoint, 32 network evaluations);
 no suffix = 4 Euler steps; `[thr0.5]` = the labelled clean-up (towers below
@@ -64,3 +65,19 @@ All from the repository root after `. ./scripts/flow/env.sh`.
     # deck tables and the deck
     $PYTHON scripts/flow/bench_tables.py
     cd docs/flow/bench/slides && ~/pyext/tectonic_env/bin/tectonic bench_deck.tex
+
+    # the paired noisy-interpolant pilot (eta 0 and 0.1, 32,640 updates each)
+    $PYTHON scripts/flow/sine_path_check.py              # checks, CPU
+    sub() { METHOD=otcfm1_paired LABEL=$1 MINUTES=170 SEED=0 EVAL_DECODE=mixture \
+        EVAL_ARGS="--nfe 4 --solver euler" sbatch -w dahlia --time=03:30:00 -J $1 \
+        scripts/flow/fm_run.sbatch --ckpt-steps 4080 --max-steps 32640 \
+        --inline-events 1000 --inline-nfe 4 --backbone uvcgan --path sine --eta $2; }
+    sub bench_paired_eta0_s0 0; sub bench_paired_eta0p1_s0 0.1
+    for r in bench_paired_eta0_s0 bench_paired_eta0p1_s0; do
+        LABEL=$r STEP=last SETS=val CONVERGENCE=1 sbatch -w dahlia scripts/flow/bench_post.sbatch; done
+    $PYTHON scripts/flow/noisy_traj.py bench_paired_eta0_s0 bench_paired_eta0p1_s0 \
+        --labels 'control eta 0,treatment eta 0.1' --out docs/flow/bench/noisy/traj   # GPU
+    sbatch -p a6k -w saturn -c 64 --mem=160G scripts/flow/noisy_bench.sh     # CPU
+    $PYTHON scripts/flow/noisy_tables.py; $PYTHON scripts/flow/noisy_curves.py \
+        "control eta 0=bench_paired_eta0_s0" "noisy eta 0.1=bench_paired_eta0p1_s0" \
+        "benchmark paired s0 (straight)=bench_paired_bkg_s0"

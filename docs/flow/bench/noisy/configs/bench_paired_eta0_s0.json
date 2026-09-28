@@ -1,0 +1,49 @@
+{
+    "method": "otcfm1_paired",
+    "label": "bench_paired_eta0_s0",
+    "seed": 0,
+    "batch": 256,
+    "lr": 0.0002,
+    "warmup": 1000,
+    "cosine_steps": null,
+    "ema": 0.9999,
+    "grad_clip": 1.0,
+    "log_bias": 0.1,
+    "augment": "none",
+    "cost": "l2",
+    "cost_lambda": 1.0,
+    "target_domain": "closure_tgt",
+    "ot_pool": null,
+    "pairing": "unpaired",
+    "paired_n": null,
+    "paired_share": 0.5,
+    "sigma": 0.0,
+    "path": "sine",
+    "eta": 0.0,
+    "backbone": "uvcgan",
+    "channels": 96,
+    "res_blocks": 2,
+    "attn": [
+        4
+    ],
+    "minutes": 170.0,
+    "max_steps": 32640,
+    "ckpt_minutes": 2.5,
+    "ckpt_steps": 4080,
+    "log_steps": 100,
+    "inline_events": 1000,
+    "inline_nfe": 4,
+    "outdir": null,
+    "n_params": 32282803,
+    "runs": [
+        {
+            "torch": "2.7.1+cu118",
+            "torchcfm": "1.0.7",
+            "pot": "0.9.7.post1",
+            "python": "3.12.11",
+            "gpu": "NVIDIA RTX A6000",
+            "node": "dahlia",
+            "commit": "556718e"
+        }
+    ]
+}

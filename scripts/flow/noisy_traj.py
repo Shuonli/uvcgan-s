@@ -62,7 +62,47 @@ def parse_cmdargs():
         help = 'perturbation size, standardised log-energy units')
     parser.add_argument('--batch', type = int, default = 250)
     parser.add_argument('--out', default = 'docs/flow/bench/noisy/traj')
+    parser.add_argument('--replot', action = 'store_true',
+        help = 'only redraw the figure from the saved tables')
     return parser.parse_args()
+
+COLOURS = [ '#ff7f0e', '#9467bd', '#2ca02c', '#1f77b4' ]
+
+def plot(tr, pe, meta, labels, out):
+    """Hard-tower error along the ODE path; perturbation response."""
+    (fig, axes) = plt.subplots(1, 3, figsize = (10, 2.9))
+    for (k, label) in enumerate(labels):
+        c = COLOURS[k % len(COLOURS)]
+        d = tr[tr.model == label]
+        axes[0].plot(d.t, d.hard_share_err, color = c, marker = 'o', ms = 2,
+                     label = f'{label}: ODE path')
+        if k == 0:
+            axes[0].plot(d.t, d.ref_share_err, color = 'k', ls = ':',
+                         label = 'clean interpolant')
+        axes[0].plot(d.t, -d.hard_share_below, color = c, ls = '--', lw = 0.8)
+        p = pe[(pe.model == label) & (pe.delta == 0) & (pe.direction == 'hard')]
+        axes[1].plot(p.t0, p.hard_share_err, color = c, marker = 's', label = label)
+        axes[1].axhline(meta[label]['endpoint_hard_share_err'], color = c, lw = 0.6, ls = ':')
+        for (dname, ls) in [ ('hard', '-'), ('random', '--') ]:
+            q = pe[(pe.model == label) & (pe.delta == 0) & (pe.direction == dname)]
+            axes[2].plot(q.t0, q.response_hard, color = c, ls = ls, marker = 'o',
+                         label = f'{label}, {dname}')
+    axes[0].set_title('hard towers (S > 5 GeV): sum(B(x_t) - B) / sum(S)\n'
+                      '(dashed: minus the share of towers below B)', fontsize = 7)
+    axes[0].set_xlabel('t')
+    axes[1].set_title('endpoint leakage from the clean interpolant at t0\n'
+                      '(dotted: from t = 0, the ordinary ODE)', fontsize = 7)
+    axes[1].set_xlabel('t0')
+    axes[2].set_title('endpoint response to a start displacement\n'
+                      '(1: kept, 0: removed; hard towers)', fontsize = 7)
+    axes[2].set_xlabel('t0')
+    for ax in axes:
+        ax.grid(alpha = 0.3)
+        ax.axhline(0, color = 'k', lw = 0.5)
+        ax.legend(fontsize = 5.5)
+    fig.tight_layout()
+    fig.savefig(f'{out}.png', dpi = 150)
+    plt.close(fig)
 
 def load(run, step, device):
     run_dir = os.path.join(fc.out_root(), run)
@@ -115,8 +155,14 @@ def shares(bhat, b, s):
 def main():
     # pylint: disable=too-many-locals,too-many-statements
     cmdargs = parse_cmdargs()
-    device  = torch.device('cuda')
     labels  = cmdargs.labels.split(',')
+    if cmdargs.replot:
+        with open(f'{cmdargs.out}.json', encoding = 'utf-8') as f:
+            meta = json.load(f)
+        plot(pd.read_csv(f'{cmdargs.out}_paths.csv'), pd.read_csv(f'{cmdargs.out}_perturb.csv'),
+             meta, labels, cmdargs.out)
+        return
+    device  = torch.device('cuda')
     n = max(cmdargs.n_solver, cmdargs.n_traj)
     (embed, signal) = ev.load_pairs(os.environ.get('UVCGAN_S_DATA', 'data'), 20000, 0)
     m_all = torch.from_numpy(embed[:n]).float().to(device)
@@ -217,41 +263,7 @@ def main():
     with open(f'{cmdargs.out}.json', 'w', encoding = 'utf-8') as f:
         json.dump(meta, f, indent = 4)
 
-    # figure: hard-tower error along the ODE path; perturbation response
-    (fig, axes) = plt.subplots(1, 3, figsize = (10, 2.9))
-    for (k, label) in enumerate(labels):
-        d = tr[tr.model == label]
-        axes[0].plot(d.t, d.hard_share_err, color = f'C{k}', marker = 'o', ms = 2,
-                     label = f'{label}: ODE path')
-        if k == 0:
-            axes[0].plot(d.t, d.ref_share_err, color = 'k', ls = ':',
-                         label = 'clean interpolant')
-        axes[0].plot(d.t, -d.hard_share_below, color = f'C{k}', ls = '--', lw = 0.8)
-        p = pe[(pe.model == label) & (pe.delta == 0) & (pe.direction == 'hard')]
-        axes[1].plot(p.t0, p.hard_share_err, color = f'C{k}', marker = 's', label = label)
-        for (dname, ls) in [ ('hard', '-'), ('random', '--') ]:
-            q = pe[(pe.model == label) & (pe.delta == 0) & (pe.direction == dname)]
-            axes[2].plot(q.t0, q.response_hard, color = f'C{k}', ls = ls, marker = 'o',
-                         label = f'{label}, {dname}')
-    axes[1].axhline(meta[labels[0]]['endpoint_hard_share_err'], color = 'C0', lw = 0.6, ls = ':')
-    if len(labels) > 1:
-        axes[1].axhline(meta[labels[1]]['endpoint_hard_share_err'], color = 'C1', lw = 0.6,
-                        ls = ':')
-    axes[0].set_title('hard towers (S > 5 GeV): sum(B(x_t) - B) / sum(S)\n'
-                      '(dashed: minus the share of towers below B)', fontsize = 7)
-    axes[0].set_xlabel('t')
-    axes[1].set_title('endpoint leakage from the clean interpolant at t0\n'
-                      '(dotted: from t = 0, the ordinary ODE)', fontsize = 7)
-    axes[1].set_xlabel('t0')
-    axes[2].set_title('endpoint response to a start displacement\n'
-                      '(1: kept, 0: removed; hard towers)', fontsize = 7)
-    axes[2].set_xlabel('t0')
-    for ax in axes:
-        ax.grid(alpha = 0.3)
-        ax.axhline(0, color = 'k', lw = 0.5)
-        ax.legend(fontsize = 5.5)
-    fig.tight_layout()
-    fig.savefig(f'{cmdargs.out}.png', dpi = 150)
+    plot(tr, pe, meta, labels, cmdargs.out)
     with pd.option_context('display.width', 250, 'display.max_columns', 30):
         print(pd.DataFrame(solver_rows).round(4).to_string(index = False))
         print(pe.round(4).to_string(index = False))

@@ -1,0 +1,24 @@
+{
+    "control eta 0": {
+        "run": "bench_paired_eta0_s0",
+        "step": 32640,
+        "eta": 0.0,
+        "path": "sine",
+        "hard_towers": 592,
+        "share_ever_below_true_b": 0.0,
+        "share_end_above_true_b": 1.0,
+        "share_ever_below_and_end_above": 0.0,
+        "endpoint_hard_share_err": 0.2746432423591614
+    },
+    "treatment eta 0.1": {
+        "run": "bench_paired_eta0p1_s0",
+        "step": 32640,
+        "eta": 0.1,
+        "path": "sine",
+        "hard_towers": 592,
+        "share_ever_below_true_b": 0.0,
+        "share_end_above_true_b": 1.0,
+        "share_ever_below_and_end_above": 0.0,
+        "endpoint_hard_share_err": 0.27419888973236084
+    }
+}

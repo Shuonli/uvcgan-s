@@ -25,9 +25,12 @@ TEX = {
     'OT-CFM U-Net shape+E' : (r'\ot{}, U-Net, shape + $E$', True),
     'OT-CFM U-Net shape+E pool 1024' : (r'\ot{}, U-Net, shape + $E$, pool 1024', True),
     'OT-CFM UVCGAN l2' : (r'\ot{}, UVCGAN, $L^2$', False),
-    'bridge pretrained' : (r'\br{}, pretrained (0.5 h)', False),
-    'bridge continued' : (r'\br{}, continued', False),
-    'alpha-DSBM' : (r'\dsbm{}', False),
+    'bridge pretrained eps 1' : (r'\br{} pretrained, $\varepsilon = 1$', False),
+    'bridge continued eps 1' : (r'\br{} continued, $\varepsilon = 1$', False),
+    'alpha-DSBM eps 1' : (r'\dsbm{}, $\varepsilon = 1$', False),
+    'bridge pretrained eps 0.25' : (r'\br{} pretrained, $\varepsilon = 0.25$', False),
+    'bridge continued eps 0.25' : (r'\br{} continued, $\varepsilon = 0.25$', False),
+    'alpha-DSBM eps 0.25' : (r'\dsbm{}, $\varepsilon = 0.25$', False),
 }
 
 def parse_cmdargs():

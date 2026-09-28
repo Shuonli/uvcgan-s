@@ -35,7 +35,7 @@ for stage in $STAGES; do
             --procs 32 --out $OUT 2>&1 | grep -v '^#' ;;
     diag)
         "$PYTHON" -u scripts/flow/bench_diag.py --sets val \
-            --display "UVCGAN-S=uvcgan__sig,control (eta 0) [mid32]=${C}__midpoint32__sig,noisy (eta 0.1) [mid32]=${N}__midpoint32__sig,control (eta 0)=${C}__euler4__sig,noisy (eta 0.1)=${N}__euler4__sig" \
+            --display "UVCGAN-S=uvcgan__sig,eta 0 (32 NFE)=${C}__midpoint32__sig,eta 0.1 (32 NFE)=${N}__midpoint32__sig,eta 0 (4 Euler)=${C}__euler4__sig,eta 0.1 (4 Euler)=${N}__euler4__sig" \
             --towers "$MODELS" --figure-labels "UVCGAN-S,control (eta 0) [mid32],noisy (eta 0.1) [mid32],control (eta 0),noisy (eta 0.1)" \
             --out $OUT ;;
     esac

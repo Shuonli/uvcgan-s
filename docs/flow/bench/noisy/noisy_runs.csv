@@ -1,0 +1,3 @@
+run,method,seed,backbone,path,eta,step,train_minutes,end_to_end_minutes,updates_per_s,peak_mem_gb,checkpoint,network,n_params,commit,gpu,node
+bench_paired_eta0_s0,otcfm1_paired,0,uvcgan,sine,0.0,32640,120.00905561856925,120.70938970396917,4.532991258001581,18.121477127075195,OUTDIR/sphenix/flow/bench_paired_eta0_s0/checkpoints/step_00032640.pt,ema,32282803,556718e,NVIDIA RTX A6000,dahlia
+bench_paired_eta0p1_s0,otcfm1_paired,0,uvcgan,sine,0.1,32640,118.84263367503881,120.13274461875359,4.577481861328519,18.121477127075195,OUTDIR/sphenix/flow/bench_paired_eta0p1_s0/checkpoints/step_00032640.pt,ema,32282803,556718e,NVIDIA RTX A6000,dahlia

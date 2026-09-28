@@ -2764,6 +2764,123 @@ seeds 1 and 2 of both arms before any claim. **Clearly fails** (no leakage
 reduction at the accurate solve, or a gain only at 4 steps): stop; no
 noise or path sweep. A negative result rules out only this setting.
 
+### Pilot results (jobs 20309-20310 training, 20317-20321 scoring and analysis)
+
+**Training.** Both arms stopped at exactly 32,640 updates: control 120.0
+min of training, 120.7 end to end (4.53 updates/s); eta = 0.1 118.8 and
+120.1 min (4.58/s); side by side on dahlia; peak memory as the benchmark's
+paired arm (18.1 GB). Manifest and configs: `docs/flow/bench/noisy/`
+`noisy_runs.csv`, `configs/`. The fresh
+control repeats the benchmark's `bench_paired_bkg_s0` loss history to four
+significant digits (0.13810 against 0.13810 at step 100, 0.07586 against
+0.07584 at 300): the same initialisation, mixture order and times. The
+treatment's loss is 0.049 higher throughout, the irreducible part of the
+noisy target (eta^2 pi^2 / 2 per element).
+
+**Validation curves** (`docs/flow/bench/noisy/noisy_curves.{png,csv}`; 20k
+val events, cone scores, EMA): see the figure; the arms stay within 0.1 GeV
+of each other in cone resolution at 4 Euler steps at every checkpoint.
+
+**Solver check** (`traj_solver.csv`, the first 1000 val events, final
+update): midpoint 32 against 64 evaluations differs by 0.0004 GeV rms per
+tower and by <= 0.0007 in every leakage share, for both arms. 32 is
+resolved; no finer solve was needed. 4 Euler steps differ from it by 0.036
+GeV per tower and -5.3 GeV per event (less background: the 4-step solve's
+lower leakage is a discretisation effect, as in the benchmark).
+
+| 1000 val events, accurate solve (mid64) | S 0.5-2 | S 2-5 | S 5-10 | S > 10 GeV | B_hat - B where S = 0, GeV |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| control eta 0: share of S in B_hat | 65.4% | 47.2% | 31.2% | 23.2% | -0.025 |
+| eta 0.1 | 65.4% | 47.3% | 31.2% | 23.2% | -0.025 |
+| control, 4 Euler steps | 61.0% | 39.7% | 23.6% | 16.0% | -0.026 |
+| eta 0.1, 4 Euler steps | 61.1% | 39.9% | 23.6% | 16.0% | -0.025 |
+
+**Trajectory diagnostic** (`traj.{png,json}`, `traj_paths.csv`,
+`traj_perturb.csv`; the first 256 val events, 592 hard towers with S > 5
+GeV, final update, EMA, midpoint):
+- **The ODE never undershoots.** In no hard tower does the decoded
+  background B(x_t) fall below the true B at any step, and every hard tower
+  ends above it (both arms). The flow stops short in the core; it does not
+  overshoot and come back.
+- **It stalls, both arms alike.** The hard-tower error sum(B(x_t) - B) /
+  sum(S) follows the clean interpolant (1 - t) a + t b only up to t ~ 0.2
+  (0.60 against 0.57 at t = 0.19), is 0.31 against 0.21 at t = 0.5, and is
+  frozen after t ~ 0.7 (0.28 -> 0.275 at t = 1) while the clean path goes
+  to 0. eta = 0.1 differs from the control by <= 0.003 at every t.
+- **The field, not the drift off the path, keeps the core in B_hat.**
+  Started exactly on the clean interpolant, the remaining solve still ends
+  with 26% (t0 = 0.25), 18% (0.5) and 7% (0.75) of the hard towers' signal
+  in B_hat, against 27% from t = 0; eta = 0.1: 25%, 18%, 7%.
+- **Displacements survive.** A +-0.05 shift of the hard towers at t0 is
+  kept at the endpoint with factor 0.70 / 0.92 / 1.00 (t0 = 0.25 / 0.5 /
+  0.75; eta = 0.1: 0.69 / 0.92 / 1.00), a random direction 0.74 / 0.95 /
+  1.00. Neither field restores a displaced core. The endpoint error against
+  the true B changes by the same amount in both arms.
+
+**The benchmark at the final update** (`docs/flow/bench/noisy/`:
+`bench_summary.csv`, `bench_jets.csv`, `bench_towers_summary.csv`,
+`bench_fig3-6_val.png`, `bench_bkgerr.png`, `bench_displays*.png` (the
+benchmark's fixed events); `noisy_compare.csv`: every decision metric with
+its threshold; PYTHIA val, 20k events, R = 0.4; UVCGAN-S: published, ~105
+h, its training signals include the val signal images):
+
+| | UVCGAN-S | control, 32 NFE | eta 0.1, 32 NFE | control, 4 Euler | eta 0.1, 4 Euler |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| jet scale, 20-30 GeV | 0.982 | 0.753 | 0.753 | 0.832 | 0.831 |
+| resolution, frozen calibration | 0.153 | 0.161 | 0.161 | 0.156 | 0.157 |
+| jet pT RMSE, 20-30 GeV | 3.59 | 7.03 | 7.03 | 5.45 | 5.46 |
+| efficiency, 14-20 GeV | 0.972 | 0.956 | 0.959 | 0.969 | 0.971 |
+| fake rate, 14-20 GeV | 0.030 | 0.002 | 0.002 | 0.006 | 0.005 |
+| share of S in B_hat, towers S 2-5 GeV | 12.1% | 47.0% | 47.0% | 39.4% | 39.6% |
+| S 5-10 GeV | 2.2% | 31.4% | 31.4% | 23.6% | 23.7% |
+| S > 10 GeV | 0.8% | 23.1% | 23.2% | 15.8% | 15.9% |
+| B_hat - B where S = 0, GeV per tower | -0.010 | -0.025 | -0.025 | -0.025 | -0.025 |
+| sum(S_hat - S), GeV per event | -7.1 | +0.7 | +0.7 | +6.1 | +6.0 |
+| per-tower MAE, GeV | 0.033 | 0.050 | 0.050 | 0.049 | 0.049 |
+
+Substructure (20-30 GeV, in units of the spread of all truth jets; g, m,
+z_lead, p_T^D, z_g, r_g):
+
+| | per-jet RMSE / sigma | distribution W1 / sigma |
+| :--- | :--- | :--- |
+| UVCGAN-S | 0.60, 1.16, 0.38, 0.47, 1.12, 0.94 | 0.07, 0.21, 0.04, 0.06, 0.01, 0.02 |
+| control, 32 NFE | 0.54, 1.36, 0.34, 0.53, 1.12, 0.85 | 0.22, 0.89, 0.16, 0.40, 0.14, 0.14 |
+| eta 0.1, 32 NFE | 0.54, 1.36, 0.34, 0.53, 1.12, 0.85 | 0.22, 0.90, 0.16, 0.40, 0.15, 0.14 |
+| control, 4 Euler | 0.55, 1.16, 0.34, 0.51, 1.12, 0.85 | 0.22, 0.51, 0.15, 0.36, 0.13, 0.13 |
+| eta 0.1, 4 Euler | 0.55, 1.16, 0.34, 0.52, 1.12, 0.86 | 0.22, 0.52, 0.15, 0.37, 0.13, 0.13 |
+
+- **Every decision metric is unchanged** (`noisy_compare.csv`: all 58
+  comparisons within their thresholds, at both solves). The largest
+  leakage change is +0.0007 (S > 10 GeV, 32 NFE; threshold 0.0019). The
+  fresh control after 2 h matches the benchmark's paired seed 0 at its
+  selected 30-min checkpoint: scale 0.753 against 0.752, leakage 23.1% /
+  31.4% against 23.1% / 31.4% (S > 10 / 5-10 GeV). The core loss does not
+  change with more training either.
+- The 4-step readout keeps its trade-off in both arms: less core in B_hat
+  (15.8% against 23.1%) and a higher scale (0.83 against 0.75), bought with
+  +6 GeV per event of spurious signal and larger distribution biases
+  elsewhere (mass W1 0.51 against 0.89 is the one improvement). The noisy
+  path changes neither side of it.
+
+**Decision: the pilot clearly fails; stopped.** At eta = 0.1 the noisy
+interpolant does not reduce the hard-core leakage at the accurate solve
+(nor at 4 steps), and changes no other metric. Seeds 1 and 2 were not run,
+no noise or path sweep followed, and JEWEL stays frozen (no follow-up
+merits it). This rules out only this setting (eta = 0.1, sine schedule, 2
+h, this network).
+
+**What the diagnostic suggests (hypothesis, not tested further).** The core
+stays in B_hat even when the solve starts exactly on the true path, so the
+failure is not a lack of supervision *around* the paths, which is what
+the noise adds. The learned velocity is the regression E[b - a | x_t] over
+every training pair passing near x_t; in a hard tower the partly
+subtracted state does not tell how much of it is signal, and the average
+over plausible backgrounds is higher than the true one. That is a
+property of the marginal (posterior-mean) field, which a noisy path of
+this size does not change. Explaining it needs information the state
+lacks, e.g. a signal prediction as in the joint arm, or a different
+target, not a wider tube around the same regression.
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything
