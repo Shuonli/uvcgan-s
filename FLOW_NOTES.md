@@ -1019,8 +1019,8 @@ UVCGAN-S uses a generator already shown to work on these images.
 | scales | 24 x 64 -> 12 x 32 -> 6 x 16 -> 3 x 8; 96, 192, 192, 192 channels | the same scales; 96, 192, 384 features |
 | blocks | 2 residual blocks per scale (3 in the decoder) | one plain two-conv block per scale (encoder); one block of modulated, demodulated convs per scale (decoder) |
 | normalisation | GroupNorm (32 groups) everywhere | none in the encoder; LayerNorm in the transformer; weight demodulation in the decoder |
-| global context | self-attention (4 heads) at 6 x 16 and 3 x 8 | 12-block transformer (384 features, 6 heads) over the 24 bottleneck positions, plus an extra token whose output is a style vector that modulates every decoder conv |
-| skips | every block's output, concatenated | one concatenated skip per scale; the path from below gated by a ReZero scale starting at 0 |
+| global context | self-attention (4 heads) at 6 x 16 and 3 x 8 | 12-block transformer (384 features, 6 heads) over the 24 bottleneck positions, plus an extra token whose output is a style vector that modulates every decoder conv. Inherited quirk (upstream `ViTInput`): the Fourier position code is built on a `meshgrid(x, y)` in (W, H) order while tokens are flattened in (H, W) order, so 22 of the 24 tokens get another position's code; each token's code is still unique and fixed |
+| skips | every block's output, concatenated | one concatenated skip per scale; the upsampled path from below enters ungated (the decoder ReZero option, `modnet_rezero`, is off in the published configuration; corrected 2026-09-28, an earlier version of this table said it was gated at 0) |
 | time input | sinusoidal embedding -> MLP -> scale and shift of every GroupNorm | none (a GAN generator). Added here, the one change: the same kind of embedding, through a 2-layer MLP, added to the extra token, so the style carries t |
 | initialisation | TorchCFM's | UVCGAN-S's (Kaiming) |
 
