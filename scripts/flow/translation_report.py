@@ -519,6 +519,66 @@ def fig_joint(obs, path, models):
     fig.savefig(path, dpi = 150)
     plt.close(fig)
 
+def fig_profiles(obs, path, models):
+    """The slides' joint panels: mean girth and z_lead against the cone
+    energy (E >= 10 GeV), with their standard errors."""
+    # pylint: disable=import-outside-toplevel
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    edges = np.array([ 10, 13, 16, 20, 25, 30, 36, 45, 60 ])
+    mids  = 0.5 * (edges[1:] + edges[:-1])
+    (fig, axes) = plt.subplots(1, 2, figsize = (4.6, 1.9))
+    for (ax, q) in zip(axes, [ 'girth', 'zlead' ]):
+        for s in [ 'JEWEL test', 'identity' ] + models:
+            o = obs[s]
+            means, errs = [], []
+            for (lo, hi) in zip(edges[:-1], edges[1:]):
+                v = te.finite(o[q][(o['E'] >= lo) & (o['E'] < hi)])
+                means.append(v.mean() if len(v) > 20 else np.nan)
+                errs.append(v.std() / np.sqrt(len(v)) if len(v) > 20 else np.nan)
+            ax.errorbar(mids, means, errs, color = colour(s), label = s, marker = '.',
+                        ms = 3, **style(s))
+        ax.set_xlabel('E (cone), GeV', fontsize = 6.5)
+        ax.set_title(f'mean {LABELS[q]}', fontsize = 7)
+        ax.tick_params(labelsize = 6)
+    axes[0].legend(fontsize = 5.5)
+    fig.tight_layout()
+    fig.savefig(path, dpi = 200)
+    plt.close(fig)
+
+def fig_changes_slide(obs, path, models):
+    """The slides' change panels: E_out / E_in, the girth and the
+    leading-tower change against the input energy (median, 16-84%)."""
+    # pylint: disable=import-outside-toplevel
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    o_in  = obs['identity']
+    edges = np.array(IN_EDGES)
+    mids  = 0.5 * (edges[1:] + edges[:-1])
+    qs = [ ('E', '$E_{out} / E_{in}$'), ('girth', 'girth change'),
+           ('lead', 'leading-tower change, GeV') ]
+    (fig, axes) = plt.subplots(1, len(qs), figsize = (6.0, 1.9))
+    for (ax, (q, name)) in zip(axes, qs):
+        for s in models + [ 'random JEWEL' ]:
+            o = obs[s]
+            d = o['E'] / o_in['E'] if q == 'E' else o[q] - o_in[q]
+            band = [ np.percentile(te.finite(d[(o_in['E'] >= a) & (o_in['E'] < b)]),
+                                   [ 16, 50, 84 ]) for (a, b) in zip(edges[:-1], edges[1:]) ]
+            (lo, med, hi) = np.array(band).T
+            ax.plot(mids, med, color = colour(s), label = s, marker = '.', ms = 3, **style(s))
+            ax.fill_between(mids, lo, hi, color = colour(s), alpha = 0.15, lw = 0)
+        ax.axhline(1 if q == 'E' else 0, color = 'k', lw = 0.6)
+        ax.set_xlabel('input E (cone), GeV', fontsize = 6.5)
+        ax.set_title(name, fontsize = 7)
+        ax.tick_params(labelsize = 6)
+    axes[0].set_ylim(0, 2.2)
+    axes[0].legend(fontsize = 5)
+    fig.tight_layout()
+    fig.savefig(path, dpi = 200)
+    plt.close(fig)
+
 def fig_changes(obs, path, models):
     # pylint: disable=import-outside-toplevel
     import matplotlib
@@ -529,7 +589,21 @@ def fig_changes(obs, path, models):
     mids  = 0.5 * (edges[1:] + edges[:-1])
     qs = [ ('E', 'E_out / E_in'), ('girth', 'girth change'), ('mass', 'mass change, GeV'),
            ('core', 'core fraction change'), ('lead', 'leading-tower change, GeV') ]
-    (fig, axes) = plt.subplots(1, len(qs), figsize = (2.3 * len(qs), 2.5))
+    (fig, grid) = plt.subplots(2, len(qs), figsize = (2.3 * len(qs), 4.6))
+    for (ax, (q, name)) in zip(grid[1], qs):
+        # the distributions of the changes, all inputs
+        ds = { s : (obs[s]['E'] / o_in['E'] if q == 'E' else obs[s][q] - o_in[q])
+               for s in models + [ 'random JEWEL' ] }
+        allv = te.finite(np.concatenate(list(ds.values())))
+        bins = np.linspace(*np.quantile(allv, [ 0.005, 0.995 ]), 41)
+        for (s, d) in ds.items():
+            ax.hist(te.finite(d), bins, histtype = 'step', density = True, color = colour(s),
+                    label = s, **style(s))
+        ax.axvline(1 if q == 'E' else 0, color = 'k', lw = 0.6)
+        ax.set_xlabel(name, fontsize = 6.5)
+        ax.set_yticks([])
+        ax.tick_params(labelsize = 6)
+    axes = grid[0]
     for (ax, (q, name)) in zip(axes, qs):
         for s in models + [ 'random JEWEL' ]:
             o = obs[s]
@@ -548,8 +622,47 @@ def fig_changes(obs, path, models):
         ax.set_title(name, fontsize = 7)
         ax.tick_params(labelsize = 6)
     axes[0].legend(fontsize = 5.5)
-    fig.suptitle('Proposed changes against the input (median, 16-84%): the maps, not'
-                 ' errors against a truth', fontsize = 7)
+    fig.suptitle('Proposed changes, output minus its own input (top: median and 16-84% by input'
+                 ' energy; bottom: all 20k inputs): the maps, not errors against a truth',
+                 fontsize = 7)
+    fig.tight_layout()
+    fig.savefig(path, dpi = 150)
+    plt.close(fig)
+
+def fig_migration(mig, path, show):
+    """Output cone-energy bins by input bin, and the share passing the final
+    selection."""
+    # pylint: disable=import-outside-toplevel
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    out_cols = [ c for c in mig.columns if c.startswith('out_') ]
+    (fig, axes) = plt.subplots(1, len(show) + 1, figsize = (2.6 * (len(show) + 1), 2.6))
+    for (ax, s) in zip(axes, show):
+        d = mig[mig['sample'] == s]
+        m = d[out_cols].to_numpy()
+        ax.imshow(m.T, origin = 'lower', aspect = 'auto', cmap = 'viridis', vmin = 0, vmax = 1)
+        ax.set_xticks(range(len(d)))
+        ax.set_xticklabels([ f'{a}-{b}' for (a, b) in zip(d.input_lo, d.input_hi) ],
+                           rotation = 60, fontsize = 5)
+        ax.set_yticks(range(len(out_cols)))
+        ax.set_yticklabels([ c[4:].replace('_', '-').replace('-1000', '+') for c in out_cols ],
+                           fontsize = 5)
+        ax.axhline(1.5, color = 'w', lw = 0.6, ls = '--')
+        ax.set_xlabel('input E (cone), GeV', fontsize = 6)
+        ax.set_title(s, fontsize = 7)
+    axes[0].set_ylabel('output E (cone), GeV', fontsize = 6)
+    ax = axes[-1]
+    for s in show:
+        d = mig[mig['sample'] == s]
+        x = 0.5 * (d.input_lo + d.input_hi)
+        ax.plot(x, d.acceptance, marker = '.', color = colour(s), label = s, **style(s))
+    ax.set_xlabel('input E (cone), GeV', fontsize = 6)
+    ax.set_title('share with output E >= 10 GeV', fontsize = 7)
+    ax.tick_params(labelsize = 6)
+    ax.legend(fontsize = 5.5)
+    fig.suptitle('Migration: output energy by input energy bin (columns sum to 1; white line: the'
+                 ' 10 GeV final selection)', fontsize = 7)
     fig.tight_layout()
     fig.savefig(path, dpi = 150)
     plt.close(fig)
@@ -623,6 +736,72 @@ def fig_displays(test, jewel, outputs, multi, path, qs = (0.1, 0.3, 0.5, 0.7, 0.
     fig.savefig(path, dpi = 150)
     plt.close(fig)
     return pick
+
+def fig_displays_slide(test, jewel, outputs, multi, path, qs = (0.1, 0.5, 0.9)):
+    """The slides' displays: three of the fixed inputs (same rule), one
+    output of each model, two more alpha-DSBM samples, a JEWEL jet at the
+    same energy quantile."""
+    # pylint: disable=import-outside-toplevel,too-many-locals
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    pick  = display_indices(test, qs = qs)
+    ej    = jewel['e_cone']
+    jpick = [ int(np.argmin(np.abs(ej - np.quantile(ej, q)))) for q in qs ]
+    cols  = [ ('PYTHIA input', test['canvas'][pick]) ]
+    cols += [ (name.replace('alpha-', '$\\alpha$-'), img[pick]) for (name, img) in outputs.items() ]
+    if multi is not None:
+        cols += [ (f'sample {k + 1} of 8', multi[1][k][pick]) for k in (0, 1) ]
+    cols.append(('JEWEL jet,\nsame E quantile', jewel['canvas'][jpick]))
+    (fig, axes) = plt.subplots(len(pick), len(cols), figsize = (0.82 * len(cols), 1.2 * len(pick)))
+    for (c, (name, img)) in enumerate(cols):
+        for r in range(len(pick)):
+            ax = axes[r][c]
+            w = img[r][OFFSET:OFFSET + 9, OFFSET:OFFSET + 9] * _MASK
+            ax.imshow(np.log10(w + 0.1), cmap = 'viridis', vmin = -1, vmax = 1.5)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_title(f'{w.sum():.1f} GeV', fontsize = 6, pad = 1.5)
+            if r == 0:
+                ax.set_xlabel(name, fontsize = 6, labelpad = 7)
+                ax.xaxis.set_label_position('top')
+            if c == 0:
+                ax.set_ylabel(f'q = {qs[r]}', fontsize = 6)
+    fig.tight_layout(h_pad = 1.0, w_pad = 0.2)
+    fig.savefig(path, dpi = 220)
+    plt.close(fig)
+
+def fig_curves_slide(curves, val_refs, path):
+    """The slides' curves: mean W1 / sigma of the 7 observables and the
+    input correlations against training time (validation)."""
+    # pylint: disable=import-outside-toplevel
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    (fig, axes) = plt.subplots(1, 2, figsize = (4.6, 1.75))
+    for (label, df) in curves.items():
+        for (setting, d) in df.groupby('setting'):
+            d = d.sort_values('train_time')
+            x = d['train_time'] / 3600
+            name = f'{label} ({setting})'
+            kw = dict(color = colour(name), marker = '.', ms = 3, label = name,
+                      ls = '--' if 'euler' in setting else '-')
+            axes[0].plot(x, d[[ f'w1_{o}' for o in te.OBS ]].mean(axis = 1), **kw)
+            axes[1].plot(x, d['corr_E'], **kw)
+            axes[1].plot(x, d['corr_girth'], **{ **kw, 'label' : None, 'marker' : 'x' })
+    for (name, row) in val_refs.items():
+        axes[0].axhline(np.mean([ row[f'w1_{o}'] for o in te.OBS ]), color = colour(name),
+                        lw = 0.8, ls = ':')
+    axes[0].set_yscale('log')
+    axes[0].set_title('mean W1/$\\sigma$ to JEWEL val (7 obs.)', fontsize = 6.5)
+    axes[1].set_title('input corr.: E (dot), girth (x)', fontsize = 6.5)
+    for ax in axes:
+        ax.set_xlabel('training, GPU h', fontsize = 6)
+        ax.tick_params(labelsize = 5.5)
+    axes[0].legend(fontsize = 4.5)
+    fig.tight_layout()
+    fig.savefig(path, dpi = 220)
+    plt.close(fig)
 
 def fig_samples(test, multi, path, pick):
     # pylint: disable=import-outside-toplevel
@@ -791,13 +970,18 @@ def main():
                   title = 'Leading anti-kT R = 0.4 jet refound in each canvas;'
                           ' shapes after pT >= 10 GeV')
     fig_joint(obs, fig('tr_joint.png'), primary)
+    fig_profiles(obs, fig('tr_profiles.png'), primary)
+    fig_changes_slide(obs, fig('tr_changes_slide.png'), primary)
     fig_changes(obs, fig('tr_changes.png'), models)
+    fig_migration(mig, fig('tr_migration.png'), primary + [ 'random JEWEL' ])
     fig_towers(fig('tr_towers.png'), show)
     jewel = te.load_set('test', 'jewel')
     pick = fig_displays(test, jewel, { m : canv[m][0] for m in primary }, multi,
                         fig('tr_displays.png'))
     if multi is not None:
         fig_samples(test, multi, fig('tr_samples.png'), pick)
+    fig_displays_slide(test, jewel, { m : canv[m][0] for m in primary }, multi,
+                       fig('tr_displays_slide.png'))
 
     curves = {}
     if cmdargs.curves:
@@ -820,6 +1004,7 @@ def main():
             'random JEWEL' : te.population(te.jet_observables(
                 np.asarray(pool[:n]).astype(np.float32), meta['row'][:n], device), o_vj) }
         fig_curves(curves, val_refs, fig('tr_curves.png'))
+        fig_curves_slide(curves, val_refs, fig('tr_curves_slide.png'))
         pd.concat([ d.assign(model = k) for (k, d) in curves.items() ]).to_csv(
             fig('curves.csv'), index = False)
         pd.DataFrame([ { 'sample' : k, **v } for (k, v) in val_refs.items() ]).to_csv(

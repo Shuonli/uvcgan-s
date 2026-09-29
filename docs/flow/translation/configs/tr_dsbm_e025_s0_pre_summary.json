@@ -1,0 +1,12 @@
+{
+    "updates": 26058,
+    "train_time": 1800.0458346232772,
+    "end_to_end": 1807.7655541747808,
+    "updates_per_s": 14.47629804685143,
+    "time_rollout": 0.0,
+    "time_update": 1794.2637260779738,
+    "rollout_share": 0.0,
+    "rollout_nfe_per_update": 0,
+    "peak_mem_gb": 3.5827159881591797,
+    "n_params": 32775475
+}

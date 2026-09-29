@@ -81,6 +81,8 @@ def parse_cmdargs():
     parser.add_argument('--boot', type = int, default = 200)
     parser.add_argument('--batch', type = int, default = 2000)
     parser.add_argument('--out', default = 'docs/flow/translation')
+    parser.add_argument('--check-file', default = 'solver_check.csv',
+        help = '--solver-check: the file written in --out')
     return parser.parse_args()
 
 # --- data
@@ -98,7 +100,9 @@ def train_meta(domain):
         return { k : f[k] for k in f.files }
 
 def output_dir():
-    path = os.path.join(fc.translation_root(), 'outputs')
+    """The saved outputs (TRANSLATION_OUTPUTS overrides it, for tests)."""
+    path = os.environ.get('TRANSLATION_OUTPUTS',
+                          os.path.join(fc.translation_root(), 'outputs'))
     os.makedirs(path, exist_ok = True)
     return path
 
@@ -353,7 +357,7 @@ def solver_check(cmdargs, device):
         print(f'{label}: solver check done', flush = True)
     df = pd.DataFrame(rows)
     os.makedirs(cmdargs.out, exist_ok = True)
-    df.to_csv(os.path.join(cmdargs.out, 'solver_check.csv'), index = False)
+    df.to_csv(os.path.join(cmdargs.out, cmdargs.check_file), index = False)
     with pd.option_context('display.width', 250, 'display.max_columns', 60):
         print(df.round(4).to_string(index = False))
 

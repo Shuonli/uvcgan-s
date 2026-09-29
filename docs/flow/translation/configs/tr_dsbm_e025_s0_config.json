@@ -1,0 +1,39 @@
+{
+    "label": "tr_dsbm_e025_s0",
+    "stage": "refine",
+    "eps": 0.25,
+    "midpoint_noise_sd": 0.25,
+    "rollout_steps": 30,
+    "batch": 256,
+    "lr": 0.0002,
+    "warmup": 1000,
+    "ema": 0.999,
+    "grad_clip": 1.0,
+    "minutes": 90.0,
+    "seed": 0,
+    "backbone": "uvcgan",
+    "shape": [
+        16,
+        16
+    ],
+    "target_domain": "tr_jewel",
+    "source_domain": "tr_pythia",
+    "norm_path": "/home/shuhang/cycleGAN/outdir/sphenix/flow/translation/norm.json",
+    "monitor": "translation",
+    "norm": {
+        "jet": [
+            -2.1263679337434076,
+            0.6285560589985479
+        ],
+        "_bias": 0.1
+    },
+    "parameterisation": "endpoint = c_skip x + c_out nn(c_in x) (Appendix J, per-direction endpoint variances), drift = (endpoint - x)/(1 - u), unit-weight regression",
+    "gpu": "NVIDIA RTX A6000",
+    "var0": 1.0884259939193726,
+    "var1": 0.9112478494644165,
+    "init": "tr_dsbm_e025_s0_pre",
+    "init_checkpoint": "step_00026058.pt",
+    "init_step": 26058,
+    "init_train_time": 1800.0458346232772,
+    "n_params": 32775475
+}

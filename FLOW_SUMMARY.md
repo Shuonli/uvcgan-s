@@ -1,11 +1,12 @@
 # Summary: speeding up UVCGAN-S, and flow matching for sPHENIX background subtraction
 
-*As of 2026-09-28, 17:00. Branch `ddp` of github.com/Shuonli/uvcgan-s.
+*As of 2026-09-28, 23:00. Branch `ddp` of github.com/Shuonli/uvcgan-s.
 This file is the short version. The full logs, with job numbers and
 commands, are `SCALING_NOTES.md` (UVCGAN-S training) and `FLOW_NOTES.md`
 (flow matching). The consolidated comparison with its slides is Part 9;
-the two latest, single-question experiments (a learned pairing, a noisy
-training path) are Parts 10 and 11. Both came out negative.*
+two single-question experiments (a learned pairing, a noisy training path)
+are Parts 10 and 11, both negative. Part 12 tests the intended application
+directly: turning clean PYTHIA jets into JEWEL-like ones.*
 
 ## The task
 
@@ -693,6 +694,108 @@ A sequence of cheap diagnostics, then controls:
   figures `docs/flow/bench/noisy/`; three slides at the end of
   `docs/flow/bench/slides/bench_deck.pdf`.
 
+## Part 12: can the flows turn a clean PYTHIA jet into a JEWEL-like one? (translation pilot)
+
+- **Question:** the intended application, tested directly. Take a clean
+  PYTHIA jet image (no background) and map it to an image with the
+  statistics of clean JEWEL jets, trained without pairs. Do the outputs
+  look like held-out JEWEL jets, and does each output still depend on its
+  own input jet? This is a new question, not a rerun of the closure test,
+  whose negative result stands.
+- **What it cannot show:** a jet-by-jet medium modification. No JEWEL jet
+  is "the" modified version of a PYTHIA jet, and any unpaired map is one
+  of many that give the same distributions.
+- **Data:** its own set, built from the clean images only.
+  - Counted by generated event (file and event number): 2.64M PYTHIA
+    events, 870k JEWEL events.
+  - 7.2% of the PYTHIA images turned out to be exact copies of events in
+    other files, and were removed.
+  - One leading jet per event, with the closure test's selection and crop:
+    the 53 towers of the R = 0.4 cone around the jet axis, in GeV, on a
+    16 x 16 canvas.
+  - Split by event: 200k training jets per sample, 10k validation, 20k
+    test, and 20k more JEWEL as a second reference.
+  - The JEWEL events of the old subtraction test were kept out.
+  - The crop drops about half of each event's energy, including radiation
+    outside the cone.
+  - PYTHIA and JEWEL also differ in generator settings and in how each
+    sample was selected, not only by the medium.
+- **Two models,** each 2 GPU hours from scratch, the same network as the
+  earlier studies:
+  - OT-CFM (minibatch optimal-transport pairing, deterministic);
+  - online alpha-DSBM (learned pairing, random at noise 0.25, the lower
+    setting of Part 10).
+- **Compared with:**
+  - "doing nothing" (the PYTHIA jet itself);
+  - "random JEWEL" (a JEWEL training jet that ignores the input: perfect
+    distributions, no dependence on the input);
+  - a second held-out JEWEL sample (how close two JEWEL samples of this
+    size are).
+- **How it was judged** (fixed before training): distance of seven jet
+  observables to held-out JEWEL, with sampling errors; the same at fixed
+  jet energy; input-output correlations; how often an output is closer to
+  its own input than to another input; soft-tower and core summaries;
+  fixed example jets.
+- **Settings fixed on held-out validation jets:** the OT-CFM solve needs
+  128 network evaluations before each jet's output stops changing (32 were
+  not enough); alpha-DSBM's 30-step sampler was enough. The fast 4-step solve of the
+  subtraction study does not work here: it barely changes the jets.
+- **Results** (20k held-out jets each; distance to held-out JEWEL, lower
+  is better; "two JEWEL samples" is as close as two samples of this size
+  can get):
+
+| | energy | mass | girth | p_T^D | z_lead | z_g | R_g | input-output correlation (energy, girth) |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
+| two JEWEL samples | 0.011 | 0.014 | 0.009 | 0.018 | 0.019 | 0.012 | 0.008 | |
+| doing nothing | 0.55 | 0.88 | 0.10 | 0.26 | 0.23 | 0.03 | 0.16 | 1, 1 |
+| random JEWEL jet | 0.019 | 0.024 | 0.011 | 0.010 | 0.011 | 0.005 | 0.010 | 0, 0 |
+| **OT-CFM** | 0.025 | 0.021 | 0.012 | 0.010 | 0.008 | 0.017 | 0.012 | 0.94, 0.99 |
+| **alpha-DSBM** | 0.26 | 0.33 | 0.06 | 0.11 | 0.10 | 0.04 | 0.07 | 0.80, 0.98 |
+
+- **OT-CFM reproduces the JEWEL jets as well as a second JEWEL sample
+  would:**
+  - every observable;
+  - jets re-found with a jet algorithm in its output images;
+  - how girth and z_lead change with jet energy (at the same energy, JEWEL
+    jets are narrower and harder than PYTHIA's).
+- **And each output still belongs to its input:**
+  - correlations of 0.91-0.99;
+  - every output is closer in shape to its own input than to another,
+    randomly paired input jet (11 times closer on average);
+  - no artificial soft haze above 0.01 GeV per tower;
+  - below that, towers that should be exactly empty get about 0.002 GeV
+    (0.1% of the jet energy), a limit of the log-energy representation.
+- **alpha-DSBM gets about halfway** (51-64% of the distance). Its second
+  stage made its distributions worse than its first stage while tying
+  outputs more tightly to inputs, and it was still changing at 2 hours.
+  Two random outputs for the same jet differ more than either differs from
+  the input.
+- **What OT-CFM's "energy loss" is:**
+  - on average 18%;
+  - but 40% for 20-25 GeV jets and nothing above 40 GeV;
+  - hard jets even gain a sharper core.
+  - It maps the PYTHIA energy spectrum, which starts near 20 GeV, onto the
+    JEWEL one, which reaches down to 10. That comes from how the two
+    samples were generated and selected, not from a quenching mechanism.
+- **Reading, fixed before training:** a useful outcome for OT-CFM, and by
+  the letter for alpha-DSBM too.
+- **What it does not show:**
+  - a jet-by-jet medium modification;
+  - that the per-jet map is unique (OT chooses the "least change" map;
+    the closure tests showed the matching rule decides the per-jet
+    answer);
+  - that it holds for another seed.
+- **One follow-up recommended:** two more OT-CFM seeds, to see whether the
+  same PYTHIA jet gets the same output, not only whether the distributions
+  come out right.
+- **Cost:**
+  - OT-CFM: 2 GPU hours, 6.6 ms per jet at 128 evaluations;
+  - alpha-DSBM: 2 GPU hours (89% of its second stage spent generating its
+    own training partners), 1.5 ms per jet.
+- **Where:** `FLOW_NOTES.md`, "PYTHIA -> JEWEL translation pilot"; data
+  set manifest, split lists, tables and figures `docs/flow/translation/`;
+  a 4-slide appendix `docs/flow/translation/slides/translation_appendix.pdf`.
+
 ## Where everything is
 
 - `FLOW_NOTES.md`: the full log of the flow study (pre-registration,
@@ -710,6 +813,10 @@ A sequence of cheap diagnostics, then controls:
 - `docs/flow/dsbm/`: the learned-pairing closure test (Part 10): the
   Gaussian check, test tables and figures, the appendix
   (`slides/dsbm_appendix.pdf`).
+- `docs/flow/translation/`: the PYTHIA -> JEWEL translation pilot (Part
+  12): data set manifest and parent split lists, run configs, solver
+  checks, test tables and figures, the appendix
+  (`slides/translation_appendix.pdf`); `README.md` lists them.
 - `scripts/flow/`: all code:
   - `fm_common.py`: the models;
   - `fm_train.py`, `fm_eval.py`, `fm_compare.py`: train, score, compare;
@@ -717,11 +824,16 @@ A sequence of cheap diagnostics, then controls:
     the jet-level benchmarks;
   - the coupling diagnostics;
   - `dsbm*.py`: the learned pairing (Part 10); `noisy_*.py`,
-    `sine_path_check.py`: the noisy-path pilot (Part 11).
+    `sine_path_check.py`: the noisy-path pilot (Part 11);
+    `translation_*.py`: the translation pilot (Part 12).
 - `outdir/sphenix/flow/<run>/`: checkpoints, training histories and
-  per-event outputs (not in git).
+  per-event outputs (not in git); the translation pilot's caches, runs and
+  outputs under `outdir/sphenix/flow/translation/`.
 
 ## Still open
+
+- Whether the PYTHIA -> JEWEL OT-CFM map is the same jet by jet for other
+  seeds, and how much it changes with the matching rule (Part 12).
 
 - A small paired HYBRID sample (several medium versions per vacuum shower),
   obtained from the authors, to measure how random the modification is. It

@@ -9,10 +9,13 @@ Questions: can a flow-based model reach the current UVCGAN-S physics
 performance in fewer GPU-hours; is it more stable across seeds; how do final
 quality and inference cost compare. Treated as hypotheses.
 
-**Latest (2026-09-28):** the section "Consolidated benchmark" (background-only
+**Latest (2026-09-28, 23:00):** the section "PYTHIA -> JEWEL translation
+pilot" tests the intended application directly: unpaired OT-CFM and online
+alpha-DSBM between clean PYTHIA and clean JEWEL jets, with its own data set
+and appendix `docs/flow/translation/slides/translation_appendix.pdf`.
+The subtraction study closes with "Consolidated benchmark" (background-only
 against joint subtraction, reconstructed-jet analysis of the paper, 3 seeds
-per arm) and its deck `docs/flow/bench/slides/bench_deck.pdf` close the
-study.
+per arm) and its deck `docs/flow/bench/slides/bench_deck.pdf`.
 
 ## Answer (2026-09-25)
 
@@ -3189,6 +3192,229 @@ separately, not as one number):**
   - Under SLURM the forked workers came up pinned to one core; the pools
     now restore the parent's CPU mask.
 
+### Pilot results (jobs 20333-20334 training, 20340-20343 solver checks and outputs, 20344-20347 report)
+
+**Training** (one A6000 each, side by side on dahlia, 20:22-22:23;
+`docs/flow/translation/cost.csv`, `configs/`):
+
+| model | stage | GPU h | updates | updates / s | overhead | peak GB |
+| :--- | :--- | ---: | ---: | ---: | :--- | ---: |
+| OT-CFM (32.3M parameters) | train | 2.00 | 122,720 | 17.0 | OT matching 10.4% | 3.5 |
+| alpha-DSBM (32.8M) | bridge pretraining | 0.50 | 26,058 | 14.5 | | 3.6 |
+| | online refinement | 1.50 | 8,761 | 1.62 | rollouts 89% (7680 NFE per update) | 3.8 |
+
+**Validation curves** (`curves.csv`, `tr_curves.png`; 10k PYTHIA val inputs
+against 10k JEWEL val, every 10 min; mean W1/sigma of the seven
+observables; val references: identity 0.321, JEWEL-train draws 0.016):
+- **OT-CFM at 32 NFE:**
+  - 0.034 at 10 min, 0.024-0.025 from 40 min to 2 h (flat);
+  - E 0.092 -> 0.041; mass 0.03-0.04 until 1.3 h, then 0.056;
+  - input correlations: E 0.935 -> 0.947, girth 0.990-0.992.
+  - With 4 Euler steps: 0.26-0.27 throughout (E 0.54-0.59).
+- **alpha-DSBM:**
+  - pretraining 0.132 -> 0.101 (30 min);
+  - refinement first jumps to 0.162 (50 min), then declines to 0.137 at
+    2 h, still falling (0.002-0.004 per 10 min);
+  - over the last 70 min: E 0.355 -> 0.223 and mass 0.465 -> 0.327
+    improve, while p_T^D 0.100 -> 0.138 and z_lead 0.082 -> 0.118 worsen;
+  - the girth correlation jumps from 0.93 to 0.98 when refinement starts.
+  - At the budget, its distributions are further from JEWEL than its own
+    pretrained bridge's (0.137 against 0.101), with a tighter coupling.
+  - Whether it recovers with more time is open.
+
+**Solver, fixed on validation before any test output** (`solver_check.csv`,
+`_ode64`, `_ode128`; 2000 val inputs, 200 bootstraps):
+
+| check | per-jet cone E difference, rms GeV | relative to | largest W1/sigma shift (its sd) | reading |
+| :--- | ---: | :--- | :--- | :--- |
+| OT-CFM 32 vs 64 NFE | 0.52 | 8.4% of the E change (6.2 GeV rms) | mass 0.027 (0.013) | not adequate |
+| OT-CFM 64 vs 128 | 0.10 | 1.6% | z_g 0.012 (0.015) | not adequate (energy) |
+| OT-CFM 128 vs 256 | 0.035 | 0.54% | R_g 0.004 (0.021) | **adequate: 128 NFE frozen** |
+| OT-CFM 4 Euler vs 256 | 6.38 | 98% | mass 0.66 | does not translate |
+| alpha-DSBM 30 vs 60 steps, same noise | 0.55 | 0.09 of two independent samples (6.01) | z_g 0.004 (0.019) | **adequate: 30 steps frozen** |
+
+The pre-registered rule named 64 NFE as the fallback, checked against 128.
+64 failed the energy criterion narrowly, so the doubling was continued
+to 128, which passes against 256. Latency on one A6000 at batch 2000:
+- OT-CFM: 6.58 ms per jet at 128 NFE, 0.21 at 4 Euler steps;
+- alpha-DSBM: 1.55 ms (30 steps).
+
+The validation curves above were drawn at 32 NFE (descriptive). At 128 NFE
+the final OT-CFM checkpoint scores E 0.044 and mass 0.030 on the check's
+2000 validation inputs.
+
+**Test: distributions of the fixed-crop observables** (`population.csv`,
+`tr_marginals.png`; 20k each; W1/sigma to JEWEL test; every sample cut at
+cone E >= 10 GeV; bootstrap sd 0.004-0.011):
+
+| | pass | E | mass | girth | p_T^D | z_lead | z_g | R_g |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| JEWEL ref (floor) | 1 | 0.011 | 0.014 | 0.009 | 0.018 | 0.019 | 0.012 | 0.008 |
+| random JEWEL | 1 | 0.019 | 0.024 | 0.011 | 0.010 | 0.011 | 0.005 | 0.010 |
+| identity | 1 | 0.546 | 0.881 | 0.105 | 0.264 | 0.232 | 0.034 | 0.158 |
+| **OT-CFM** | 0.995 | 0.025 | 0.021 | 0.012 | 0.010 | 0.008 | 0.017 | 0.012 |
+| OT-CFM, 4 Euler (speed readout) | 0.974 | 0.510 | 0.678 | 0.129 | 0.125 | 0.099 | 0.010 | 0.249 |
+| **alpha-DSBM** | 0.999 | 0.256 | 0.325 | 0.056 | 0.112 | 0.099 | 0.036 | 0.073 |
+
+- **OT-CFM:** every observable is within 3 sd of the JEWEL-vs-JEWEL floor.
+  z_g was already consistent for the identity: PYTHIA and JEWEL barely
+  differ in it here.
+- **alpha-DSBM:** closes 51-64% of the identity's gap in the six others
+  and stays 5-23x the floor.
+- The E panel of `tr_marginals.png` also shows the outputs below 10 GeV,
+  which the cut removes.
+
+**Joint structure** (`joint.csv`, `tr_joint.png`; W1/sigma of girth and
+z_lead in cone-energy bins):
+
+| | girth: 10-20 / 20-30 / 30-60 GeV | z_lead: 10-20 / 20-30 / 30-60 | correlation matrix, max diff |
+| :--- | :--- | :--- | ---: |
+| JEWEL ref | 0.032 / 0.044 / 0.019 | 0.022 / 0.033 / 0.019 | 0.022 |
+| identity | 0.158 / 0.156 / 0.329 | 0.474 / 0.401 / 0.369 | 0.317 |
+| OT-CFM | 0.023 / 0.012 / 0.020 | 0.030 / 0.025 / 0.016 | 0.015 |
+| alpha-DSBM | 0.095 / 0.071 / 0.106 | 0.129 / 0.161 / 0.184 | 0.128 |
+
+At fixed energy JEWEL jets are narrower and harder than PYTHIA's (the
+binned means, `tr_profiles.png`). OT-CFM reproduces both trends in every
+bin; alpha-DSBM gets about halfway.
+
+**Refound jets** (`refound.csv`, `tr_refound.png`; the leading anti-kT
+R = 0.4 jet found in each canvas, pT >= 10 GeV on every sample):
+- acceptance: JEWEL test 0.976, ref 0.974, OT-CFM 0.978, alpha-DSBM 0.996,
+  identity 1;
+- mean axis offset from the canvas centre: 0.127 in JEWEL and OT-CFM;
+- OT-CFM: pT, mass, girth, p_T^D, z_lead, z_g, R_g all within the floor
+  (W1/sigma 0.006-0.031);
+- alpha-DSBM: 0.03-0.34 (identity 0.04-0.82).
+
+**Dependence on the input** (`dependence.csv`, `tr_changes.png`,
+`tr_migration.png`; 20k test jets, no selection):
+
+| | corr. E | girth | mass | core | leading tower | own input preferred | shape EMD to its input / to another input | E_out/E_in |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- | :--- |
+| identity | 1 | 1 | 1 | 1 | 1 | 1 | 0 / 0.454 | 1 |
+| random JEWEL | 0.006 | -0.004 | 0.007 | -0.000 | -0.001 | 0.498 | 0.466 / 0.466 | 0.88 +- 0.37 |
+| OT-CFM | 0.944 | 0.989 | 0.912 | 0.991 | 0.917 | 1.000 | 0.041 / 0.465 | 0.82 +- 0.15 |
+| OT-CFM, 4 Euler | 0.865 | 0.989 | 0.823 | 0.990 | 0.886 | 1.000 | 0.047 / 0.458 | 0.67 +- 0.12 |
+| alpha-DSBM | 0.800 | 0.983 | 0.880 | 0.982 | 0.792 | 1.000 | 0.056 / 0.458 | 0.91 +- 0.15 |
+
+- Bootstrap sd of a correlation <= 0.003; the Spearman values agree
+  within 0.03.
+- **OT-CFM's energy change is set by the two spectra.** Median E_out/E_in
+  by input energy:
+  - 0.57 at 10-20 GeV, 0.60 at 20-25, 0.73 at 25-30, 0.89 at 30-40, 1.00
+    at 40-50, 1.04 at 50-70.
+  - PYTHIA's cone energy starts near 20 GeV and JEWEL's reaches down to
+    10. The near-monotone map sends PYTHIA's lower edge onto JEWEL's
+    10-20 GeV tail and leaves the top almost unchanged.
+  - That is a quantile-like map between two differently selected samples,
+    not an energy-loss mechanism.
+  - High-energy jets gain a harder core, as JEWEL's high-energy jets have
+    one. The median leading-tower change is +2.2 GeV at 40-50 GeV and
+    +3.7 at 50-70, against -1.9 at 20-25.
+- **alpha-DSBM:** 0.78-0.94, flatter; hence it misses JEWEL's low-E tail.
+- **Share of outputs with E >= 10 GeV** (`migration.csv`):
+  - OT-CFM: 0.16 for 10-15 GeV inputs, 0.70 at 15-20, >= 0.996 above;
+  - alpha-DSBM: 0.41, 0.98 and 1.
+  - Only 279 of the 20k inputs are below 20 GeV.
+- **alpha-DSBM's variability** (`variability.csv`, `tr_samples.png`; 8
+  samples of each of the first 1000 test inputs):
+  - the spread of one input's outputs, in units of JEWEL's population sd:
+    E 0.37, mass 0.33, leading tower 0.40, z_lead 0.36, p_T^D 0.29, girth
+    0.13, core 0.14;
+  - two samples of a jet differ more (shape EMD 0.068) than a sample
+    differs from its input (0.056);
+  - the 8-sample mean follows the input better than one sample (E
+    correlation 0.91 against 0.80). It is reported, never used as a
+    result.
+  - This is the sampler's variability, not a physical uncertainty.
+
+**Image fidelity** (`fidelity.csv`, `tr_towers.png`, `tr_displays.png`; per
+jet, the 53 cone towers):
+
+| | towers > 0 | > 0.01 GeV | > 0.1 | > 1 | energy in towers < 0.5 GeV | leading tower, GeV | core fraction | z_lead |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| JEWEL test | 32.9 | 28.6 | 18.4 | 5.85 | 2.71 | 9.68 | 0.435 | 0.342 |
+| identity | 36.3 | 32.0 | 21.4 | 7.35 | 2.98 | 10.15 | 0.422 | 0.307 |
+| OT-CFM | 42.8 | 28.7 | 18.5 | 5.86 | 2.72 | 9.68 | 0.434 | 0.341 |
+| alpha-DSBM | 47.5 | 30.4 | 19.9 | 6.46 | 2.91 | 9.97 | 0.438 | 0.327 |
+
+- **No soft floor or flattening flag.** OT-CFM matches JEWEL in every
+  class above 0.01 GeV, and its tower-energy spectrum lies on JEWEL's.
+- **Below 0.01 GeV it cannot make exact zeros.**
+  - It has 10.2 empty cone towers per jet against JEWEL's 20.1, and 14.1
+    towers of ~0.002 GeV against 4.4.
+  - Those towers carry 0.024 GeV per jet, against 0.022 for JEWEL: 0.1% of
+    the jet energy.
+  - alpha-DSBM: 5.5 empty towers, 0.040 GeV.
+  - This is the log(E + 0.1) representation (psi(0.01) - psi(0) = 0.1);
+    the discrete sub-0.01 GeV peaks of the data are not reproduced
+    either.
+- **Displays:** each output keeps its input's prongs and layout. OT-CFM
+  rescales the energy and sharpens the core of hard jets; the alpha-DSBM
+  samples of one jet vary visibly (e.g. 36.8-49.2 GeV for a 40.4 GeV
+  input).
+
+**Reading, as fixed before training** (`verdict.csv`):
+- **OT-CFM: a useful outcome on every pre-registered item.**
+  - It moves toward JEWEL in 6 of 7 marginals; z_g was already within the
+    floor.
+  - All 7 are consistent with JEWEL, and so are both joint comparisons.
+  - Its input dependence goes beyond random JEWEL, with no artefact flag.
+- **alpha-DSBM: also meets the letter of the rule,** with 6 of 7
+  marginals and both joints moved, input dependence, and no flag. But it
+  stays 5-23x the floor.
+- **The 4-Euler readout fails:** 4 of 7 marginals moved, and the girth
+  joint did not.
+- (A pT bin with fewer than 50 jets would have made a joint comparison
+  undefined; none had.)
+
+**What this establishes.** Trained unpaired for 2 GPU-hours, OT-CFM with the
+UVCGAN-S backbone maps clean PYTHIA jets to outputs that are, within the
+finite-sample precision of 20k jets, indistinguishable from held-out JEWEL
+jets:
+- in seven fixed-crop and seven refound-jet observables;
+- in the energy dependence of girth and z_lead;
+- while each output stays tied to its own input: correlations 0.91-0.99,
+  outputs 11x closer in shape to their own input than to another.
+- This holds for this crop, this pair of samples and one seed.
+- alpha-DSBM at eps = 0.25, with the same budget, is clearly worse on the
+  distributions and no better on dependence. Its refinement had not
+  converged.
+
+**What it does not establish:**
+- **A per-jet medium modification.**
+  - There is no truth to compare a jet with. The OT-CFM map is the
+    least-change transport in standardised log E, a modelling choice.
+  - Its high input correlation is partly by construction: the closure test
+    showed that the cost decides the per-jet correspondence, and no
+    unpaired coupling tried there reproduced a known per-jet modification.
+- **Physics in the energy change.** It follows the two samples' spectra
+  (generator-level jet requirements, generators), inside a crop that drops
+  out-of-cone energy.
+- **Robustness:** one seed. alpha-DSBM's limit at a larger budget is open.
+
+**Recommended follow-up (one, narrow):** OT-CFM seeds 1 and 2 with the same
+data, cost, budget and 128-NFE solve. Report the seed spread of every
+metric above, and the per-jet differences between the three maps' outputs
+for the same test jets. The question is whether the *per-jet* map, not only
+its distributions, is reproducible. No new architecture, cost or
+noise-level search follows from this pilot.
+
+    sbatch -w saturn scripts/flow/translation_data.sbatch          # data set
+    KIND=otcfm LABEL=tr_otcfm_s0 MINUTES=120 SEED=0 \
+        sbatch -w dahlia -J tr_otcfm_s0 scripts/flow/translation_run.sbatch
+    KIND=dsbm LABEL=tr_dsbm_e025_s0 PRE_MINUTES=30 MINUTES=90 EPS=0.25 SEED=0 \
+        sbatch -w dahlia -J tr_dsbm_e025_s0 scripts/flow/translation_run.sbatch
+    MODE=check sbatch -w dahlia scripts/flow/translation_post.sbatch     # 32 vs 64
+    MODE=check ODE=64:midpoint RUNS=tr_otcfm_s0 LABELS=OT-CFM \
+        CHECK_FILE=solver_check_ode64.csv sbatch -w dahlia scripts/flow/translation_post.sbatch
+    (the same with ODE=128:midpoint, CHECK_FILE=solver_check_ode128.csv)
+    MODE=generate ODE=128:midpoint STEPS=30 sbatch -w dahlia scripts/flow/translation_post.sbatch
+    ODE=midpoint128 STEPS=30 sbatch -p a6k -w saturn -c 32 --mem=64G \
+        scripts/flow/translation_report.sh                           # report + tables
+    cd docs/flow/translation/slides && ~/pyext/tectonic_env/bin/tectonic translation_appendix.tex
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything
@@ -3269,27 +3495,42 @@ time and NFE, `checkpoints/`, `evals/closure_{val,train}_sde30.csv`):
 
 Paired noisy-interpolant pilot: `docs/flow/bench/README.md` (end).
 
-## Status (2026-09-28 17:00)
+PYTHIA -> JEWEL translation pilot: `docs/flow/translation/README.md` and the
+end of its section above.
 
-All runs of this study have ended; nothing is running.
+## Status (2026-09-28 23:00)
 
-- **Latest: two single-question experiments, both negative, both stopped as
-  pre-registered.**
-  - **Online alpha-DSBM on the closure test** (section above; appendix
-    `docs/flow/dsbm/slides/dsbm_appendix.pdf`). The code reproduces the
-    analytic Schrodinger bridge on Gaussians. On the closure test, learning
-    the coupling online halves the error of an unlearned bridge at equal
-    cost. Single samples are 0.097 (eps = 1) and 0.077 (eps = 0.25) in
-    shape EMD, against 0.092 for OT-CFM with the same backbone, 0.032 for
-    doing nothing and 0.0002 for the paired control. At eps = 1 the
-    sampling spread dominates; at eps = 0.25 a systematic mass and girth
-    error. Gate failed; no second seed, no M -> B pilot.
-  - **Paired noisy-interpolant pilot** (section above; deck slides 11-13).
-    A sine-shaped noisy training path (eta = 0.1) changes nothing
-    measurable in the paired background-only flow: the core in B_hat stays
-    at 23% (accurate solve). The trajectory diagnostic shows the core is
-    lost even from states on the true path. Stopped; JEWEL untouched.
-- **Consolidated benchmark** (still the reference; deck
+All runs have ended; nothing is running.
+
+- **Latest: the PYTHIA -> JEWEL translation pilot** (section above;
+  appendix `docs/flow/translation/slides/translation_appendix.pdf`).
+  - **Data:** its own set of clean jets, split by parent; 7.2% of the
+    PYTHIA images were exact copies across files and were dropped.
+  - **OT-CFM** (2 GPU h, 128-NFE ODE):
+    - its outputs match held-out JEWEL within the JEWEL-vs-JEWEL
+      finite-sample floor in 7 fixed-crop and 7 refound-jet observables,
+      and in girth and z_lead against energy;
+    - each output stays tied to its own input (correlations 0.91-0.99);
+    - no soft floor above 0.01 GeV;
+    - its energy change follows the two samples' spectra, not a medium
+      mechanism.
+  - **alpha-DSBM** (eps 0.25) gets about halfway; its refinement had not
+    converged.
+  - **Pre-registered reading:** useful. The one follow-up recommended is
+    OT-CFM seeds 1-2 (is the per-jet map reproducible?). Nothing about a
+    per-jet medium modification is established.
+- **Earlier today, two single-question experiments, both negative and both
+  stopped as pre-registered:**
+  - **Online alpha-DSBM on the closure test** (appendix
+    `docs/flow/dsbm/slides/dsbm_appendix.pdf`):
+    - single samples are 0.097 (eps = 1) and 0.077 (eps = 0.25) in shape
+      EMD, against 0.092 for OT-CFM with the same backbone and 0.032 for
+      doing nothing;
+    - gate failed.
+  - **Paired noisy-interpolant pilot** (deck slides 11-13): eta = 0.1
+    changes nothing measurable; the core is lost even from states on the
+    true path.
+- **Consolidated benchmark** (still the reference for subtraction; deck
   `docs/flow/bench/slides/bench_deck.pdf`):
   - no flow arm is as faithful as UVCGAN-S;
   - predicting the background alone loses 12-25% of the hardest towers'
@@ -3297,11 +3538,9 @@ All runs of this study have ended; nothing is running.
     and low-pT jets.
 - **Missing:** ICS (fjcontrib), the paper's own analysis code.
 - **Open:**
+  - whether the OT-CFM translation's per-jet map is reproducible across
+    seeds and how it depends on the cost (the closure test showed the cost
+    decides the per-jet correspondence);
   - a paired HYBRID sample with several medium realisations per vacuum
-    shower, to measure how random the modification is;
-  - the dependence of unpaired correspondence on the chosen coupling:
-    minibatch OT, the Schrodinger bridge at two noise levels and the
-    teacher all fall short of the identity on the closure test;
-  - why the background-only flow's field stops short in the core. The
-    pilot rules out the missing supervision around the paths at eta = 0.1;
-    the posterior-mean explanation is untested.
+    shower;
+  - why the background-only flow's field stops short in the core.

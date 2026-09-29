@@ -8,7 +8,9 @@
 #                  first 1000 test inputs, latency
 #
 #   MODE=check sbatch -w dahlia scripts/flow/translation_post.sbatch
-#   MODE=generate ODE=32:midpoint STEPS=30 sbatch -w dahlia scripts/flow/translation_post.sbatch
+#   (a finer ODE check: MODE=check ODE=64:midpoint RUNS=tr_otcfm_s0 LABELS=OT-CFM
+#    CHECK_FILE=solver_check_ode64.csv ...)
+#   MODE=generate ODE=128:midpoint STEPS=30 sbatch -w dahlia scripts/flow/translation_post.sbatch
 #
 #SBATCH -p a6k
 #SBATCH --nodes=1
@@ -29,7 +31,8 @@ echo "[$(date +%T)] $MODE on $(hostname), $(nvidia-smi --query-gpu=name --format
 case $MODE in
 check)
     "$PYTHON" -u scripts/flow/translation_eval.py --solver-check "${RUNS[@]}" \
-        --labels "$LABELS" --n-check 2000 --boot 200 --out docs/flow/translation || exit 1 ;;
+        --labels "$LABELS" --n-check 2000 --boot 200 --out docs/flow/translation \
+        --ode-setting "${ODE:-32:midpoint}" --check-file "${CHECK_FILE:-solver_check.csv}" || exit 1 ;;
 generate)
     "$PYTHON" -u scripts/flow/translation_eval.py --generate "${RUNS[@]}" \
         --labels "$LABELS" --ode-setting "${ODE:-32:midpoint}" --steps "${STEPS:-30}" \

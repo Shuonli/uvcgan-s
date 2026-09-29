@@ -3,7 +3,7 @@
 # table and figure (translation_report.py) and the appendix tables
 # (translation_tables.py), from the generated outputs.
 #
-#   ODE=midpoint32 STEPS=30 sbatch -p a6k -w saturn -c 32 --mem=64G scripts/flow/translation_report.sh
+#   ODE=midpoint128 STEPS=30 sbatch -p a6k -w saturn -c 32 --mem=64G scripts/flow/translation_report.sh
 #
 #SBATCH -J tr_report
 #SBATCH --time=01:00:00
@@ -14,7 +14,7 @@ cd "$SLURM_SUBMIT_DIR"
 . ./scripts/flow/env.sh
 export OMP_NUM_THREADS=1
 
-ODE=${ODE:-midpoint32}
+ODE=${ODE:-midpoint128}
 STEPS=${STEPS:-30}
 echo "[$(date +%T)] on $(hostname)"
 "$PYTHON" -u scripts/flow/translation_report.py \

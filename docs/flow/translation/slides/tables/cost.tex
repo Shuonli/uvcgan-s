@@ -1,0 +1,12 @@
+\scriptsize
+\setlength{\tabcolsep}{2.5pt}
+\begin{tabular}{lrrrrrr}
+\toprule
+ & GPU h & updates & upd./s & overhead & NFE & ms/jet \\
+\midrule
+\ot{} & 2.00 & 122.7k & 17.0 & 10\% OT & 128 & 6.58 \\
+\quad 4 Euler$^\ast$ & & & & & 4 & 0.21 \\
+\dsbm{} pretrain & 0.50 & 26.1k & 14.5 & -- & & \\
+\quad + refine & 1.50 & 8.8k & 1.62 & 89\% roll-out & 30 & 1.55 \\
+\bottomrule
+\end{tabular}
