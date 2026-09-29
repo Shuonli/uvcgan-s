@@ -66,6 +66,14 @@ log(E + 0.1)); nothing is decoded, clipped or re-encoded during training.
     dsbm.py --label NAME --stage pretrain --minutes 30 --eps 1.0
     dsbm.py --label NAME --stage refine --init RUN --minutes 90
     dsbm.py --label NAME --stage continue --init RUN --minutes 90
+
+The PYTHIA -> JEWEL translation pilot (FLOW_NOTES.md, "PYTHIA -> JEWEL
+translation pilot") runs the same code on its own pools, normalisation and
+run area, with a population monitor (there is no per-jet truth):
+
+    dsbm.py ... --source-domain tr_pythia --target-domain tr_jewel \
+        --norm-path OUTDIR/sphenix/flow/translation/norm.json \
+        --outdir OUTDIR/sphenix/flow/translation/runs --monitor translation
 """
 
 import argparse
@@ -272,13 +280,17 @@ def optimizer_step(model, ema, opt, loss, grad_clip, ema_decay):
 
 class ClosureData:
     """The closure pools in model coordinates: z = (log(E + 0.1) - mu) / sd
-    of the canvases (closure_data.py, norm_closure.json), on the GPU."""
+    of the canvases (closure_data.py, norm_closure.json), on the GPU; or any
+    other pair of jet pools with their own normalisation (the translation
+    pilot: tr_pythia, tr_jewel and translation/norm.json)."""
 
-    def __init__(self, device, target_domain = 'closure_tgt'):
+    def __init__(self, device, target_domain = 'closure_tgt',
+                 source_domain = 'closure_src', norm_path = None):
         # the closure normalisation, fitted by closure_data.py (as fm_train)
-        with open(fc.Norm.path(method = 'jetflow'), encoding = 'utf-8') as f:
+        with open(norm_path or fc.Norm.path(method = 'jetflow'),
+                  encoding = 'utf-8') as f:
             self.method = fc.Method('jetflow', fc.Norm(json.load(f)))
-        self.src = torch.from_numpy(np.load(fc.cache_path('closure_src'))).to(device)
+        self.src = torch.from_numpy(np.load(fc.cache_path(source_domain))).to(device)
         self.tgt = torch.from_numpy(np.load(fc.cache_path(target_domain))).to(device)
         self.device = device
 
@@ -322,6 +334,17 @@ def parse_cmdargs():
     parser.add_argument('--seed', type = int, default = 0)
     parser.add_argument('--monitor-n', type = int, default = 1000)
     parser.add_argument('--target-domain', default = 'closure_tgt')
+    parser.add_argument('--source-domain', default = 'closure_src')
+    parser.add_argument('--norm-path', default = None,
+        help = 'normalisation JSON (default: the closure\'s norm_closure.json)')
+    parser.add_argument('--outdir', default = None,
+        help = 'directory holding the runs (default: OUTDIR/sphenix/flow);'
+               ' --init is looked up there too')
+    parser.add_argument('--monitor', default = 'closure',
+        choices = [ 'closure', 'translation' ],
+        help = 'closure: shape EMD to T(J) on validation pairs; translation:'
+               ' population scores of validation outputs against held-out'
+               ' JEWEL (translation_eval.monitor)')
     return parser.parse_args()
 
 def build_model(config, device):
@@ -366,9 +389,15 @@ def main():
     cmdargs = parse_cmdargs()
     device  = torch.device('cuda')
     torch.backends.cudnn.benchmark = True
-    run_dir = os.path.join(fc.out_root(), cmdargs.label)
+    runs    = cmdargs.outdir or fc.out_root()
+    run_dir = os.path.join(runs, cmdargs.label)
     os.makedirs(os.path.join(run_dir, 'checkpoints'), exist_ok = True)
-    data = ClosureData(device, cmdargs.target_domain)
+    translation = cmdargs.monitor == 'translation'
+    assert translation == (cmdargs.source_domain == 'tr_pythia') \
+        == (cmdargs.target_domain == 'tr_jewel') == (cmdargs.norm_path is not None), \
+        'the translation pools go with their own normalisation and monitor'
+    data = ClosureData(device, cmdargs.target_domain, cmdargs.source_domain,
+                       cmdargs.norm_path)
 
     config = { 'label' : cmdargs.label, 'stage' : cmdargs.stage, 'eps' : cmdargs.eps,
                'midpoint_noise_sd' : 0.5 * math.sqrt(cmdargs.eps),
@@ -377,6 +406,9 @@ def main():
                'grad_clip' : cmdargs.grad_clip, 'minutes' : cmdargs.minutes,
                'seed' : cmdargs.seed, 'backbone' : 'uvcgan', 'shape' : list(fc.JET_SHAPE),
                'target_domain' : cmdargs.target_domain,
+               'source_domain' : cmdargs.source_domain,
+               'norm_path' : cmdargs.norm_path, 'monitor' : cmdargs.monitor,
+               'norm' : data.method.norm.to_dict(),
                'parameterisation' : 'endpoint = c_skip x + c_out nn(c_in x) (Appendix J,'
                                     ' per-direction endpoint variances), drift ='
                                     ' (endpoint - x)/(1 - u), unit-weight regression',
@@ -389,11 +421,17 @@ def main():
         ema   = copy.deepcopy(model)
     else:
         assert cmdargs.init, '--init: the pretrained run'
-        init_dir  = os.path.join(fc.out_root(), cmdargs.init)
+        init_dir  = os.path.join(runs, cmdargs.init)
         init_ckpt = last_checkpoint(init_dir)
         with open(os.path.join(init_dir, 'config.json'), encoding = 'utf-8') as f:
             init_cfg = json.load(f)
         assert abs(init_cfg['eps'] - cmdargs.eps) < 1e-12, 'eps must match the pretraining'
+        # the pools and normalisation of the pretraining (older closure
+        # configs record only the target)
+        for (key, default) in (('source_domain', 'closure_src'),
+                               ('target_domain', 'closure_tgt'), ('norm_path', None)):
+            assert init_cfg.get(key, default) == getattr(cmdargs, key), \
+                f'{key} must match the pretraining'
         state = torch.load(init_ckpt, map_location = device, weights_only = False)
         model = build_model(config, device)
         model.load_state_dict(state['raw'])
@@ -418,8 +456,13 @@ def main():
     g_loss = torch.Generator(device = device).manual_seed(1000 * cmdargs.seed + 10 * stage_seed + 2)
     g_roll = torch.Generator(device = device).manual_seed(1000 * cmdargs.seed + 10 * stage_seed + 3)
 
-    val  = load_pairs('val', cmdargs.monitor_n)
-    jets = Jets(val['row'], device)
+    if translation:
+        import translation_eval
+        val  = translation_eval.MonitorSets(cmdargs.monitor_n, device)
+        jets = None
+    else:
+        val  = load_pairs('val', cmdargs.monitor_n)
+        jets = Jets(val['row'], device)
     b    = cmdargs.batch // 2
     hist = []
     timing = { 'rollout' : 0.0, 'update' : 0.0 }
@@ -477,13 +520,17 @@ def main():
                 os.path.join(run_dir, 'checkpoints', f'step_{step0 + update:08d}.pt'),
                 raw = model.state_dict(), ema = ema.state_dict(),
                 norm = data.method.norm.to_dict(), stats = stats, config = config)
-            mon = monitor(ema, data, val, jets, cmdargs.eps, cmdargs.steps, 12345)
+            if translation:
+                mon = val.monitor(ema, data, cmdargs.eps, cmdargs.steps, 12345)
+                text = '  '.join(f'{k} {v:.3f}' for (k, v) in mon.items())
+            else:
+                mon = monitor(ema, data, val, jets, cmdargs.eps, cmdargs.steps, 12345)
+                text = (f"val shape EMD {mon['val_shape_emd']:.4f}  EMD "
+                        f"{mon['val_emd_gev']:.3f} GeV  response {mon['val_response']:.3f}")
             model.train()
             print(f"{cmdargs.stage} update {update:6d} ({step0 + update}) "
                   f"{train_time / 60:6.1f} min  loss {float(loss):.4f} "
-                  f"(fwd {float(l_f):.4f}, bwd {float(l_b):.4f})  val shape EMD "
-                  f"{mon['val_shape_emd']:.4f}  EMD {mon['val_emd_gev']:.3f} GeV  "
-                  f"response {mon['val_response']:.3f}", flush = True)
+                  f"(fwd {float(l_f):.4f}, bwd {float(l_b):.4f})  {text}", flush = True)
             hist.append({ 'update' : update, 'step' : step0 + update,
                           'train_time' : train_time, **mon })
             pd.DataFrame(hist).to_csv(os.path.join(run_dir, 'history.csv'), index = False)

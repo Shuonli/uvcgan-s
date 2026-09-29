@@ -2946,6 +2946,249 @@ this size does not change. Explaining it needs information the state
 lacks, e.g. a signal prediction as in the joint arm, or a different
 target, not a wider tube around the same regression.
 
+## PYTHIA -> JEWEL translation pilot (set up 2026-09-28 20:00, before training)
+
+**Question.** Can the existing unpaired methods (OT-CFM, online alpha-DSBM)
+map clean PYTHIA jet images to outputs whose statistics match held-out
+JEWEL jets, while the output still depends in a meaningful way on its input
+jet? This is the intended application tested directly. Background
+subtraction mixed transport with an inverse problem and the residual
+readout S_hat = M - B_hat; here both ends are clean jet images. It is a
+new, exploratory experiment:
+- the failed toy closure stays a negative result; its gate is not
+  reopened;
+- nothing here can establish a true per-event medium modification. There
+  is no matched JEWEL jet for a PYTHIA jet: any unpaired map is one choice
+  among the many that reproduce the same marginals (OT-CFM: least squared
+  log-energy change; alpha-DSBM: the Schrodinger bridge of |x - y|^2 / 2 at
+  eps). No JEWEL jet, OT partner or nearest JEWEL jet is treated as an
+  input's truth;
+- PYTHIA -> JEWEL differences include generator and selection effects as
+  well as medium effects (below);
+- the published subtraction UVCGAN-S checkpoint is not a translation
+  baseline and is not used.
+
+**Data** (`translation_data.py`; its own caches, normalisation and runs
+under `OUTDIR/sphenix/flow/translation/`; manifest and parent split lists
+in `docs/flow/translation/`):
+- **Parents:** a generated event, identified by (generator file, event
+  number).
+  - PYTHIA: the 2,635,582 events of `train/signal.h5`, whose index gives
+    unique keys; 2636 files.
+  - JEWEL: the 870,000 clean images of the 870 ROOT files of Zenodo
+    record 17594612. 833,000 of them are embedded once each in the old
+    test mixtures; mixtures are not distinct jets, the ROOT files are the
+    parent list.
+  - Duplicate images, by a content hash, are dropped (the first of a group
+    is kept).
+- **Jets** (the closure test's code, `closure_data.select` / `windows`,
+  identical for both domains):
+  - one jet per parent, the leading R = 0.4 cone (phi periodic);
+  - axis rows 4-19, cone >= 10 GeV;
+  - the 53 cone towers in GeV of tower E_T, clipped at 0 (neither sample
+    has negative towers), on the 16 x 16 canvas;
+  - JEWEL is rounded to float16, the precision of the PYTHIA h5.
+- **Physical amplitudes:** no per-jet normalisation; neither spectrum is
+  reweighted.
+- **What the crop leaves out:**
+  - all energy outside the cone around the leading axis: wide-angle and
+    out-of-cone medium-induced radiation, recoil energy, the recoiling jet,
+    the underlying event;
+  - the window's towers beyond dR = 0.4;
+  - everything beyond |eta| < 1.1.
+  - Per jet, the event energy and the ring 0.4 < dR <= 0.8 are recorded.
+- **Splits, by parent,** from one fixed permutation per domain:
+  - PYTHIA train 200k, val 10k, test 20k;
+  - JEWEL train 200k, val 10k, test 20k, and ref 20k (a second held-out
+    JEWEL sample, only for the JEWEL-vs-JEWEL finite-sample reference);
+  - the 20k JEWEL parents of the subtraction study's JEWEL evaluation are
+    in no split, so that evaluation stays untouched by JEWEL training.
+- **Normalisation:** psi = log(E + 0.1), standardised with one mean and sd
+  over both training pools together (`translation/norm.json`; the closure's
+  `norm_closure.json` is not used).
+- **Known and unknown about the samples:**
+  - PYTHIA: sPHENIX-style production naming (type 11, "jet30", run 19,
+    no noise); its generator version, tune, the meaning of "jet30" and the
+    detector simulation are not recorded.
+  - JEWEL: no generator record, version, medium parameters, seeds or
+    recoil treatment. The old mixed sample's name says `jet30_40_50`,
+    meaning undocumented.
+  - Both share the smallest tower value (1.1e-4 GeV) and the low quantiles
+    of the tower spectrum, which suggests one tower pipeline (not
+    documented).
+  - Differences can come from the medium, the generators (JEWEL uses PYTHIA
+    6 for the hard process; tunes, underlying event: JEWEL events carry
+    about half of PYTHIA's total event energy, median 35 against 75 GeV),
+    each sample's generator-level jet requirement, and the common 10 GeV
+    selection acting on different spectra.
+
+**Models** (seed 0, from scratch, the UVCGAN-S backbone, the same training
+pools; each 2 A6000 GPU-hours of training time on dahlia):
+- **OT-CFM** (`fm_train.py --method jetflow --cost l2`):
+  - exact minibatch OT, TorchCFM's pair sampling, pool = batch 256;
+  - one fixed cost, the squared L2 of the standardised states (jet-centred,
+    the geometry of the closure's DSBM comparison);
+  - straight path (sigma 0), MSE velocity loss, Adam 2e-4, warm-up 1000,
+    clip 1, EMA 0.9999;
+  - 120 min, checkpoints every 10 min. No cost sweep.
+- **Online alpha-DSBM** (`dsbm.py`, the checked implementation):
+  - bidirectional bridge, independent-pair pretraining (30 min), then
+    online refinement from EMA rollouts (90 min, rollouts in the budget);
+  - eps = 0.25 in the new standardised coordinates (midpoint noise sd
+    0.25 in z);
+  - endpoint preconditioning variances refitted on the translation pools;
+  - batch 256, Adam 2e-4, warm-up 1000, clip 1, EMA 0.999, 30-step
+    Euler-Maruyama rollouts. No noise sweep.
+- No new backbone, conditioning, shape or conservation loss, or noisy
+  path.
+- **Primary comparison: the final checkpoint at the 2 GPU-h budget.**
+  - Validation curves every 10 min (population scores and input
+    correlations on PYTHIA val -> JEWEL val) are descriptive only.
+  - Test data are used for nothing but the final scores.
+  - A curve still improving at 2 h is reported as such, with no
+    extrapolated time to success.
+
+**Solver (fixed on validation, then frozen):** the final checkpoint on
+2000 PYTHIA val inputs, against JEWEL val.
+- OT-CFM: midpoint with 32 network evaluations is adequate if, against 64:
+  - every W1 / sigma below changes by less than its bootstrap sd;
+  - the per-jet cone energy moves by less than 1% of the rms energy change
+    the model makes (E_out - E_in);
+  - otherwise 64, checked against 128.
+- alpha-DSBM: the SDE sampler with 30 steps is adequate if, against 60
+  steps with coupled Brownian increments:
+  - the per-jet energy difference is below 1/3 of that between two
+    independent samples at 30;
+  - every W1 moves by less than its bootstrap sd;
+  - otherwise 60. Noise is never dropped.
+- Four-step Euler for OT-CFM: a secondary speed readout only.
+- NFE and latency (one A6000, batch 2000) are reported.
+
+**Samples compared** (20k test each; outputs clipped at 0, no threshold or
+clean-up for any method):
+- **JEWEL test:** the target.
+- **JEWEL ref:** the finite-sample floor.
+- **Identity:** the PYTHIA test inputs.
+- **Random JEWEL:** 20k jets of the JEWEL training pool, one per input,
+  ignoring it. It shows that good target distributions alone do not make a
+  translation.
+- **OT-CFM:** one output per input.
+- **alpha-DSBM:** one sample per input, fixed sampler seed. Eight samples
+  per input on the first 1000 test inputs, to show variability. That
+  spread is algorithmic, not a physical uncertainty.
+
+**Metrics:**
+- **Population, fixed crop:**
+  - E, mass, girth, p_T^D, z_lead, z_g, R_g of the 53 cone towers
+    (`closure_eval.Jets`, the closure's definitions);
+  - W1 / sigma_JEWEL, each with a bootstrap sd (200 resamples of both
+    samples);
+  - the common final selection E >= 10 GeV is applied to outputs and to
+    JEWEL alike, and the share of outputs passing is reported (JEWEL: 100%
+    by construction), with the migration of E bins.
+- **Joint:**
+  - pT-girth and pT-z_lead densities and binned means;
+  - W1 of girth and z_lead in pT bins (10-20, 20-30, 30-60 GeV);
+  - the largest difference of the (log E, mass, girth, p_T^D, z_lead)
+    correlation matrices.
+- **Refound jets, kept apart from the fixed crop:** anti-kT R = 0.4
+  (FastJet, `bench_jets.py`'s constituents and soft drop) on each canvas's
+  towers. For the leading jet: pT, axis offset, mass, girth, p_T^D,
+  z_lead, z_g, R_g, with the same final selection (pT >= 10 GeV) on both
+  sides.
+- **Dependence on the input** (no selection):
+  - the input-output correlation of E, girth, mass, core fraction and
+    leading-tower energy, with bootstrap sd;
+  - the distributions of their changes, and the changes against input pT
+    (a separate figure);
+  - the own-input preference rate: how often an output is closer, in
+    normalised-shape EMD, to its own input than to another test input
+    (identity 1, random JEWEL 0.5).
+  - These describe the proposed map, not errors against a truth; high
+    correlation alone is no success (the identity has it).
+- **Image fidelity:**
+  - fixed displays: the first 1000 PYTHIA test jets nearest the 0.1, 0.3,
+    0.5, 0.7 and 0.9 quantiles of their cone energy (fixed now), their
+    outputs, 8 alpha-DSBM samples each, and JEWEL test jets at the same
+    quantiles of the JEWEL spectrum as a visual reference, not a truth;
+  - the cone tower spectrum;
+  - occupancy (towers above 0, 0.01, 0.1, 1 GeV), energy in towers below
+    0.5 GeV, leading-tower energy, core fraction.
+
+**How the outcome is read (fixed now; successes and failures reported
+separately, not as one number):**
+- **Moves toward JEWEL** in an observable: its W1 / sigma is below the
+  identity's by more than 3 combined bootstrap sd. **Consistent with
+  JEWEL:** within 3 sd of the JEWEL-ref floor.
+- **Input dependence beyond random JEWEL:**
+  - the input correlation of E and of girth exceeds 0 by more than 3
+    bootstrap sd;
+  - the own-input preference rate exceeds 0.5 by more than 3 standard
+    errors.
+- **Artefact flags:**
+  - *soft floor:* mean occupancy above 0.01 GeV, or mean energy in towers
+    below 0.5 GeV, more than 10% above both PYTHIA's and JEWEL's;
+  - *flattening:* mean z_lead or core fraction below both domains' by more
+    than 3 sd.
+- **Useful outcome:**
+  - movement toward JEWEL in at least 4 of the 7 fixed-crop marginals and
+    in both joint comparisons;
+  - input dependence beyond random JEWEL;
+  - no artefact flag.
+  - Then one narrowly defined follow-up is recommended.
+- **Otherwise:** the result is recorded as it is, with no new architecture
+  or hyperparameter search.
+
+### Data as built (job 20331, 20:17; `docs/flow/translation/manifest.json`)
+
+| | PYTHIA | JEWEL |
+| :--- | ---: | ---: |
+| parents (unique keys) / files | 2,635,582 / 2636 | 870,000 / 870 |
+| exact duplicate images dropped | 190,584 | 0 |
+| leading axis outside rows 4-19 | 329,869 | 93,683 |
+| leading cone below 10 GeV | 522 | 43,306 |
+| selected (share) | 2,305,191 (87.5%) | 733,011 (84.3%) |
+| eligible (selected, unique, not reserved) | 2,134,675 | 716,290 (16,721 reserved) |
+| used: train / val / test / ref | 200k / 10k / 20k / - | 200k / 10k / 20k / 20k |
+| cone E quantiles 5 / 50 / 95%, GeV | 23.0 / 31.9 / 44.0 | 12.7 / 26.4 / 44.2 |
+| event energy, median, GeV | 74.3 | 51.3 |
+| cone share of the event energy, median | 0.43 | 0.51 |
+| ring 0.4 < dR <= 0.8, mean GeV (share of the cone) | 2.83 (9.3%) | 2.09 (9.2%) |
+
+- **Duplicates:** 7.2% of the PYTHIA images are exact copies of an image in
+  another file.
+  - They come in pairs only, 295-496 per file across 955 files, never
+    within one file, in shuffled order: 397 events of file 1954 reappear in
+    file 2448 under other event numbers (the same number in only 194 of all
+    pairs).
+  - One of each pair is kept, so no image can sit in two splits.
+  - No near-copy (same leading tower, total energy within 0.1%) was found
+    among the other events of two such file pairs.
+  - JEWEL has none, and no image is shared between the domains.
+  - The parent key alone would not have caught these copies.
+- **Spectra:** PYTHIA's cone energy is cut sharply near 20 GeV (5% below 23
+  GeV: a generator-level jet requirement seen through the detector
+  response). JEWEL reaches down to the 10 GeV selection (5% below 12.7 GeV;
+  5% of JEWEL parents fail it, 0.02% of PYTHIA's).
+- **The crop drops about half the event energy in both samples.** The ring
+  just outside the cone holds 9% of the cone energy in both.
+- **Normalisation:** psi mean -2.126, sd 0.629. Per-element E[z^2] (the
+  DSBM endpoint variances): PYTHIA 1.088, JEWEL 0.911. eps = 0.25 is a
+  midpoint noise sd of 0.25 in z, 0.157 in log(E + 0.1).
+- **Checks:** float16 caches reproduce every canvas energy exactly; JEWEL's
+  float16 rounding is at most 4.9e-4 relative; no negative tower in either
+  sample; the 16,721 reserved JEWEL parents are in no split.
+- The tower spectra of both samples have discrete peaks below ~0.01 GeV (a
+  property of the simulation). log(E + 0.1) compresses that region
+  (psi(0.01) - psi(0) = 0.1), so no model in these coordinates can resolve
+  it; those towers carry < 0.1% of the energy.
+- **Build:** the JEWEL ROOT files are read once into a flat cache (45 s,
+  30 processes, each file read whole and parsed in memory).
+  - uproot's default handler re-read ~0.7 GB per 1.5 MB file through NFS,
+    and a memory map faulted page by page.
+  - Under SLURM the forked workers came up pinned to one core; the pools
+    now restore the parent's CPU mask.
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything

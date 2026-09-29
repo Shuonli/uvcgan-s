@@ -1,0 +1,172 @@
+{
+    "domains": {
+        "pythia": {
+            "domain": "pythia",
+            "parents": 2635582,
+            "unique_keys": 2635582,
+            "files": 2636,
+            "empty_images": 0,
+            "content_duplicates_dropped": 190584,
+            "leading_axis_outside_acceptance": 329869,
+            "leading_cone_below_min_jet": 522,
+            "selected": 2305191,
+            "selected_fraction": 0.8746421094088517,
+            "selected_and_unique": 2134675,
+            "excluded_old_evaluation": 0,
+            "eligible": 2134675,
+            "used": {
+                "train": 200000,
+                "val": 10000,
+                "test": 20000
+            },
+            "unused_eligible": 1904675,
+            "e_cone_gev_quantiles_5_25_50_75_95": [
+                22.963991165161133,
+                27.912117958068848,
+                31.932106018066406,
+                36.4950749874115,
+                44.02198600769043
+            ],
+            "e_event_gev_median": 74.28813564777374,
+            "cone_share_of_event_energy_median": 0.4345917776014573,
+            "cone_share_of_event_energy_mean": 0.43725989131272086,
+            "ring_0p4_0p8_gev_median": 2.4124584197998047,
+            "ring_0p4_0p8_gev_mean": 2.8341777894737232,
+            "ring_share_of_cone_mean": 0.092760946165325
+        },
+        "jewel": {
+            "domain": "jewel",
+            "parents": 870000,
+            "unique_keys": 870000,
+            "files": 870,
+            "empty_images": 0,
+            "content_duplicates_dropped": 0,
+            "leading_axis_outside_acceptance": 93683,
+            "leading_cone_below_min_jet": 43306,
+            "selected": 733011,
+            "selected_fraction": 0.8425413793103448,
+            "selected_and_unique": 733011,
+            "excluded_old_evaluation": 16721,
+            "eligible": 716290,
+            "used": {
+                "train": 200000,
+                "val": 10000,
+                "test": 20000,
+                "ref": 20000
+            },
+            "unused_eligible": 466290,
+            "e_cone_gev_quantiles_5_25_50_75_95": [
+                12.65236759185791,
+                19.60529327392578,
+                26.4296817779541,
+                33.87516784667969,
+                44.173810958862305
+            ],
+            "e_event_gev_median": 51.32424855232239,
+            "cone_share_of_event_energy_median": 0.5055366829610038,
+            "cone_share_of_event_energy_mean": 0.5185192791133814,
+            "ring_0p4_0p8_gev_median": 1.7148723602294922,
+            "ring_0p4_0p8_gev_mean": 2.085718950841478,
+            "ring_share_of_cone_mean": 0.09202880853165943,
+            "read": {
+                "files": 870,
+                "histograms": 870000,
+                "read_seconds": 44.51799559593201,
+                "float16_max_rel_rounding": 0.00048801314546500314,
+                "negative_towers": 0
+            }
+        }
+    },
+    "splits": {
+        "pythia_train": {
+            "n": 200000,
+            "e_cone_median": 31.691720962524414,
+            "files": 2636
+        },
+        "pythia_val": {
+            "n": 10000,
+            "e_cone_median": 31.681360244750977,
+            "files": 2556
+        },
+        "pythia_test": {
+            "n": 20000,
+            "e_cone_median": 31.663625717163086,
+            "files": 2635
+        },
+        "jewel_train": {
+            "n": 200000,
+            "e_cone_median": 26.439363479614258,
+            "files": 870
+        },
+        "jewel_val": {
+            "n": 10000,
+            "e_cone_median": 26.689507484436035,
+            "files": 870
+        },
+        "jewel_test": {
+            "n": 20000,
+            "e_cone_median": 26.23325252532959,
+            "files": 870
+        },
+        "jewel_ref": {
+            "n": 20000,
+            "e_cone_median": 26.327106475830078,
+            "files": 870
+        }
+    },
+    "checks": {
+        "identical_images_across_domains": 0,
+        "jewel_old_evaluation_parents_in_splits": 0,
+        "train_pythia_float16_energy_ratio": [
+            1.0,
+            1.0
+        ],
+        "train_jewel_float16_energy_ratio": [
+            1.0,
+            1.0
+        ],
+        "train_pythia_z_mean_sd_second_moment": [
+            0.022966086184264187,
+            1.043023724978692,
+            1.0884259319830494
+        ],
+        "train_jewel_z_mean_sd_second_moment": [
+            -0.022967470180617174,
+            0.9543166800746782,
+            0.9112478305552533
+        ],
+        "pythia_duplicates_note": "190,584 PYTHIA images (7.2% of 2,635,582) are exact copies of an image in another file: pairs only (no image occurs 3 times), 955 files involved, 295-496 copies per file, in shuffled order (e.g. 397 events of file 1954 reappear in file 2448 under other event numbers; the same number in only 194 pairs), never within one file. One image of each pair is kept (the lower sample index). Among the non-identical events of two such file pairs no near-copy (same leading tower, total energy within 0.1%) was found. JEWEL: no duplicate; no image is shared between the domains."
+    },
+    "norm": {
+        "jet": [
+            -2.1263679337434076,
+            0.6285560589985479
+        ],
+        "_bias": 0.1,
+        "fitted_on": "train_pythia + train_jewel canvases, every pixel of the 16 x 16 canvas (the closure procedure)"
+    },
+    "seed": 0,
+    "min_jet_gev": 10.0,
+    "selection": "leading R = 0.4 cone (axis = tower of largest cone sum, phi periodic) >= 10.0 GeV, axis rows 4-19 (9 x 9 window inside the acceptance); one jet per parent",
+    "canvas": "16 x 16, 9 x 9 window at 4..12, R = 0.4 cone towers only (53), tower E_T in GeV, clipped at 0",
+    "crop_excludes": [
+        "all energy outside the R = 0.4 cone around the leading axis: wide-angle radiation, out-of-cone medium-induced radiation and recoil energy, the recoiling jet, the underlying event",
+        "towers of the 9 x 9 window outside the cone (dR > 0.4)",
+        "everything beyond |eta| < 1.1 (the image), and particles the images do not hold"
+    ],
+    "ring": "0.4 < dR <= 0.8 around the axis, inside |eta| < 1.1",
+    "splits_by": "parent key = file x 10^6 + event, one jet per parent; one fixed permutation per domain",
+    "excluded": "the 20000 JEWEL parents of pairs_jewel_n20000_seed0.npz (the subtraction study's JEWEL evaluation)",
+    "provenance": {
+        "pythia": "train/signal.h5 = type11_run19_jet30_pythia_noNoise_allCentrality (sPHENIX-style production naming: sample type 11, \"jet30\", run 19, no noise); generator version, tune, the definition of the jet30 requirement and the detector simulation are not recorded with the data",
+        "jewel": "Zenodo record 17594612, jewel_jet30.tar.gz: one ROOT TH2D per event (24 x 64, eta -1.1..1.1, phi 0..2 pi), no generator record, seeds, version or medium parameters; the mixed test sample is named type4_hijing_plus_jewel_jet30_40_50 (meaning of 40_50 not documented); recoil treatment unknown",
+        "common": "both samples share the smallest tower value (1.1e-4 GeV) and the low quantiles of the tower spectrum, which suggests the same tower-level pipeline; not documented",
+        "differences_can_include": [
+            "medium effects (JEWEL)",
+            "generator differences (JEWEL runs PYTHIA 6 for the hard process; the PYTHIA sample is presumably PYTHIA 8; tunes, underlying event)",
+            "generator-level jet requirements of each sample",
+            "the common >= 10 GeV leading-cone selection acting on different spectra"
+        ]
+    },
+    "build_seconds": 72.42742228507996
+}

@@ -52,7 +52,10 @@ Methods (c.f. FLOW_NOTES.md):
              (closure_data.Modification), no matching; `paired_n` limits it
              to the first paired_n source jets. `pairing = 'semi'`: each
              batch holds n_paired such true pairs (from the first paired_n
-             source jets) next to OT-coupled unpaired pairs.
+             source jets) next to OT-coupled unpaired pairs. With source
+             'tr_pythia', target 'tr_jewel' and the translation
+             normalisation, the same method is the OT-CFM of the PYTHIA ->
+             JEWEL translation pilot (translation_data.py).
 
 Paired arms of the consolidated subtraction benchmark (FLOW_NOTES.md,
 "Consolidated benchmark"). They train on the same real training mixtures as
@@ -182,8 +185,19 @@ def out_root():
         os.environ.get('UVCGAN_S_OUTDIR', 'outdir'), 'sphenix', 'flow'
     )
 
+def translation_root():
+    """The PYTHIA -> JEWEL translation pilot's own area (translation_data.py):
+    caches, normalisation and runs, apart from the closure study's."""
+    return os.path.join(out_root(), 'translation')
+
+def translation_norm_path():
+    return os.path.join(translation_root(), 'norm.json')
+
 def cache_path(domain):
-    """Flat float16 copy of a training domain, c.f. make_cache.py."""
+    """Flat float16 copy of a training domain, c.f. make_cache.py; domains
+    `tr_<name>` are the translation pools (translation_data.py)."""
+    if domain.startswith('tr_'):
+        return os.path.join(translation_root(), 'cache', f'train_{domain[3:]}.npy')
     return os.path.join(out_root(), 'cache', f'train_{domain}.npy')
 
 def draw_indices(rng, n, k):
@@ -681,7 +695,7 @@ class Method:
     def __init__(self, name, norm, sigma = None, augment = 'none',
                  cost = 'l2', cost_lambda = 1.0, pairing = 'unpaired',
                  target = 'closure_tgt', paired_n = None, path = 'straight',
-                 eta = 0.0):
+                 eta = 0.0, source = 'closure_src'):
         # pylint: disable=too-many-arguments
         assert name in METHODS, name
         assert augment in ('none', 'jets'), augment
@@ -703,8 +717,11 @@ class Method:
         self.n_paired = 0
         self.paired   = None
         # jetflow's target pool: closure_tgt = T(B); closure_null_tgt = B
-        # itself (the null test, closure_data.py --null)
+        # itself (the null test, closure_data.py --null); tr_jewel = the
+        # translation pilot's JEWEL jets. Its source pool: closure_src, or
+        # tr_pythia (translation_data.py)
         self.target  = target
+        self.source_domain = source
 
         self.name    = name
         self.norm    = norm
@@ -740,9 +757,11 @@ class Method:
     @property
     def domains(self):
         if self.pairing == 'paired':
-            return DOMAINS[self.name][:1]      # targets are made from them
+            # targets are made from them
+            return (self.source_domain,) if self.name == 'jetflow' \
+                else DOMAINS[self.name][:1]
         if self.name == 'jetflow':
-            return (DOMAINS[self.name][0], self.target)
+            return (self.source_domain, self.target)
         return DOMAINS[self.name]
 
     @property
@@ -752,7 +771,7 @@ class Method:
 
     def paired_sources(self, data, n):
         """n random source jets with a known pair, from GPUData `data`."""
-        pool = data.data['closure_src']
+        pool = data.data[self.source_domain]
         k    = self.paired_n or len(pool)
         idx  = torch.randint(k, (n,), device = pool.device,
                              generator = data.gen)
@@ -763,7 +782,7 @@ class Method:
         of each domain (the matching pool), and the true-pair sources of the
         (semi-)paired closure."""
         if self.pairing == 'paired':
-            return { 'closure_src' : self.paired_sources(data, batch) }
+            return { self.source_domain : self.paired_sources(data, batch) }
         out = data.batch(pool or batch)
         if self.pairing == 'semi':
             out['paired_src'] = self.paired_sources(data, self.n_paired)
@@ -784,7 +803,7 @@ class Method:
     def endpoints(self, batch):
         """(x0, x1, cond) of a batch of energies, before any coupling."""
         if self.name == 'jetflow':
-            src = batch['closure_src']
+            src = batch[self.source_domain]
             if (self.pairing != 'unpaired') and (self.modify is None):
                 # pylint: disable=import-outside-toplevel
                 from closure_data import Modification

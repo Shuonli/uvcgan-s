@@ -1,0 +1,32 @@
+% PYTHIA -> JEWEL translation pilot, results appendix (FLOW_NOTES.md,
+% "PYTHIA -> JEWEL translation pilot"). Build:
+%   cd docs/flow/translation/slides && ~/pyext/tectonic_env/bin/tectonic translation_appendix.tex
+% Numbers: docs/flow/translation/*.csv (translation_report.py); tables/*.tex
+% (translation_tables.py); figures docs/flow/translation/tr_*.png.
+\documentclass[aspectratio=169,10pt]{beamer}
+\usetheme{default}
+\usefonttheme{professionalfonts}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{footline}{%
+  \hspace{1em}\textcolor{gray}{\tiny Appendix: unpaired PYTHIA $\to$ JEWEL jet translation pilot, 2026-09-28}%
+  \hfill\textcolor{gray}{\tiny T\insertframenumber}\hspace{1em}\vspace{0.6em}}
+\setbeamerfont{frametitle}{size=\large,series=\bfseries}
+\setbeamercolor{frametitle}{fg=black}
+\setbeamertemplate{itemize items}{\textbullet}
+\setbeamersize{text margin left=0.9em,text margin right=0.9em}
+
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{array}
+\graphicspath{{../}}
+
+\definecolor{cDSBM}{HTML}{d62728}
+\definecolor{cOT}{HTML}{2ca02c}
+\newcommand{\dsbm}{\textcolor{cDSBM}{\textbf{$\alpha$-DSBM}}}
+\newcommand{\ot}{\textcolor{cOT}{\textbf{OT-CFM}}}
+\newcommand{\snote}[1]{{\scriptsize\textcolor{gray}{#1}}}
+
+\begin{document}
+\input{body.tex}
+\end{document}

@@ -61,8 +61,17 @@ def parse_cmdargs():
     parser.add_argument('--cost-lambda', type = float, default = 1.0,
         help = 'weight of the energy term of the shape_energy cost')
     parser.add_argument('--target-domain', default = 'closure_tgt',
-        choices = [ 'closure_tgt', 'closure_null_tgt' ],
-        help = 'jetflow targets: T(B), or B unmodified (the null test)')
+        choices = [ 'closure_tgt', 'closure_null_tgt', 'tr_jewel' ],
+        help = 'jetflow targets: T(B), B unmodified (the null test), or the'
+               ' translation pilot\'s JEWEL jets (translation_data.py)')
+    parser.add_argument('--source-domain', default = 'closure_src',
+        choices = [ 'closure_src', 'tr_pythia' ],
+        help = 'jetflow sources: the closure pool A, or the translation'
+               ' pilot\'s PYTHIA jets')
+    parser.add_argument('--norm-path', default = None,
+        help = 'jetflow: the normalisation JSON (default: the closure\'s,'
+               ' norm_closure.json; the translation pilot:'
+               ' OUTDIR/sphenix/flow/translation/norm.json)')
     parser.add_argument('--ot-pool', type = int, default = None,
         help = 'matching pool per domain (default: the batch); the plan is'
                ' solved on the pool and --batch complete pairs drawn from it')
@@ -154,11 +163,14 @@ def write_config(run_dir, cmdargs, n_params):
         old.setdefault('paired_share', 0.5)
         old.setdefault('path', 'straight')
         old.setdefault('eta', 0.0)
+        old.setdefault('source_domain', 'closure_src')
+        old.setdefault('norm_path', None)
         for key in [ 'method', 'batch', 'lr', 'sigma', 'channels',
                      'res_blocks', 'attn', 'seed', 'ema', 'warmup',
                      'cosine_steps', 'log_bias', 'augment', 'backbone',
                      'cost', 'cost_lambda', 'pairing', 'target_domain',
-                     'ot_pool', 'paired_n', 'paired_share', 'path', 'eta' ]:
+                     'ot_pool', 'paired_n', 'paired_share', 'path', 'eta',
+                     'source_domain', 'norm_path' ]:
             if old.get(key) != config.get(key):
                 raise RuntimeError(
                     f"resuming '{run_dir}' with {key} = {config.get(key)},"
@@ -233,12 +245,18 @@ def main():
     t_start = time.perf_counter()
 
     if cmdargs.method == 'jetflow':
-        # fitted on the training jets by closure_data.py
-        with open(fc.Norm.path(method = 'jetflow'), 'r',
+        # fitted on the training jets by closure_data.py (or, for the
+        # translation pilot, by translation_data.py: --norm-path)
+        with open(cmdargs.norm_path or fc.Norm.path(method = 'jetflow'), 'r',
                   encoding = 'utf-8') as f:
             norm = fc.Norm(json.load(f))
+        assert (cmdargs.source_domain == 'tr_pythia') \
+            == (cmdargs.target_domain == 'tr_jewel') \
+            == (cmdargs.norm_path is not None), \
+            'the translation pools go with their own normalisation'
         if cmdargs.inline_events > 0:
-            print('jetflow: no inline scoring (closure_eval.py scores the'
+            print('jetflow: no inline scoring (closure_eval.py, or'
+                  ' translation_eval.py for the translation pilot, scores the'
                   ' checkpoints)')
             cmdargs.inline_events = 0
     else:
@@ -248,7 +266,7 @@ def main():
     method = fc.Method(cmdargs.method, norm, cmdargs.sigma, cmdargs.augment,
                        cmdargs.cost, cmdargs.cost_lambda, cmdargs.pairing,
                        cmdargs.target_domain, cmdargs.paired_n, cmdargs.path,
-                       cmdargs.eta)
+                       cmdargs.eta, cmdargs.source_domain)
     if cmdargs.pairing == 'semi':
         method.n_paired = int(round(cmdargs.paired_share * cmdargs.batch))
     cmdargs.sigma = method.sigma
