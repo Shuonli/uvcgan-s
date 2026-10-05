@@ -59,6 +59,13 @@ def parse_cmdargs():
     parser.add_argument('--audit', action = 'store_true')
     parser.add_argument('--checks', action = 'store_true')
     parser.add_argument('--gauss', action = 'store_true')
+    parser.add_argument('--partners', action = 'store_true',
+        help = 'the couplings\' own conditional distribution of the first'
+               ' 1000 test inputs: their targets over many training-like batches')
+    parser.add_argument('--partner-batches', type = int, default = 2000)
+    parser.add_argument('--pair-corr', action = 'store_true',
+        help = 'descriptive: condition-target correlations of the audit pairs'
+               ' at the frozen regularisation (no new choice)')
     parser.add_argument('--batches', type = int, default = 32)
     parser.add_argument('--support', type = float, default = 4.0)
     parser.add_argument('--tol', type = float, default = 1e-4)
@@ -226,6 +233,72 @@ def audit(cmdargs, device):
     with open(os.path.join(cmdargs.out, 'coupling_audit.json'), 'w', encoding = 'utf-8') as f:
         json.dump(summary, f, indent = 4)
     print(json.dumps(summary, indent = 4))
+
+def pair_corr(cmdargs, device):
+    """How much of a condition's energy and shape its sampled targets carry:
+    Pearson correlations between condition and target observables of the
+    audit pairs (hard, soft at the frozen reg, random). Descriptive; the
+    regularisation is read, not chosen, here."""
+    import pandas as pd       # pylint: disable=import-outside-toplevel
+    nm  = norm()
+    reg = reg_of(cmdargs)
+    data = audit_batches(cmdargs.batches, device)
+    (cp, cy) = (data['pythia'][0], data['jewel'][0])
+    o_c = te.jet_observables(cp.view(-1, 16, 16), data['pythia'][1].reshape(-1), device)
+    o_y = te.jet_observables(cy.view(-1, 16, 16), data['jewel'][1].reshape(-1), device)
+    gen = torch.Generator(device = device).manual_seed(AUDIT_SEED)
+    rng = torch.Generator(device = device).manual_seed(AUDIT_SEED + 1)
+    picks = { 'hard (exact plan)' : [], 'soft (entropic plan)' : [], 'random pairs' : [] }
+    (exact, soft) = (fc.RowCoupling('exact'), fc.RowCoupling('entropic', reg, cmdargs.tol))
+    for b in range(cmdargs.batches):
+        (c, y) = (nm.z(cp[b], 'jet').unsqueeze(1), nm.z(cy[b], 'jet').unsqueeze(1))
+        picks['soft (entropic plan)'].append(fc.row_targets(soft.log_plan(c, y), gen) + b * N)
+        picks['hard (exact plan)'].append(fc.row_targets(exact.log_plan(c, y), gen) + b * N)
+        picks['random pairs'].append(torch.randperm(N, device = device, generator = rng) + b * N)
+    rows = []
+    for (kind, js) in picks.items():
+        j = torch.cat(js).cpu().numpy()
+        row = { 'pairs' : kind, 'reg' : reg if 'soft' in kind else np.nan }
+        for q in [ 'E', 'mass', 'girth', 'ptd', 'zlead', 'core', 'lead' ]:
+            (a, b) = (np.asarray(o_c[q], float), np.asarray(o_y[q], float)[j])
+            ok = np.isfinite(a) & np.isfinite(b)
+            row[f'corr_{q}'] = float(np.corrcoef(a[ok], b[ok])[0, 1])
+        rows.append(row)
+    df = pd.DataFrame(rows)
+    df.to_csv(os.path.join(cmdargs.out, 'coupling_audit_corr.csv'), index = False)
+    print(df.round(3).to_string(index = False))
+
+def partners(cmdargs, device):
+    """What each coupling assigns to a jet: the first 1000 PYTHIA test
+    inputs, 256 at a time (random subsets) in --partner-batches batches with
+    256 random JEWEL training jets each, as in training; the same batches for
+    both plans, one target drawn per row. Each input collects about 500
+    targets per plan: the conditional distribution the noise-to-target model
+    is trained to reproduce (not a physical one). Nothing is fitted.
+    OUTDIR/.../translation/condfm/outputs/partners.npz: (input, pool index)
+    pairs of each plan."""
+    nm  = norm()
+    reg = reg_of(cmdargs)
+    n   = 1000
+    src = torch.from_numpy(te.load_set('test', 'pythia')['canvas'][:n]).float().to(device)
+    pool = torch.from_numpy(np.load(fc.cache_path('tr_jewel'))).to(device)
+    g = torch.Generator(device = device).manual_seed(AUDIT_SEED + 2)
+    plans = { 'hard' : fc.RowCoupling('exact'),
+              'soft' : fc.RowCoupling('entropic', reg, cmdargs.tol) }
+    out = { k : [] for k in plans }
+    for _ in range(cmdargs.partner_batches):
+        i = torch.randperm(n, device = device, generator = g)[:N]
+        k = torch.randint(len(pool), (N,), device = device, generator = g)
+        c = nm.z(src[i], 'jet').unsqueeze(1)
+        y = nm.z(pool[k].float(), 'jet').unsqueeze(1)
+        for (name, cpl) in plans.items():
+            j = fc.row_targets(cpl.log_plan(c, y), g)
+            out[name].append(torch.stack([ i, k[j] ]).cpu())
+    path = os.path.join(fc.translation_root(), 'condfm', 'outputs', 'partners.npz')
+    os.makedirs(os.path.dirname(path), exist_ok = True)
+    np.savez_compressed(path, reg = reg, batches = cmdargs.partner_batches,
+                        **{ k : torch.cat(v, 1).numpy() for (k, v) in out.items() })
+    print(f'wrote {path}', flush = True)
 
 # --- checks
 
@@ -469,6 +542,10 @@ def main():
         checks(cmdargs, device)
     if cmdargs.gauss:
         gauss(cmdargs, device)
+    if cmdargs.pair_corr:
+        pair_corr(cmdargs, device)
+    if cmdargs.partners:
+        partners(cmdargs, device)
 
 if __name__ == '__main__':
     main()

@@ -1,12 +1,14 @@
 # Summary: speeding up UVCGAN-S, and flow matching for sPHENIX background subtraction
 
-*As of 2026-09-28, 23:00. Branch `ddp` of github.com/Shuonli/uvcgan-s.
+*As of 2026-10-05, 19:10. Branch `ddp` of github.com/Shuonli/uvcgan-s.
 This file is the short version. The full logs, with job numbers and
 commands, are `SCALING_NOTES.md` (UVCGAN-S training) and `FLOW_NOTES.md`
 (flow matching). The consolidated comparison with its slides is Part 9;
 two single-question experiments (a learned pairing, a noisy training path)
 are Parts 10 and 11, both negative. Part 12 tests the intended application
-directly: turning clean PYTHIA jets into JEWEL-like ones.*
+directly: turning clean PYTHIA jets into JEWEL-like ones, now also against
+a CycleGAN trained on the same task. Part 13 asks for several different
+outputs per input jet.*
 
 ## The task
 
@@ -790,6 +792,15 @@ A sequence of cheap diagnostics, then controls:
 - **One follow-up recommended:** two more OT-CFM seeds, to see whether the
   same PYTHIA jet gets the same output, not only whether the distributions
   come out right.
+- **Against a CycleGAN** (added 2026-10-05): the repository's UVCGAN2,
+  trained on the same jets with the same network and coordinates. At the
+  same 2 GPU hours it moves no observable toward JEWEL: it about doubles
+  the jet energy (mean 65 GeV against JEWEL's 27) and makes the cores far
+  too hard, while keeping each output tied to its input (correlations
+  0.85-0.99). Its 1-hour checkpoint erred the other way (too little
+  energy), so its training had not settled; checkpoints at 8 and 24 hours
+  are being evaluated. It applies 130 times faster (one network pass).
+  Deck: `docs/flow/translation/slides/translation_deck.pdf`.
 - **Cost:**
   - OT-CFM: 2 GPU hours, 6.6 ms per jet at 128 evaluations;
   - alpha-DSBM: 2 GPU hours (89% of its second stage spent generating its
@@ -798,6 +809,89 @@ A sequence of cheap diagnostics, then controls:
   set manifest, split lists, tables and figures `docs/flow/translation/`;
   a short 8-slide talk `docs/flow/translation/slides/translation_deck.pdf`
   and a detailed 4-slide appendix `slides/translation_appendix.pdf`.
+
+## Part 13: several JEWEL-like outputs for one PYTHIA jet (stochastic pilot)
+
+- **Question:** OT-CFM (Part 12) gives exactly one output per PYTHIA jet.
+  The physics target is rather a distribution of possible modified jets
+  for one vacuum jet. Can a model that adds random noise give several
+  sharp, different outputs per jet, and still match JEWEL and depend on
+  the input as OT-CFM does?
+- **What it cannot show:** with unpaired data, "the outputs a jet could
+  have" are whatever the chosen pairing of PYTHIA and JEWEL jets says. The
+  spread is therefore not a physical medium fluctuation, and not a
+  calibrated uncertainty.
+- **The model:** ordinary flow matching from random noise to a JEWEL jet,
+  with the PYTHIA jet given to the network as a second input image. To
+  draw an output, pick the PYTHIA jet, draw fresh noise, and solve the
+  flow; the same noise always gives the same output. It is not DSBM or a
+  noisy bridge.
+- **Two versions, everything else identical** (same data, batches, noise,
+  network, 2 GPU hours each, seed 0):
+  - **hard:** the training partner of each PYTHIA jet is the JEWEL jet the
+    exact optimal-transport matching assigns it within its batch of 256;
+  - **soft:** a looser matching that spreads each PYTHIA jet over about 4
+    JEWEL candidates (set on training jets before training), one drawn at
+    random.
+- **Checks before training:** the formulas inside the code, the pairing
+  indices and the repeatability are exact; on a toy problem with a known
+  answer (output = input + noise of size 0.2) the samples have the right
+  mean and the right spread. On validation the solve is converged at 128
+  network evaluations: its error is 2500 times smaller than the difference
+  between two samples.
+- **Results** (20k held-out jets, one output each; distance to held-out
+  JEWEL, lower is better):
+
+| | energy | mass | girth | p_T^D | z_lead | z_g | R_g | correlation with the input (energy, girth) |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- |
+| two JEWEL samples | 0.011 | 0.014 | 0.009 | 0.018 | 0.019 | 0.012 | 0.008 | |
+| OT-CFM (one output per jet) | 0.025 | 0.021 | 0.012 | 0.010 | 0.008 | 0.017 | 0.012 | 0.94, 0.99 |
+| **noise-driven, hard** | 0.055 | 0.055 | 0.017 | 0.015 | 0.012 | 0.006 | 0.013 | 0.19, 0.72 |
+| **noise-driven, soft** | 0.056 | 0.059 | 0.020 | 0.019 | 0.017 | 0.007 | 0.017 | 0.18, 0.71 |
+| CycleGAN at 2 hours | 3.9 | 3.3 | 0.14 | 0.66 | 0.58 | 0.12 | 0.22 | 0.85, 0.99 |
+
+- **What worked:**
+  - each output is a sharp, realistic jet: tower counts, leading tower,
+    core and soft energy as in JEWEL, no smeared or flattened cores;
+  - the jet shapes match JEWEL as well as OT-CFM's do; energy and mass
+    are 2-3 times further off (too many jets above 50 GeV);
+  - the outputs really differ: two outputs of the same jet differ by 13
+    GeV in energy and in shape more than either differs from the input.
+- **What did not:**
+  - the output energy barely depends on the input's: a 55 GeV PYTHIA jet
+    gets outputs around a median of 30 GeV, a 22 GeV jet around 23. Within
+    one jet the outputs cover almost the whole JEWEL range of energy,
+    p_T^D, z_lead, z_g and R_g; only the width (girth, core) stays clearly
+    tied to the input (correlation 0.72);
+  - swapping the input jet while keeping the noise fixed shows the split:
+    the input sets the shape class, the noise sets most of the energy.
+- **Why:** the model learned its training pairs faithfully. A PYTHIA jet
+  and its optimal-transport partner in a batch of 256 share part of the
+  shape and almost none of the energy (correlation 0.17), because the
+  matching compares tower patterns. OT-CFM's tight per-jet link (0.94)
+  does not come from these pairs: its deterministic flow averages over
+  many of them and cannot scatter one input.
+- **Hard against soft:** the same noise gives almost the same output in
+  both (4-6% of the spread): the looser matching changes nothing, since
+  the exact matching already gives each jet different partners from batch
+  to batch.
+- **Reading, fixed before training:** the hard version passes every
+  item; the soft one misses one (mass slightly further from JEWEL than
+  OT-CFM's, by 3.4 standard deviations). By the letter, "useful". But the
+  pre-registration set no ceiling on the spread, and the spread here is
+  most of the JEWEL population, not a modest modification of the input.
+- **Not established:** a physical medium response; how the result varies
+  with the training seed (one seed each; a second noise seed changes the
+  scores by about one statistical error).
+- **What would change it:** only a different pairing (one that keeps the
+  energy). Which pairing defines "the outputs a jet could have" is a
+  modelling choice that unpaired data cannot make. Nothing further was
+  run.
+- **Cost:** the same as OT-CFM: 2 GPU hours, about 122k updates, 6.6 ms per
+  output.
+- **Where:** `FLOW_NOTES.md`, "Stochastic conditional FM pilot";
+  `docs/flow/translation/condfm/` (its `README.md` lists the files), the
+  4-slide appendix `condfm/slides/condfm_appendix.pdf`.
 
 ## Where everything is
 
@@ -819,7 +913,9 @@ A sequence of cheap diagnostics, then controls:
 - `docs/flow/translation/`: the PYTHIA -> JEWEL translation pilot (Part
   12): data set manifest and parent split lists, run configs, solver
   checks, test tables and figures, the appendix
-  (`slides/translation_appendix.pdf`); `README.md` lists them.
+  (`slides/translation_appendix.pdf`), the OT-FM and the OT-FM-against-
+  CycleGAN decks; `README.md` lists them. `condfm/`: the stochastic pilot
+  (Part 13), with its own `README.md`.
 - `scripts/flow/`: all code:
   - `fm_common.py`: the models;
   - `fm_train.py`, `fm_eval.py`, `fm_compare.py`: train, score, compare;
@@ -837,6 +933,9 @@ A sequence of cheap diagnostics, then controls:
 
 - Whether the PYTHIA -> JEWEL OT-CFM map is the same jet by jet for other
   seeds, and how much it changes with the matching rule (Part 12).
+- Which pairing should define a conditional translation: the minibatch-OT
+  pairs keep a jet's shape class, not its energy (Part 13).
+- CycleGAN at 8 and 24 hours of training (Part 12; running).
 
 - A small paired HYBRID sample (several medium versions per vacuum shower),
   obtained from the authors, to measure how random the modification is. It

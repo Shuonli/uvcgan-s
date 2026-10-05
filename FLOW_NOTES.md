@@ -3722,6 +3722,198 @@ checkpoint, 2000 PYTHIA val inputs against JEWEL val, midpoint 128 against
   not repaired by extra losses or post-processing. More spread is not by
   itself better; the soft arm is judged on the same items as the hard one.
 
+### Pilot results (jobs 20512-20513 training, 20518-20519 solver checks and outputs, 20521-20522 second sampler seed, 20524-20525 pair diagnostics, 20520 and 20551 report)
+
+`docs/flow/translation/condfm/` (README lists every file); appendix
+`condfm/slides/condfm_appendix.pdf`.
+
+**Training** (one A6000 each, side by side on dahlia, 16:29-18:31;
+`condfm/configs/`):
+
+| run | updates | updates / s | OT plan share | peak GB |
+| :--- | ---: | ---: | ---: | ---: |
+| hard (exact plan, CPU) | 122,390 | 17.0 | 10.0% | 3.5 |
+| soft (entropic plan, GPU) | 121,480 | 16.9 | 10.6% | 3.5 |
+| OT-FM, for scale | 122,720 | 17.0 | 10.4% | 3.5 |
+
+The entropic plan met its row tolerance in every logged interval (L1 error
+5e-5); 74% of a batch's soft targets are distinct.
+
+**Validation curves** (`curves.csv`, `tr_curves.png`; 10k val inputs, midpoint
+128, the seed-0 noise; descriptive): mean W1/sigma of the 7 observables
+- hard 0.067 at 10 min, 0.029 at 1 h, 0.022 at 2 h, still falling slowly;
+- soft 0.071, 0.028, 0.025, flat from 40 min (0.025-0.031);
+- OT-FM (32 NFE) 0.024-0.025 from 40 min.
+- The input correlations do not move from the first checkpoint on: E 0.17
+  (hard) and 0.16 (soft), girth 0.73 and 0.71: what the pairs carry (below).
+
+**Solver (validation, 2000 inputs; `solver_check_{hard,soft}_ode128.csv`):**
+midpoint 128 and 256 from the same noise differ per jet by 0.005 (hard) and
+0.0045 GeV (soft) in cone E and 0.0002 GeV per tower; the largest W1/sigma
+shift is 0.0023 (bootstrap sd >= 0.005). Two different noises at 256 differ
+by 13.4 GeV and 0.96 GeV per tower: the solver's share is 0.04%. **Resolved;
+frozen at 128 NFE** for both (6.6 ms per sample at batch 2000). Two noises
+also move W1(E) on these 2000 inputs by 0.04: at this size the benchmark's
+sampling variability is large.
+
+**Test: population, one sample per input** (`population.csv` etc.; 20k each,
+sampler seed 0; W1/sigma after E >= 10 GeV; bootstrap sd 0.004-0.010):
+
+| | pass | E | mass | girth | p_T^D | z_lead | z_g | R_g | corr. E | girth | own input |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| JEWEL ref | 1 | 0.011 | 0.014 | 0.009 | 0.018 | 0.019 | 0.012 | 0.008 | | | |
+| random JEWEL | 1 | 0.019 | 0.024 | 0.011 | 0.010 | 0.011 | 0.005 | 0.010 | 0.01 | 0.00 | 0.50 |
+| identity | 1 | 0.546 | 0.881 | 0.105 | 0.264 | 0.232 | 0.034 | 0.158 | 1 | 1 | 1 |
+| OT-FM | 0.995 | 0.025 | 0.021 | 0.012 | 0.010 | 0.008 | 0.017 | 0.012 | 0.94 | 0.99 | 1.00 |
+| **cond. FM, hard** | 0.993 | 0.055 | 0.055 | 0.017 | 0.015 | 0.012 | 0.006 | 0.013 | 0.19 | 0.72 | 0.92 |
+| **cond. FM, soft** | 0.992 | 0.056 | 0.059 | 0.020 | 0.019 | 0.017 | 0.007 | 0.017 | 0.18 | 0.71 | 0.92 |
+| alpha-DSBM | 0.999 | 0.256 | 0.325 | 0.056 | 0.112 | 0.099 | 0.036 | 0.073 | 0.80 | 0.98 | 1.00 |
+| CycleGAN, 2 h | 1 | 3.91 | 3.33 | 0.143 | 0.657 | 0.579 | 0.123 | 0.220 | 0.85 | 0.99 | 1.00 |
+
+- **Shapes:** girth, p_T^D, z_lead, z_g and R_g within 3 sd of the
+  JEWEL-vs-JEWEL reference for both arms; at fixed energy girth 0.020 /
+  0.021 and z_lead 0.028 / 0.036 (OT-FM 0.018, 0.024); refound jets 0.006-
+  0.021 except pT and mass.
+- **E and mass:** 2.2-2.9x OT-FM's distance; against OT-FM 2.7 and 2.9
+  combined sd (hard), 2.7 and 3.4 (soft). The outputs have too many jets
+  above 50 GeV (2.2% against JEWEL's 1.4%; above 55 GeV 0.8% against 0.3%).
+  Refound pT 0.047 / 0.046.
+- **A second sampler seed** (same model and inputs; `cf_seeds.csv`) moves
+  every W1 by at most 0.011 (E: 0.057 for both): about one bootstrap sd.
+- **Single samples are sharp:** occupancy above 0.01 GeV 28.7 / 28.8 (JEWEL
+  28.6), above 1 GeV 5.88 / 5.90 (5.85), energy in sub-0.5 GeV towers 2.74 /
+  2.75 (2.71), leading tower 9.78 / 9.75 GeV (9.68), core 0.436 (0.435);
+  no soft-floor or flattening flag. Below 0.01 GeV they fill empty towers
+  as OT-FM does (42 non-zero cone towers against JEWEL's 33; the
+  log-energy representation).
+- **Dependence:** beyond random JEWEL by the pre-registered rule, but weak in
+  energy. E 0.19 / 0.18 (sd 0.007), mass 0.25 / 0.24, girth 0.72 / 0.71, core
+  0.72 / 0.70, leading tower 0.14 / 0.12; an output is closer in shape to
+  its own input than to another for 92% (OT-FM 100%); shape EMD to it 0.233
+  / 0.237 (OT-FM 0.041), to another input 0.465.
+  - Median output E by input E (hard): 22.7 GeV for 20-25 GeV inputs, 25.4
+    at 25-30, 27.8 at 30-40, 29.9 at 40-50 and at 50-70. The output energy
+    is mostly drawn from the JEWEL spectrum, whatever the input's.
+
+**Test: 8 samples of the first 1000 inputs** (`cf_*.csv`; bootstrap over
+inputs):
+- **Spread within one input** (pooled sd of the 8 samples), against the sd
+  across inputs of the per-input mean, and against JEWEL's population sd:
+
+| | E | mass | girth | p_T^D | z_lead | z_g | R_g | lead | core |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| hard: within / across inputs | 2.08 | 1.99 | 0.82 | 1.91 | 2.08 | 2.70 | 1.83 | 2.42 | 0.83 |
+| hard: within / JEWEL sd | 0.98 | 0.96 | 0.65 | 0.91 | 0.93 | 1.00 | 0.93 | 0.99 | 0.65 |
+| soft: within / across inputs | 2.12 | 2.05 | 0.85 | 1.97 | 2.13 | 2.67 | 1.88 | 2.46 | 0.86 |
+| the hard plan's own targets: within / across | 2.61 | 2.47 | 0.86 | 2.35 | 2.71 | 5.84 | 2.17 | 3.62 | 0.88 |
+| alpha-DSBM: within / across | 0.58 | 0.42 | 0.16 | 0.41 | 0.48 | 0.97 | 0.53 | 0.66 | 0.18 |
+
+  - Within-input sd of E 9.4 GeV (hard and soft): 98% of JEWEL's population
+    sd; two samples of one jet differ by 13.2 GeV rms in cone E and 0.94
+    GeV rms per tower.
+  - **Diversity is not mainly energy:** p_T^D, z_lead, z_g and R_g vary
+    within one input as much as across all JEWEL jets; girth and core 65%
+    as much (they are what the input fixes best).
+  - The fluctuations are coherent jets, not noise around a mean: within an
+    input E goes with the leading tower (r 0.78) and mass (0.74), p_T^D with
+    z_lead (0.97), girth against core (-0.83).
+  - Against the size of the change: the within-input sd is 0.80 of the rms
+    change E_out - E_in (girth 0.93); most of each sample's change is its
+    spread.
+- **Shape distances** (normalised-shape EMD, mean over inputs; sd 0.002-0.005):
+
+| | two samples, same input | sample to its input | sample to OT-FM's output | sample to an unrelated input |
+| :--- | ---: | ---: | ---: | ---: |
+| hard | 0.290 | 0.232 | 0.236 | 0.464 |
+| soft | 0.295 | 0.237 | 0.241 | 0.463 |
+| the hard plan's own targets | 0.290 | 0.235 | 0.239 | 0.463 |
+| alpha-DSBM | 0.071 | 0.056 | 0.060 | 0.458 |
+
+  OT-FM's output is 0.041 from its input; unrelated inputs are 0.453 apart.
+- **It is the pairing's conditional distribution, learned faithfully**
+  (`cf_spread.csv`, `coupling_audit_corr.csv`; `condfm_checks.py
+  --partners`: each of the 1000 inputs placed in 2000 training-like batches
+  with random JEWEL training jets, about 500 targets per input and plan):
+  - correlation of a sample with its input / of a plan's target with it: E
+    0.17 / 0.16, mass 0.25 / 0.25, girth 0.73 / 0.72, z_lead 0.24 / 0.24,
+    core 0.72 / 0.71 (hard); within-input sd of E 9.4 / 9.1 GeV; shape EMD
+    between two of them 0.290 / 0.290.
+  - On the audit's training pairs, r(E) is 0.17 (hard) and 0.16 (soft)
+    against 0.00 for random pairs; girth 0.71 / 0.70. Minibatch OT on the
+    squared L2 of standardised log-energy canvases pairs jets by their
+    tower pattern, and barely by their total energy.
+  - OT-FM's per-jet relation (E r 0.94) is not in its pairs either: it comes
+    from the deterministic flow, which averages over many pairs and cannot
+    scatter one input.
+- **Condition swap at fixed noise** (`cf_swap.csv`; input i's noise with
+  input k's jet, k a fixed shift of i):
+  - closer in shape to k's own input than to i's: 93% / 93%; closer to k's
+    own sample than to i's (the noise-mate): 66% / 64% (sd 0.015). EMD to k's
+    input 0.229 (a normal sample: 0.232), to i's 0.457;
+  - E of the swapped output correlates with k's input (0.21), not with i's
+    (-0.04);
+  - the noise carries a shared fluctuation: the deviation from the
+    condition's mean output correlates between noise-mates by 0.39 (E) and
+    0.52 (girth), 0.10-0.13 for z_lead and p_T^D (0.02 for other noises).
+  - So the condition sets the shape class (width, core), the noise most of
+    the energy and part of the width.
+- **Per-sample tails** (`cf_tails.csv`): samples with core fraction below
+  JEWEL test's 5% quantile 5.1%, with sub-0.5 GeV energy above its 95%
+  quantile 5.4% / 5.5%, z_lead below its 5% 4.7%: JEWEL's own rates. No
+  flattened cores or diffuse energy in single samples.
+- **hard against soft, same input and noise:** shape EMD 0.012 and 0.78
+  GeV rms apart (two noises: 0.29 and 13 GeV). The entropic plan at reg 7
+  changes the trained conditional map by 4-6% of its spread.
+- **Displays** (`cf_samples_{hard,soft}.png`, `cf_samples_slide.png`,
+  `cf_profiles.png`; the five fixed inputs, every sample separately): each
+  sample is a sharp, distinct jet. The 8 hard samples of the 40.4 GeV input
+  span 29.6-52.9 GeV with leading towers of 6.9-27.5 GeV (input 10.1); those
+  of the 34.7 GeV input 9.1-53.7 GeV. Their radial profiles scatter around
+  the input's. Same-seed samples of the two arms are nearly identical
+  images.
+
+**Reading, as fixed before training** (`cf_verdict.csv`):
+
+| item | hard | soft |
+| :--- | :--- | :--- |
+| toward JEWEL (>= 4 of 7 marginals, both joints) | yes (6 of 7; z_g was already consistent) | yes (6 of 7) |
+| no observable 3 sd worse than OT-FM | yes (E 2.7, mass 2.9 sd) | **no** (mass 3.4 sd) |
+| input dependence beyond random JEWEL | yes | yes |
+| sharp samples (no flag; tails <= 10%) | yes (5.1%, 5.4%) | yes (5.1%, 5.5%) |
+| solver resolved | yes (128) | yes (128) |
+| diversity above numerical error | yes (2500x) | yes |
+| conditioning used (swap above 0.5 by 3 se) | yes (0.66) | yes (0.64) |
+| **useful** | **yes** | no |
+
+**What this establishes:**
+- Noise-to-target conditional FM with the PYTHIA jet as an input, trained
+  2 GPU-hours on minibatch-OT pairs, generates individually sharp jets with
+  JEWEL's substructure, a resolved ODE, and diversity far above numerical
+  error, at OT-FM's cost per sample.
+- Its conditional distribution is its pairing's, reproduced closely: the
+  samples of one input share part of its width and core and almost none of
+  its energy. Within one input they spread over nearly the whole JEWEL range
+  of E, p_T^D, z_lead, z_g and R_g.
+- The entropic plan at the pre-registered support (4 targets) changes
+  nothing measurable: minibatch OT pairs already vary from batch to batch as
+  much as the entropic draws.
+- So the hard arm is "useful" by the letter of the pre-registration, which
+  set no ceiling on the spread; the spread it has is not a modest
+  modification of the input but most of the JEWEL population.
+
+**What it does not establish:**
+- a physical medium response or a calibrated per-jet uncertainty: the
+  spread is the pairing's, an algorithmic choice; no per-jet truth exists;
+- training-seed variability: one seed per arm. The two arms share seed,
+  batches, times and noise, so their near-identity is the effect of the
+  plan, not a seed spread. Sampling variability is measured: a second
+  sampler seed moves the population W1 by about one bootstrap sd;
+- that a pairing keeping more of the input's energy would do as well; that
+  is a different coupling, not tried.
+- No follow-up is run. A conditional distribution tied to the input's pT
+  needs a pairing that ties it (a cost or batch size that weights energy);
+  choosing one is a modelling decision that unpaired data cannot settle.
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything
@@ -3803,13 +3995,34 @@ time and NFE, `checkpoints/`, `evals/closure_{val,train}_sde30.csv`):
 Paired noisy-interpolant pilot: `docs/flow/bench/README.md` (end).
 
 PYTHIA -> JEWEL translation pilot: `docs/flow/translation/README.md` and the
-end of its section above.
+end of its section above. The CycleGAN baseline and the stochastic
+conditional FM pilot: `docs/flow/translation/README.md` and
+`docs/flow/translation/condfm/README.md`.
 
-## Status (2026-09-28 23:00)
+## Status (2026-10-05 19:10)
 
-All runs have ended; nothing is running.
+Running: the CycleGAN baseline (job 20490, to 24 h of training time) and its
+evaluation chains at 8 h (job 20505, about 21:30) and 24 h (job 20506, about
+13:30 tomorrow), which rebuild `docs/flow/translation/slides/translation_deck.pdf`.
 
-- **Latest: the PYTHIA -> JEWEL translation pilot** (section above;
+- **Latest: the stochastic conditional FM pilot** (section above; appendix
+  `docs/flow/translation/condfm/slides/condfm_appendix.pdf`).
+  - Noise-to-target conditional FM, the PYTHIA jet as an input, pairs from
+    minibatch OT (hard) or entropic OT (soft, reg 7); 2 GPU h each; the ODE
+    resolved at 128 NFE.
+  - Sharp single jets with JEWEL's substructure (E and mass at 2-3x OT-FM's
+    distance); diversity 2500x the solver error.
+  - But each jet's samples spread over most of the JEWEL population: the
+    output energy barely follows the input (r 0.19; OT-FM 0.94), as in the
+    training pairs themselves (r 0.17). The model learns its pairing's
+    conditional distribution faithfully; that pairing carries the input's
+    shape class, not its energy.
+  - The soft plan changes nothing measurable. Pre-registered reading: hard
+    useful by the letter, soft not (mass 3.4 sd behind OT-FM).
+- **CycleGAN at the matched 2 hours** (section "CycleGAN baseline"): moves no
+  observable toward JEWEL (cone pT about doubled, cores too hard), keeps its
+  inputs; OT-FM is better in all seven.
+- **Earlier: the PYTHIA -> JEWEL translation pilot** (section above;
   appendix `docs/flow/translation/slides/translation_appendix.pdf`).
   - **Data:** its own set of clean jets, split by parent; 7.2% of the
     PYTHIA images were exact copies across files and were dropped.
@@ -3848,6 +4061,9 @@ All runs have ended; nothing is running.
   - whether the OT-CFM translation's per-jet map is reproducible across
     seeds and how it depends on the cost (the closure test showed the cost
     decides the per-jet correspondence);
+  - which pairing should define a conditional (stochastic) translation: the
+    minibatch-OT pairs tie a jet's shape class but not its energy;
+  - CycleGAN at 8 and 24 hours;
   - a paired HYBRID sample with several medium realisations per vacuum
     shower;
   - why the background-only flow's field stops short in the core.

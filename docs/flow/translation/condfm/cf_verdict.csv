@@ -1,0 +1,3 @@
+model,marginals_moved,joints_moved,population_rule,worse_than_ot_fm,better_than_ot_fm,competitive_with_ot_fm,dependence_beyond_random,soft_floor,flattening,core_low_share,soft_high_share,sharp_samples,solver_adequate,solver_E_over_two_noises,diversity_above_numerical,swap_follows_condition,conditioning_used,useful
+CondFM hard OT,6,True,True,-,-,True,True,False,False,0.050875,0.0535,True,True,0.0004004552134767,True,0.662,True,True
+CondFM soft OT,6,True,True,mass,-,False,True,False,False,0.050625,0.055375,True,True,0.0003342241040631,True,0.643,True,False

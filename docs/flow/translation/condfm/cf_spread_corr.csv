@@ -1,0 +1,244 @@
+model,a,b,r
+CondFM hard OT,E,E,1.0
+CondFM hard OT,E,mass,0.7373710142195952
+CondFM hard OT,E,girth,-0.2889529136514368
+CondFM hard OT,E,ptd,0.39610586184375485
+CondFM hard OT,E,zlead,0.3654574313670061
+CondFM hard OT,E,zg,-0.051078594646496944
+CondFM hard OT,E,rg,-0.395795837928986
+CondFM hard OT,E,lead,0.7766072245108829
+CondFM hard OT,E,core,0.19528233011881685
+CondFM hard OT,mass,E,0.7373710142195952
+CondFM hard OT,mass,mass,1.0
+CondFM hard OT,mass,girth,0.08610370377843424
+CondFM hard OT,mass,ptd,-0.06546617313299251
+CondFM hard OT,mass,zlead,-0.045753657265165774
+CondFM hard OT,mass,zg,-0.03141893108366315
+CondFM hard OT,mass,rg,0.09171190575115942
+CondFM hard OT,mass,lead,0.3398064403216301
+CondFM hard OT,mass,core,-0.07021193472962534
+CondFM hard OT,girth,E,-0.2889529136514368
+CondFM hard OT,girth,mass,0.08610370377843424
+CondFM hard OT,girth,girth,1.0
+CondFM hard OT,girth,ptd,-0.2541199816005004
+CondFM hard OT,girth,zlead,-0.2387611577089154
+CondFM hard OT,girth,zg,0.07769632255668547
+CondFM hard OT,girth,rg,0.4400683831710463
+CondFM hard OT,girth,lead,-0.29959890462137345
+CondFM hard OT,girth,core,-0.8343627641571585
+CondFM hard OT,ptd,E,0.39610586184375485
+CondFM hard OT,ptd,mass,-0.06546617313299251
+CondFM hard OT,ptd,girth,-0.2541199816005004
+CondFM hard OT,ptd,ptd,1.0
+CondFM hard OT,ptd,zlead,0.9727054497723164
+CondFM hard OT,ptd,zg,-0.13189853323579476
+CondFM hard OT,ptd,rg,-0.41672592621007976
+CondFM hard OT,ptd,lead,0.8274965620274819
+CondFM hard OT,ptd,core,0.17871671331694952
+CondFM hard OT,zlead,E,0.3654574313670061
+CondFM hard OT,zlead,mass,-0.045753657265165774
+CondFM hard OT,zlead,girth,-0.2387611577089154
+CondFM hard OT,zlead,ptd,0.9727054497723164
+CondFM hard OT,zlead,zlead,1.0
+CondFM hard OT,zlead,zg,-0.19019691054244137
+CondFM hard OT,zlead,rg,-0.3587803110509009
+CondFM hard OT,zlead,lead,0.8255909186066499
+CondFM hard OT,zlead,core,0.1718944269451129
+CondFM hard OT,zg,E,-0.051078594646496944
+CondFM hard OT,zg,mass,-0.03141893108366315
+CondFM hard OT,zg,girth,0.07769632255668547
+CondFM hard OT,zg,ptd,-0.13189853323579476
+CondFM hard OT,zg,zlead,-0.19019691054244137
+CondFM hard OT,zg,zg,1.0
+CondFM hard OT,zg,rg,-0.23482973747354147
+CondFM hard OT,zg,lead,-0.14705859005432953
+CondFM hard OT,zg,core,-0.06655418677241785
+CondFM hard OT,rg,E,-0.395795837928986
+CondFM hard OT,rg,mass,0.09171190575115942
+CondFM hard OT,rg,girth,0.4400683831710463
+CondFM hard OT,rg,ptd,-0.41672592621007976
+CondFM hard OT,rg,zlead,-0.3587803110509009
+CondFM hard OT,rg,zg,-0.23482973747354147
+CondFM hard OT,rg,rg,1.0
+CondFM hard OT,rg,lead,-0.4354329506547143
+CondFM hard OT,rg,core,-0.29804973571759774
+CondFM hard OT,lead,E,0.7766072245108829
+CondFM hard OT,lead,mass,0.3398064403216301
+CondFM hard OT,lead,girth,-0.29959890462137345
+CondFM hard OT,lead,ptd,0.8274965620274819
+CondFM hard OT,lead,zlead,0.8255909186066499
+CondFM hard OT,lead,zg,-0.14705859005432953
+CondFM hard OT,lead,rg,-0.4354329506547143
+CondFM hard OT,lead,lead,1.0
+CondFM hard OT,lead,core,0.20355979573215952
+CondFM hard OT,core,E,0.19528233011881685
+CondFM hard OT,core,mass,-0.07021193472962534
+CondFM hard OT,core,girth,-0.8343627641571585
+CondFM hard OT,core,ptd,0.17871671331694952
+CondFM hard OT,core,zlead,0.1718944269451129
+CondFM hard OT,core,zg,-0.06655418677241785
+CondFM hard OT,core,rg,-0.29804973571759774
+CondFM hard OT,core,lead,0.20355979573215952
+CondFM hard OT,core,core,1.0
+CondFM soft OT,E,E,1.0
+CondFM soft OT,E,mass,0.7338439297278199
+CondFM soft OT,E,girth,-0.29440847195632874
+CondFM soft OT,E,ptd,0.392360197007904
+CondFM soft OT,E,zlead,0.363480322151693
+CondFM soft OT,E,zg,-0.03948868707399344
+CondFM soft OT,E,rg,-0.3983612962057184
+CondFM soft OT,E,lead,0.7749136285936482
+CondFM soft OT,E,core,0.20102648121925412
+CondFM soft OT,mass,E,0.7338439297278199
+CondFM soft OT,mass,mass,1.0
+CondFM soft OT,mass,girth,0.08184206709078065
+CondFM soft OT,mass,ptd,-0.0766002752411055
+CondFM soft OT,mass,zlead,-0.0545975047575731
+CondFM soft OT,mass,zg,-0.026019740579117493
+CondFM soft OT,mass,rg,0.09522719323702751
+CondFM soft OT,mass,lead,0.330185915576076
+CondFM soft OT,mass,core,-0.0667090718095649
+CondFM soft OT,girth,E,-0.29440847195632874
+CondFM soft OT,girth,mass,0.08184206709078065
+CondFM soft OT,girth,girth,1.0
+CondFM soft OT,girth,ptd,-0.25232161030615846
+CondFM soft OT,girth,zlead,-0.23719345861409802
+CondFM soft OT,girth,zg,0.060803895806293924
+CondFM soft OT,girth,rg,0.44624156105424506
+CondFM soft OT,girth,lead,-0.3020501010731243
+CondFM soft OT,girth,core,-0.8380379157091252
+CondFM soft OT,ptd,E,0.392360197007904
+CondFM soft OT,ptd,mass,-0.0766002752411055
+CondFM soft OT,ptd,girth,-0.25232161030615846
+CondFM soft OT,ptd,ptd,1.0
+CondFM soft OT,ptd,zlead,0.972772995792437
+CondFM soft OT,ptd,zg,-0.1224753575715917
+CondFM soft OT,ptd,rg,-0.4243149395249303
+CondFM soft OT,ptd,lead,0.8260347930613673
+CondFM soft OT,ptd,core,0.177846114422065
+CondFM soft OT,zlead,E,0.363480322151693
+CondFM soft OT,zlead,mass,-0.0545975047575731
+CondFM soft OT,zlead,girth,-0.23719345861409802
+CondFM soft OT,zlead,ptd,0.972772995792437
+CondFM soft OT,zlead,zlead,1.0
+CondFM soft OT,zlead,zg,-0.1805213756258572
+CondFM soft OT,zlead,rg,-0.36748323034577385
+CondFM soft OT,zlead,lead,0.8250045690724743
+CondFM soft OT,zlead,core,0.17073692470529833
+CondFM soft OT,zg,E,-0.03948868707399344
+CondFM soft OT,zg,mass,-0.026019740579117493
+CondFM soft OT,zg,girth,0.060803895806293924
+CondFM soft OT,zg,ptd,-0.1224753575715917
+CondFM soft OT,zg,zlead,-0.1805213756258572
+CondFM soft OT,zg,zg,1.0
+CondFM soft OT,zg,rg,-0.23553235020162072
+CondFM soft OT,zg,lead,-0.13392157947196842
+CondFM soft OT,zg,core,-0.050169092804102686
+CondFM soft OT,rg,E,-0.3983612962057184
+CondFM soft OT,rg,mass,0.09522719323702751
+CondFM soft OT,rg,girth,0.44624156105424506
+CondFM soft OT,rg,ptd,-0.4243149395249303
+CondFM soft OT,rg,zlead,-0.36748323034577385
+CondFM soft OT,rg,zg,-0.23553235020162072
+CondFM soft OT,rg,rg,1.0
+CondFM soft OT,rg,lead,-0.44160943626830046
+CondFM soft OT,rg,core,-0.3107687284199028
+CondFM soft OT,lead,E,0.7749136285936482
+CondFM soft OT,lead,mass,0.330185915576076
+CondFM soft OT,lead,girth,-0.3020501010731243
+CondFM soft OT,lead,ptd,0.8260347930613673
+CondFM soft OT,lead,zlead,0.8250045690724743
+CondFM soft OT,lead,zg,-0.13392157947196842
+CondFM soft OT,lead,rg,-0.44160943626830046
+CondFM soft OT,lead,lead,1.0
+CondFM soft OT,lead,core,0.20663350684720053
+CondFM soft OT,core,E,0.20102648121925412
+CondFM soft OT,core,mass,-0.0667090718095649
+CondFM soft OT,core,girth,-0.8380379157091252
+CondFM soft OT,core,ptd,0.177846114422065
+CondFM soft OT,core,zlead,0.17073692470529833
+CondFM soft OT,core,zg,-0.050169092804102686
+CondFM soft OT,core,rg,-0.3107687284199028
+CondFM soft OT,core,lead,0.20663350684720053
+CondFM soft OT,core,core,1.0
+alpha-DSBM,E,E,1.0
+alpha-DSBM,E,mass,0.8494543051719262
+alpha-DSBM,E,girth,-0.3019590803936341
+alpha-DSBM,E,ptd,0.6537990300663419
+alpha-DSBM,E,zlead,0.5454436466837126
+alpha-DSBM,E,zg,-0.00858999981061474
+alpha-DSBM,E,rg,-0.23034359261754117
+alpha-DSBM,E,lead,0.8490183254257662
+alpha-DSBM,E,core,0.21843918064103734
+alpha-DSBM,mass,E,0.8494543051719262
+alpha-DSBM,mass,mass,1.0
+alpha-DSBM,mass,girth,-0.05244713467473152
+alpha-DSBM,mass,ptd,0.39190707164248556
+alpha-DSBM,mass,zlead,0.3233318344146871
+alpha-DSBM,mass,zg,0.005710543000422441
+alpha-DSBM,mass,rg,-0.03827578364208976
+alpha-DSBM,mass,lead,0.5928847392703493
+alpha-DSBM,mass,core,0.038338775654315246
+alpha-DSBM,girth,E,-0.3019590803936341
+alpha-DSBM,girth,mass,-0.05244713467473152
+alpha-DSBM,girth,girth,1.0
+alpha-DSBM,girth,ptd,-0.3752100761325996
+alpha-DSBM,girth,zlead,-0.32945580363552013
+alpha-DSBM,girth,zg,0.044376463925225915
+alpha-DSBM,girth,rg,0.25876895525517424
+alpha-DSBM,girth,lead,-0.3228352894193542
+alpha-DSBM,girth,core,-0.774905614073152
+alpha-DSBM,ptd,E,0.6537990300663419
+alpha-DSBM,ptd,mass,0.39190707164248556
+alpha-DSBM,ptd,girth,-0.3752100761325996
+alpha-DSBM,ptd,ptd,1.0
+alpha-DSBM,ptd,zlead,0.9416644189697537
+alpha-DSBM,ptd,zg,-0.11293402596059869
+alpha-DSBM,ptd,rg,-0.2702803317135319
+alpha-DSBM,ptd,lead,0.8847668429679438
+alpha-DSBM,ptd,core,0.28201557161753676
+alpha-DSBM,zlead,E,0.5454436466837126
+alpha-DSBM,zlead,mass,0.3233318344146871
+alpha-DSBM,zlead,girth,-0.32945580363552013
+alpha-DSBM,zlead,ptd,0.9416644189697537
+alpha-DSBM,zlead,zlead,1.0
+alpha-DSBM,zlead,zg,-0.14066851039433448
+alpha-DSBM,zlead,rg,-0.22439886409003695
+alpha-DSBM,zlead,lead,0.84843205888318
+alpha-DSBM,zlead,core,0.24250678056825384
+alpha-DSBM,zg,E,-0.00858999981061474
+alpha-DSBM,zg,mass,0.005710543000422441
+alpha-DSBM,zg,girth,0.044376463925225915
+alpha-DSBM,zg,ptd,-0.11293402596059869
+alpha-DSBM,zg,zlead,-0.14066851039433448
+alpha-DSBM,zg,zg,1.0
+alpha-DSBM,zg,rg,-0.44953367302257047
+alpha-DSBM,zg,lead,-0.09365017840887646
+alpha-DSBM,zg,core,-0.0370148927796648
+alpha-DSBM,rg,E,-0.23034359261754117
+alpha-DSBM,rg,mass,-0.03827578364208976
+alpha-DSBM,rg,girth,0.25876895525517424
+alpha-DSBM,rg,ptd,-0.2702803317135319
+alpha-DSBM,rg,zlead,-0.22439886409003695
+alpha-DSBM,rg,zg,-0.44953367302257047
+alpha-DSBM,rg,rg,1.0
+alpha-DSBM,rg,lead,-0.2415958670060984
+alpha-DSBM,rg,core,-0.17628019488951185
+alpha-DSBM,lead,E,0.8490183254257662
+alpha-DSBM,lead,mass,0.5928847392703493
+alpha-DSBM,lead,girth,-0.3228352894193542
+alpha-DSBM,lead,ptd,0.8847668429679438
+alpha-DSBM,lead,zlead,0.84843205888318
+alpha-DSBM,lead,zg,-0.09365017840887646
+alpha-DSBM,lead,rg,-0.2415958670060984
+alpha-DSBM,lead,lead,1.0
+alpha-DSBM,lead,core,0.2365006360835519
+alpha-DSBM,core,E,0.21843918064103734
+alpha-DSBM,core,mass,0.038338775654315246
+alpha-DSBM,core,girth,-0.774905614073152
+alpha-DSBM,core,ptd,0.28201557161753676
+alpha-DSBM,core,zlead,0.24250678056825384
+alpha-DSBM,core,zg,-0.0370148927796648
+alpha-DSBM,core,rg,-0.17628019488951185
+alpha-DSBM,core,lead,0.2365006360835519
+alpha-DSBM,core,core,1.0

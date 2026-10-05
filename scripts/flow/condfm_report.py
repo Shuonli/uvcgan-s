@@ -147,13 +147,17 @@ def spread_table(sets, o_in, o_ref, boot):
             val = stats(np.arange(n))
             bs  = np.array([ stats(i) for i in draws ])
             sd_ref = float(np.nanstd(o_ref[q]))
+            xx = np.broadcast_to(x[None], v.shape).ravel()
+            ok = np.isfinite(xx) & np.isfinite(v.ravel())
+            corr = float(np.corrcoef(xx[ok], v.ravel()[ok])[0, 1])
             rows.append({ 'model' : label, 'observable' : q,
                           'within_sd' : val[0], 'within_sd_sd' : bs[:, 0].std(),
                           'across_sd' : val[1], 'input_sd' : float(np.nanstd(x)),
                           'jewel_sd' : sd_ref, 'within_over_jewel_sd' : val[0] / sd_ref,
                           'rms_change' : val[2], 'rms_mean_change' : val[3],
                           'within_over_across' : val[4], 'within_over_across_sd' : bs[:, 4].std(),
-                          'within_over_change' : val[5], 'within_over_change_sd' : bs[:, 5].std() })
+                          'within_over_change' : val[5], 'within_over_change_sd' : bs[:, 5].std(),
+                          'corr_with_input' : corr })
     return pd.DataFrame(rows)
 
 def corr_table(sets):
@@ -195,6 +199,13 @@ def distance_pairs(sets, inp, det, other):
                               ('swap_to_noise_input', inp) ]:
                 pairs[(label, key)] = (sw, b)
                 owners[(label, key)] = np.arange(len(inp))
+    arms = { arm(l) : s for (l, s) in sets.items() if arm(l) and not s.get('coupling') }
+    if ('hard' in arms) and ('soft' in arms):
+        # the two models with the same noise (seeds 1000 + k) and input
+        (h, f) = (arms['hard']['multi'], arms['soft']['multi'])
+        pairs[('hard vs soft', 'same_noise_other_arm')] = (h.reshape(-1, 16, 16),
+                                                         f.reshape(-1, 16, 16))
+        owners[('hard vs soft', 'same_noise_other_arm')] = np.tile(np.arange(len(inp)), len(h))
     pairs[('deterministic', 'to_own_input')] = (det, inp)
     pairs[('deterministic', 'to_unrelated_input')] = (det, inp[other])
     pairs[('identity', 'to_unrelated_input')] = (inp, inp[other])
@@ -215,11 +226,19 @@ def distance_table(sets, emds, owners, det_label, n, boot):
         name = det_label if label == 'deterministic' else label
         rows.append({ 'model' : name, 'distance' : kind, 'shape_emd' : mean,
                       'shape_emd_sd' : sd, 'pairs' : int(np.isfinite(d).sum()) })
+    arms = { arm(l) : s for (l, s) in sets.items() if arm(l) and not s.get('coupling') }
+    if ('hard' in arms) and ('soft' in arms):
+        de = arms['hard']['obs']['E'] - arms['soft']['obs']['E']
+        rows.append({ 'model' : 'hard vs soft', 'distance' : 'same_noise_other_arm_E_rms_gev',
+                      'shape_emd' : float(np.sqrt(np.mean(de**2))), 'shape_emd_sd' : np.nan,
+                      'pairs' : int(de.size) })
     for (label, s) in sets.items():
         m = s['multi']
         (a, b) = (m[0::2], m[1::2])
         e = s['obs']['E']
         de = (e[0::2] - e[1::2])
+        if s.get('coupling'):
+            continue                 # targets of a plan: no tower comparison
         rows.append({ 'model' : label, 'distance' : 'two_samples_E_rms_gev',
                       'shape_emd' : float(np.sqrt(np.mean(de**2))), 'shape_emd_sd' : np.nan,
                       'pairs' : int(de.size) })
@@ -483,21 +502,29 @@ def fig_profiles(path, inp, det, sets, pick, qs, o_in, det_obs):
     fig.savefig(path, dpi = 200)
     plt.close(fig)
 
-def fig_spread(path, spread, dist, sets, det_label):
+def fig_spread(path, spread, dist, sets, det_label, refs = None):
     """Within-input sd over the across-input sd, per observable; shape
-    distances."""
+    distances. The couplings' own targets (refs) as markers over their arm."""
+    # pylint: disable=too-many-locals
     plt = plt_module()
     (fig, axes) = plt.subplots(1, 2, figsize = (7.0, 2.3), gridspec_kw = { 'width_ratios' : [ 1.45, 1 ] })
     ax = axes[0]
     labels = list(sets)
     width = 0.8 / len(labels)
+    xs = {}
     for (k, label) in enumerate(labels):
         d = spread[spread['model'] == label].set_index('observable').loc[Q]
         col = COLOURS.get(arm(label), '#898781')
         x = np.arange(len(Q)) + (k - (len(labels) - 1) / 2) * width
+        xs[arm(label)] = x
         ax.bar(x, d['within_over_across'], width * 0.92, color = col, label = label,
                yerr = d['within_over_across_sd'], error_kw = { 'lw' : 0.6, 'ecolor' : INK2 },
                hatch = None if arm(label) else '////', edgecolor = 'white', linewidth = 0.4)
+    for (k, label) in enumerate(l for l in (refs or {}) if arm(l) in xs):
+        d = spread[spread['model'] == label].set_index('observable').loc[Q]
+        ax.scatter(xs[arm(label)], d['within_over_across'], marker = 'D', s = 9,
+                   color = '#0b0b0b', zorder = 5,
+                   label = 'the plan\'s own targets' if k == 0 else None)
     ax.set_xticks(np.arange(len(Q)))
     ax.set_xticklabels([ trp.LABELS.get(q, q).replace(', GeV', '').replace(' (cone)', '')
                          for q in Q ], fontsize = 5.5, rotation = 30)
@@ -510,15 +537,22 @@ def fig_spread(path, spread, dist, sets, det_label):
               ('to_own_input', 'sample to\nits input'),
               ('to_deterministic_output', 'sample to\nOT-FM output'),
               ('to_unrelated_input', 'sample to an\nunrelated input') ]
+    xs = {}
     for (k, label) in enumerate(labels):
         d = dist[dist['model'] == label].set_index('distance')
         col = COLOURS.get(arm(label), '#898781')
         ys = [ d.loc[kk, 'shape_emd'] if kk in d.index else np.nan for (kk, _) in kinds ]
         es = [ d.loc[kk, 'shape_emd_sd'] if kk in d.index else np.nan for (kk, _) in kinds ]
         x = np.arange(len(kinds)) + (k - (len(labels) - 1) / 2) * width
+        xs[arm(label)] = x
         ax.bar(x, ys, width * 0.92, yerr = es, color = col, label = label,
                error_kw = { 'lw' : 0.6, 'ecolor' : INK2 },
                hatch = None if arm(label) else '////', edgecolor = 'white', linewidth = 0.4)
+    for (k, label) in enumerate(l for l in (refs or {}) if arm(l) in xs):
+        d = dist[dist['model'] == label].set_index('distance')
+        ys = [ d.loc[kk, 'shape_emd'] if kk in d.index else np.nan for (kk, _) in kinds ]
+        ax.scatter(xs[arm(label)], ys, marker = 'D', s = 9, color = '#0b0b0b', zorder = 5,
+                   label = 'the plan\'s own targets' if k == 0 else None)
     d = dist[dist['model'] == det_label].set_index('distance')
     ax.axhline(d.loc['to_own_input', 'shape_emd'], color = COLOURS['OT-FM'], lw = 1.0,
                ls = '-', label = f'{det_label} output to its input')
@@ -547,6 +581,19 @@ TEXNAME = { 'JEWEL ref' : 'JEWEL vs JEWEL', 'random JEWEL' : r'\keyrj random JEW
             'identity' : 'PYTHIA input', 'OT-FM' : r'\keyot OT-FM (deterministic)',
             'alpha-DSBM' : r'$\alpha$-DSBM ($\epsilon$ 0.25)' }
 
+SHORT = { 'JEWEL ref' : 'JEWEL vs JEWEL', 'random JEWEL' : r'\keyrj random JEWEL',
+          'identity' : 'PYTHIA input', 'OT-FM' : r'\keyot OT-FM',
+          'alpha-DSBM' : r'$\alpha$-DSBM' }
+
+def short(s):
+    if s in SHORT:
+        return SHORT[s]
+    if arm(s) and s.startswith('pairs'):
+        return r'\quad its pairs'
+    if arm(s):
+        return (r'\keyhd ' if arm(s) == 'hard' else r'\keysf ') + f'{arm(s)} OT'
+    return s
+
 def texname(s):
     if s in TEXNAME:
         return TEXNAME[s]
@@ -574,7 +621,7 @@ def population_tex(pop, dep, samples):
                        f"{d['preference_rate']:.2f}" ]
         else:
             cells += [ '', '', '' ]
-        lines.append(texname(s) + ' & ' + ' & '.join(cells) + r' \\')
+        lines.append(short(s) + ' & ' + ' & '.join(cells) + r' \\')
         if s == 'identity':
             lines.append(r'\midrule')
     return lines + END
@@ -608,7 +655,7 @@ def cost_tex(rep, labels):
     with open(os.path.join(rep, 'outputs.json'), encoding = 'utf-8') as f:
         info = json.load(f)
     lines = BEGIN('lrrrrrr') + [
-        r' & GPU h & updates & updates/s & OT share & network calls & ms / jet \\', r'\midrule' ]
+        r' & GPU h & updates & per s & OT & calls & ms/jet \\', r'\midrule' ]
     for label in labels:
         i = info.get(label, {})
         lat = f"{i['ms_per_jet']:.2f}" if 'ms_per_jet' in i else '--'
@@ -616,16 +663,64 @@ def cost_tex(rep, labels):
         c = cost[cost['model'] == label]
         if len(c):
             c = c.iloc[0]
-            lines.append(f"{texname(label)} & {c['gpu_h']:.2f} & {c['updates'] / 1e3:.0f}k & "
+            lines.append(f"{short(label)} & {c['gpu_h']:.2f} & {c['updates'] / 1e3:.0f}k & "
                          f"{c['train_updates_per_s']:.1f} & {100 * c['coupling_share']:.0f}\\% & "
                          f"{nfe} & {lat}" + r' \\')
         elif (label == 'alpha-DSBM') and (pilot['model'] == 'alpha-DSBM').any():
             c = pilot[pilot['model'] == 'alpha-DSBM'].iloc[0]
-            lines.append(f"{texname(label)} & {c['gpu_h']:.2f} & {c['updates'] / 1e3:.0f}k & "
+            lines.append(f"{short(label)} & {c['gpu_h']:.2f} & {c['updates'] / 1e3:.0f}k & "
                          f"-- & -- & {nfe} & {lat}" + r' \\')
         elif 'train_time' in i:
-            lines.append(f"{texname(label)} & {i['train_time'] / 3600:.2f} & "
+            lines.append(f"{short(label)} & {i['train_time'] / 3600:.2f} & "
                          f"{i['updates'] / 1e3:.0f}k & -- & -- & {nfe} & {lat}" + r' \\')
+    return lines + END
+
+def corr_tex(spread, o_in, det_obs, det_label, labels):
+    """Correlation of a sample's observable with its input's, the first 1000
+    test inputs: the deterministic map, each arm's 8 samples, and the targets
+    its plan assigns to the same inputs (what a perfect model reproduces)."""
+    qs = [ 'E', 'mass', 'girth', 'zlead', 'core' ]
+    head = { 'E' : '$p_T$', 'mass' : 'mass', 'girth' : 'girth', 'ptd' : '$p_T^D$',
+             'zlead' : r'$z_\mathrm{lead}$', 'core' : 'core', 'lead' : 'lead' }
+    lines = BEGIN('l' + 'r' * len(qs)) + [
+        r'$r$(sample, input) & ' + ' & '.join(head[q] for q in qs) + r' \\', r'\midrule' ]
+    def r_det(q):
+        (a, b) = (np.asarray(o_in[q], float), np.asarray(det_obs[q], float))
+        ok = np.isfinite(a) & np.isfinite(b)
+        return float(np.corrcoef(a[ok], b[ok])[0, 1])
+    lines.append(short(det_label) + ' & ' + ' & '.join(f'{r_det(q):.2f}' for q in qs) + r' \\')
+    for label in labels:
+        d = spread[spread['model'] == label].set_index('observable')
+        if d.empty:
+            continue
+        name = short(label)
+        lines.append(name + ' & ' + ' & '.join(f"{d.loc[q, 'corr_with_input']:.2f}" for q in qs)
+                     + r' \\')
+    return lines + END
+
+def pairs_tex(rep):
+    """The training pairs themselves (the coupling audit, condfm_checks.py):
+    how far a condition's target lies from it, and how much of its energy and
+    shape it shares; OT-FM's own per-jet change for scale (test jets, the
+    translation pilot's dependence table)."""
+    pairs = pd.read_csv(os.path.join(rep, 'coupling_audit_pairs.csv')).set_index('pairs')
+    corr = pd.read_csv(os.path.join(rep, 'coupling_audit_corr.csv')).set_index('pairs')
+    pilot = pd.read_csv(os.path.join(os.path.dirname(os.path.normpath(rep)), 'dependence.csv'))
+    ot = pilot[pilot['sample'] == 'OT-CFM'].iloc[0]
+    lines = BEGIN('lrrrr', 2) + [
+        r' & EMD & $r(p_T)$ & $r$(girth) & rms $\Delta p_T$ \\', r'\midrule' ]
+    names = { 'hard (exact plan)' : r'\keyhd exact plan (hard)',
+              'soft (entropic plan)' : r'\keysf entropic plan (soft)',
+              'random pairs' : 'random pairs' }
+    for (k, name) in names.items():
+        p = pairs.loc[k]
+        c = corr.loc[k]
+        lines.append(f"{name} & {p['shape_emd_mean']:.3f} & {c['corr_E']:.2f} & {c['corr_girth']:.2f} & "
+                     f"{p['dE_rms_gev']:.1f}" + r' \\')
+    rms = float(np.sqrt(ot['delta_E_mean']**2 + ot['delta_E_sd']**2))
+    lines += [ r'\midrule',
+               r'\keyot OT-FM output vs its input & ' + f"{ot['shape_emd_to_input']:.3f} & "
+               f"{ot['corr_E']:.2f} & {ot['corr_girth']:.2f} & {rms:.1f}" + r' \\' ]
     return lines + END
 
 def obs_tex(names):
@@ -638,27 +733,82 @@ def verdict_tex(verd):
     yes = lambda v: r'\textbf{yes}' if v else 'no'      # pylint: disable=unnecessary-lambda-assignment
     labels = list(verd['model'])
     items = [
-        ('moves toward JEWEL ($\\geq$ 4 of 7, both joints)',
+        ('toward JEWEL ($\\geq$ 4 of 7, both joints)',
          lambda v: f"{yes(v['population_rule'])} ({v['marginals_moved']} of 7)"),
-        ('competitive with OT-FM (none worse by 3 sd)',
+        ('none 3 sd worse than OT-FM',
          lambda v: yes(v['competitive_with_ot_fm']) + ('' if v['worse_than_ot_fm'] == '-'
-                                                       else f" (worse: {obs_tex(v['worse_than_ot_fm'])})")),
-        ('input dependence beyond random JEWEL', lambda v: yes(v['dependence_beyond_random'])),
-        ('sharp samples (no flag, tails $\\leq$ 10\\%)',
+                                                       else f" ({obs_tex(v['worse_than_ot_fm'])})")),
+        ('input dependence beyond random', lambda v: yes(v['dependence_beyond_random'])),
+        ('sharp samples (tails $\\leq$ 10\\%)',
          lambda v: yes(v['sharp_samples']) + f" ({100 * v['core_low_share']:.0f}\\%,"
                                              f" {100 * v['soft_high_share']:.0f}\\%)"),
         ('solver resolved', lambda v: yes(v['solver_adequate'])),
         ('diversity above numerical error', lambda v: yes(v['diversity_above_numerical'])),
-        ('conditioning used (swap)',
+        ('follows the condition (swap)',
          lambda v: yes(v['conditioning_used']) + f" ({100 * v['swap_follows_condition']:.0f}\\%)"),
         ('\\textbf{useful (all of the above)}', lambda v: yes(v['useful'])),
     ]
     lines = BEGIN('l' + 'l' * len(labels)) + [
-        ' & ' + ' & '.join(texname(l) for l in labels) + r' \\', r'\midrule' ]
+        ' & ' + ' & '.join(short(l) for l in labels) + r' \\', r'\midrule' ]
     for (name, fn) in items:
         lines.append(name + ' & ' + ' & '.join(fn(verd[verd['model'] == l].iloc[0])
                                                 for l in labels) + r' \\')
     return lines + END
+
+def seed_table(models, o_ref, pop, rows, device):
+    """Sampling variability of the population benchmark: W1 / sigma of the
+    fixed-crop observables for a second sampler seed (STEM-s1 outputs, the
+    same 20k inputs and trained model) against seed 0, with seed 0's
+    bootstrap sd. Training-seed variability is not measured."""
+    out = []
+    sel_r = o_ref['E'] >= te.MIN_JET
+    for (label, stem) in models:
+        (head, setting) = stem.split('__', 1)
+        path = os.path.join(te.output_dir(), f'{head}-s1__{setting}.npy')
+        if not os.path.exists(path):
+            continue
+        o1 = te.jet_observables(te.clip(np.load(path)), rows, device)
+        p0 = pop[pop['sample'] == label].iloc[0]
+        sel = o1['E'] >= te.MIN_JET
+        for q in te.OBS:
+            r = te.finite(o_ref[q][sel_r])
+            (w1, _) = te.w1_sigma(o1[q][sel], r, r.std())
+            out.append({ 'model' : label, 'observable' : q, 'w1_seed0' : p0[f'w1_{q}'],
+                         'w1_seed1' : w1, 'diff' : w1 - p0[f'w1_{q}'],
+                         'boot_sd_seed0' : p0[f'w1_{q}_sd'],
+                         'acceptance_seed1' : float(sel.mean()) })
+    return pd.DataFrame(out)
+
+K_PAIRS = 64
+
+def coupling_sets(n, device):
+    """The couplings' own conditional distributions (condfm_checks.py
+    --partners): for each of the n inputs its first K_PAIRS targets under each
+    plan (observables), and the canvases of its first two (shape EMD). The
+    noise-to-target model is trained to reproduce these; a perfect model's
+    spread and input dependence equal theirs."""
+    path = os.path.join(fc.translation_root(), 'condfm', 'outputs', 'partners.npz')
+    if not os.path.exists(path):
+        return {}
+    pool = np.load(fc.cache_path('tr_jewel'), mmap_mode = 'r')
+    prow = te.train_meta('jewel')['row']
+    out = {}
+    with np.load(path) as f:
+        for name in [ 'hard', 'soft' ]:
+            (i, k) = f[name]
+            order = np.argsort(i, kind = 'stable')        # by input, draws in batch order
+            (i, k) = (i[order], k[order])
+            starts = np.searchsorted(i, np.arange(n))
+            counts = np.bincount(i, minlength = n)
+            assert counts.min() >= K_PAIRS, counts.min()
+            pick = k[starts[None, :] + np.arange(K_PAIRS)[:, None]]          # (K, n)
+            uniq, inv = np.unique(pick, return_inverse = True)
+            o = te.jet_observables(np.asarray(pool[uniq]).astype(np.float32), prow[uniq], device)
+            obs = { q : np.asarray(v, float)[inv.reshape(pick.shape)] for (q, v) in o.items() }
+            canv = np.asarray(pool[pick[:2].ravel()]).astype(np.float32).reshape(2, n, 16, 16)
+            out[f'pairs, {name} OT'] = { 'obs' : obs, 'multi' : canv, 'swap' : None,
+                                         'coupling' : True, 'min_count' : int(counts.min()) }
+    return out
 
 def main():
     # pylint: disable=too-many-locals,too-many-statements
@@ -700,14 +850,15 @@ def main():
                               te.jet_observables(s['swap'], rows, device).items() }
         print(f'observables: {label}', flush = True)
 
-    spread = spread_table(sets, o_in, o_ref, cmdargs.boot)
+    refs = coupling_sets(n, device)
+    spread = spread_table({ **sets, **refs }, o_in, o_ref, cmdargs.boot)
     spread.to_csv(os.path.join(rep, 'cf_spread.csv'), index = False)
     corr_table(sets).to_csv(os.path.join(rep, 'cf_spread_corr.csv'), index = False)
 
     other = (np.arange(n) + 1 + int(np.random.default_rng(3).integers(n - 1))) % n
-    (pairs, owners) = distance_pairs(sets, inp, det, other)
+    (pairs, owners) = distance_pairs({ **sets, **refs }, inp, det, other)
     emds = shape_emds(pairs, cmdargs.procs)
-    dist = distance_table(sets, emds, owners, det_label, n, cmdargs.boot)
+    dist = distance_table({ **sets, **refs }, emds, owners, det_label, n, cmdargs.boot)
     dist.to_csv(os.path.join(rep, 'cf_distances.csv'), index = False)
     swap = swap_table(sets, emds, o_in, cmdargs.boot)
     swap.to_csv(os.path.join(rep, 'cf_swap.csv'), index = False)
@@ -727,6 +878,9 @@ def main():
         sc = pd.read_csv(os.path.join(rep, path))
         rows_ = sc[sc['setting'].astype(str).str.contains('same noise')]
         solver[label] = rows_.iloc[-1] if len(rows_) else None
+    test_obs_rows = test['row']
+    seeds = seed_table(specs(cmdargs.models), o_ref, pop, test_obs_rows, device)
+    seeds.to_csv(os.path.join(rep, 'cf_seeds.csv'), index = False)
     verd = verdict(cmdargs, sets, pop, ver, dist, swap, tails, solver)
     verd.to_csv(os.path.join(rep, 'cf_verdict.csv'), index = False)
 
@@ -739,7 +893,10 @@ def main():
     fig_profiles(os.path.join(rep, 'cf_profiles.png'), inp, det, sets, pick, qs, o_in, det_obs)
     fig_samples_slide(os.path.join(rep, 'cf_samples_slide.png'), inp, det, sets,
                       [ pick[0], pick[2], pick[4] ], (qs[0], qs[2], qs[4]), det_label)
-    fig_spread(os.path.join(rep, 'cf_spread.png'), spread, dist, sets, det_label)
+    fig_spread(os.path.join(rep, 'cf_spread.png'), spread, dist, sets, det_label, refs)
+    pd.DataFrame([ { 'pairs' : k, 'per_input' : K_PAIRS, 'min_targets_per_input' : v['min_count'] }
+                   for (k, v) in refs.items() ]).to_csv(os.path.join(rep, 'cf_pairs_info.csv'),
+                                                         index = False)
 
     samples = [ s for s in [ 'JEWEL ref', 'random JEWEL', 'identity', det_label ]
                 + [ l for l in sets if arm(l) ] + [ l for l in pop['sample'] if
@@ -747,6 +904,12 @@ def main():
     tex_write(os.path.join(tables, 'cf_population.tex'), population_tex(pop, dep, samples))
     tex_write(os.path.join(tables, 'cf_spread.tex'), spread_tex(spread, list(sets)))
     tex_write(os.path.join(tables, 'cf_verdict.tex'), verdict_tex(verd))
+    tex_write(os.path.join(tables, 'cf_pairs.tex'), pairs_tex(rep))
+    order = []
+    for l in sets:
+        if arm(l):
+            order += [ l, f'pairs, {arm(l)} OT' ]
+    tex_write(os.path.join(tables, 'cf_corr.tex'), corr_tex(spread, o_in, det_obs, det_label, order))
     tex_write(os.path.join(tables, 'cf_cost.tex'), cost_tex(rep, [ det_label ]
               + [ l for l in sets if arm(l) ] + [ l for l in pop['sample']
                                                   if ('DSBM' in l or 'CycleGAN' in l) ]))
@@ -756,6 +919,7 @@ def main():
         print(swap.round(3).T.to_string())
         print(tails.round(3).to_string(index = False))
         print(verd.T.to_string())
+        print(seeds.round(4).to_string(index = False))
 
 if __name__ == '__main__':
     main()

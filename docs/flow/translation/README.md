@@ -19,7 +19,10 @@ plain-language summary: `FLOW_SUMMARY.md`, Part 12. The CycleGAN baseline:
   8- and 24-hour milestones;
 - `slides/translation_appendix.pdf`: the detailed 4-slide appendix (source
   `slides/translation_appendix.tex`, `slides/body.tex`; generated tables
-  `slides/tables/*.tex`).
+  `slides/tables/*.tex`);
+- `condfm/slides/condfm_appendix.pdf`: the stochastic conditional FM pilot
+  (several outputs per PYTHIA jet), a 4-slide appendix; everything of that
+  experiment is under `condfm/` (its own `README.md`).
 
 Nothing here is a per-event medium modification: there is no matched JEWEL
 jet for a PYTHIA jet, and any unpaired map is one choice among many with the

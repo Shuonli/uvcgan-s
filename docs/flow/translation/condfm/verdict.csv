@@ -1,0 +1,6 @@
+model,marginals_moved,n_moved,consistent_with_jewel,joint_girth_moved,joint_zlead_moved,dependence_beyond_random,soft_floor,flattening,useful
+OT-FM,"E, mass, girth, ptd, zlead, rg",6,"E, mass, girth, ptd, zlead, zg, rg",True,True,True,False,False,True
+CondFM hard OT,"E, mass, girth, ptd, zlead, rg",6,"girth, ptd, zlead, zg, rg",True,True,True,False,False,True
+CondFM soft OT,"E, mass, girth, ptd, zlead, rg",6,"girth, ptd, zlead, zg, rg",True,True,True,False,False,True
+alpha-DSBM,"E, mass, girth, ptd, zlead, rg",6,zg,True,True,True,False,False,True
+CycleGAN 2 h,-,0,-,False,True,True,False,False,False

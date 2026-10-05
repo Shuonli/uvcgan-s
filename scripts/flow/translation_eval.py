@@ -99,6 +99,9 @@ def parse_cmdargs():
                ' (hours, budget.json); default: the last checkpoint')
     parser.add_argument('--check-file', default = 'solver_check.csv',
         help = '--solver-check: the file written in --out')
+    parser.add_argument('--primary-only', action = 'store_true',
+        help = '--generate, conditional runs: one sample per test input only'
+               ' (e.g. a second sampler seed, --seed)')
     return parser.parse_args()
 
 # --- data
@@ -517,7 +520,7 @@ def generate(cmdargs, device):
                       encoding = 'utf-8') as f:
                 json.dump(meta, f, indent = 4)
             print(f'{stem}: {meta}', flush = True)
-        if tr.cond:
+        if tr.cond and not cmdargs.primary_only:
             conditional_sets(tr, src, label, cmdargs)
         if tr.bridge and cmdargs.multi > 1:
             sub = src['canvas'][:cmdargs.n_multi]

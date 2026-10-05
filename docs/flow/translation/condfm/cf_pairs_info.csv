@@ -1,0 +1,3 @@
+pairs,per_input,min_targets_per_input
+"pairs, hard OT",64,442
+"pairs, soft OT",64,442
