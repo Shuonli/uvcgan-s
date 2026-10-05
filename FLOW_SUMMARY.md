@@ -794,7 +794,8 @@ A sequence of cheap diagnostics, then controls:
     own training partners), 1.5 ms per jet.
 - **Where:** `FLOW_NOTES.md`, "PYTHIA -> JEWEL translation pilot"; data
   set manifest, split lists, tables and figures `docs/flow/translation/`;
-  a 4-slide appendix `docs/flow/translation/slides/translation_appendix.pdf`.
+  a short 8-slide talk `docs/flow/translation/slides/translation_deck.pdf`
+  and a detailed 4-slide appendix `slides/translation_appendix.pdf`.
 
 ## Where everything is
 

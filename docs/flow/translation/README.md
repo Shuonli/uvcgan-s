@@ -4,9 +4,13 @@ Can OT-CFM and online alpha-DSBM, trained unpaired on clean jets, map a
 PYTHIA jet image to an output with held-out JEWEL statistics while keeping a
 meaningful dependence on the input? Design, pre-registration, results and
 caveats: `FLOW_NOTES.md`, section "PYTHIA -> JEWEL translation pilot";
-plain-language summary: `FLOW_SUMMARY.md`, Part 12. Appendix:
-`slides/translation_appendix.pdf` (source `slides/translation_appendix.tex`,
-`slides/body.tex`; generated tables `slides/tables/*.tex`).
+plain-language summary: `FLOW_SUMMARY.md`, Part 12. Slides:
+- `slides/translation_deck.pdf`: a short 8-slide talk version (source
+  `slides/translation_deck.tex`; figures `deck_*.png` from
+  `scripts/flow/translation_deck_figs.py`, colour-vision-safe blue/orange);
+- `slides/translation_appendix.pdf`: the detailed 4-slide appendix (source
+  `slides/translation_appendix.tex`, `slides/body.tex`; generated tables
+  `slides/tables/*.tex`).
 
 Nothing here is a per-event medium modification: there is no matched JEWEL
 jet for a PYTHIA jet, and any unpaired map is one choice among many with the
@@ -32,6 +36,7 @@ same marginals.
 | `verdict.csv` | the pre-registered reading, item by item |
 | `tr_profiles.png`, `tr_changes_slide.png`, `tr_displays_slide.png`, `tr_curves_slide.png` | compact versions of the figures for the appendix |
 | `cost.csv`, `outputs.json` | GPU hours, updates and rates by stage, peak memory, NFE and latency; the generated outputs' settings |
+| `deck_*.png` | the short deck's figures: distributions, shape profiles, displays, energy change, method thumbnails |
 
 Samples: `JEWEL test` (target), `JEWEL ref` (a second held-out JEWEL
 sample: the finite-sample floor), `identity` (the PYTHIA test inputs),
@@ -63,6 +68,10 @@ From the repository root after `. ./scripts/flow/env.sh`:
     # every metric, figure and table (CPU), then the appendix
     ODE=midpoint128 STEPS=30 sbatch -p a6k -w saturn -c 32 --mem=64G scripts/flow/translation_report.sh
     cd docs/flow/translation/slides && ~/pyext/tectonic_env/bin/tectonic translation_appendix.tex
+
+    # the short deck: its figures (CPU, ~1 min), then the PDF
+    $PYTHON scripts/flow/translation_deck_figs.py
+    cd docs/flow/translation/slides && ~/pyext/tectonic_env/bin/tectonic translation_deck.tex
 
 Caches, runs and outputs (not in git) are under
 `OUTDIR/sphenix/flow/translation/{cache,runs,outputs}`.

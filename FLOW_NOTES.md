@@ -3414,6 +3414,8 @@ noise-level search follows from this pilot.
     ODE=midpoint128 STEPS=30 sbatch -p a6k -w saturn -c 32 --mem=64G \
         scripts/flow/translation_report.sh                           # report + tables
     cd docs/flow/translation/slides && ~/pyext/tectonic_env/bin/tectonic translation_appendix.tex
+    $PYTHON scripts/flow/translation_deck_figs.py                  # short deck (2026-10-05)
+    cd docs/flow/translation/slides && ~/pyext/tectonic_env/bin/tectonic translation_deck.tex
 
 ## Commands
 
