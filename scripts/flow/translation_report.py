@@ -434,11 +434,13 @@ def colour(name):
     """One colour per model in every figure: the pilot's (OT-CFM green,
     alpha-DSBM red), and for the CycleGAN comparison OT-FM blue and CycleGAN
     orange (a darker step for longer training): a pair that passes the
-    colour-vision check, unlike green/red."""
+    colour-vision check, unlike green/red; the stochastic pilot's conditional
+    FM arms aqua (hard OT) and yellow (soft OT)."""
     low = name.lower()
     for (key, c) in [ ('jewel test', 'k'), ('jewel ref', '#555555'),
                       ('random', '#bcbd22'), ('identity', '#7f7f7f'),
                       ('euler', '#98df8a'), ('ot-cfm', '#2ca02c'),
+                      ('condfm hard', '#1baf7a'), ('condfm soft', '#eda100'),
                       ('dsbm', '#d62728'), ('ot-fm', '#2a78d6'),
                       ('cyclegan 24', '#9c3d14'), ('cyclegan 8', '#c5521f'),
                       ('cyclegan', '#eb6834') ]:
