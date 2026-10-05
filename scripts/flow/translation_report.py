@@ -431,11 +431,17 @@ def verdict(pop, joint, dep, fid, models):
 # --- figures
 
 def colour(name):
+    """One colour per model in every figure: the pilot's (OT-CFM green,
+    alpha-DSBM red), and for the CycleGAN comparison OT-FM blue and CycleGAN
+    orange (a darker step for longer training): a pair that passes the
+    colour-vision check, unlike green/red."""
     low = name.lower()
     for (key, c) in [ ('jewel test', 'k'), ('jewel ref', '#555555'),
                       ('random', '#bcbd22'), ('identity', '#7f7f7f'),
                       ('euler', '#98df8a'), ('ot-cfm', '#2ca02c'),
-                      ('dsbm', '#d62728') ]:
+                      ('dsbm', '#d62728'), ('ot-fm', '#2a78d6'),
+                      ('cyclegan 24', '#9c3d14'), ('cyclegan 8', '#c5521f'),
+                      ('cyclegan', '#eb6834') ]:
         if key in low:
             return c
     return '#1f77b4'
@@ -879,6 +885,8 @@ def cost_table(info, curves_spec):
         row = { 'model' : label, 'gpu_h' : 0.0, 'updates' : 0 }
         for run in runs.split('+'):
             path = te.resolve(run)
+            if not os.path.exists(os.path.join(path, 'summary.json')):
+                continue          # CycleGAN runs: costs from outputs.json
             with open(os.path.join(path, 'summary.json'), encoding = 'utf-8') as f:
                 s = json.load(f)
             cfg = te.run_config(path)
@@ -992,7 +1000,9 @@ def main():
             for p in paths:
                 if not os.path.exists(p):
                     print(f'no validation curve {p}', flush = True)
-            curves[label] = pd.concat([ pd.read_csv(p) for p in paths if os.path.exists(p) ])
+            found = [ pd.read_csv(p) for p in paths if os.path.exists(p) ]
+            if found:
+                curves[label] = pd.concat(found)
         vp = te.load_set('val', 'pythia')
         vj = te.load_set('val', 'jewel')
         o_vj = te.jet_observables(vj['canvas'], vj['row'], device)
@@ -1010,6 +1020,16 @@ def main():
         pd.DataFrame([ { 'sample' : k, **v } for (k, v) in val_refs.items() ]).to_csv(
             fig('curves_refs.csv'), index = False)
     cost_table(info, cmdargs.curves).to_csv(fig('cost.csv'), index = False)
+    # every sample's per-jet observables, fixed crop and refound, for the
+    # deck figures (translation_deck_figs.py), so they show these numbers
+    store = os.path.join(fc.translation_root(), 'report')
+    os.makedirs(store, exist_ok = True)
+    np.savez_compressed(
+        os.path.join(store, f'{os.path.basename(os.path.normpath(cmdargs.out))}.npz'),
+        **{ f'crop|{name}|{q}' : np.asarray(v) for (name, o) in obs.items()
+            for (q, v) in o.items() },
+        **{ f'refound|{name}|{q}' : np.asarray(v) for (name, o) in ref.items()
+            for (q, v) in o.items() })
     with open(fig('outputs.json'), 'w', encoding = 'utf-8') as f:
         json.dump(info, f, indent = 4)
 

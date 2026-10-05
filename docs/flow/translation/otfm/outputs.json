@@ -1,0 +1,21 @@
+{
+    "OT-FM": {
+        "run": "tr_otcfm_s0",
+        "label": "OT-CFM",
+        "setting": "midpoint128",
+        "primary": true,
+        "nfe": 128,
+        "solver": "midpoint",
+        "sampler_seed": null,
+        "step": 122720,
+        "updates": 122720,
+        "train_time": 7200.407428465784,
+        "n": 20000,
+        "raw_min_gev": -0.0036301538348197937,
+        "generate_seconds": 130.96850146353245,
+        "ms_per_jet": 6.577377445995808,
+        "batch": 2000,
+        "gpu": "NVIDIA RTX A6000",
+        "clipped_energy_share": 0.00015956991410348564
+    }
+}

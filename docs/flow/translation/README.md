@@ -4,10 +4,17 @@ Can OT-CFM and online alpha-DSBM, trained unpaired on clean jets, map a
 PYTHIA jet image to an output with held-out JEWEL statistics while keeping a
 meaningful dependence on the input? Design, pre-registration, results and
 caveats: `FLOW_NOTES.md`, section "PYTHIA -> JEWEL translation pilot";
-plain-language summary: `FLOW_SUMMARY.md`, Part 12. Slides:
-- `slides/translation_deck.pdf`: a short 8-slide talk version (source
-  `slides/translation_deck.tex`; figures `deck_*.png` from
-  `scripts/flow/translation_deck_figs.py`, colour-vision-safe blue/orange);
+plain-language summary: `FLOW_SUMMARY.md`, Part 12. The CycleGAN baseline:
+`FLOW_NOTES.md`, "CycleGAN baseline". Slides:
+- `slides/translation_otfm.pdf`: OT flow matching alone (12 slides; source
+  `slides/translation_otfm.tex`, tables `slides/tables/otfm_*.tex`, figures
+  `deck_otfm/*.png`, report `otfm/`), with the per-jet shape changes against
+  a random JEWEL jet;
+- `slides/translation_deck.pdf`: OT flow matching (OT-FM, i.e.
+  OT-CFM) against CycleGAN (source `slides/translation_deck.tex`; tables
+  `slides/tables/deck_*.tex` from `translation_tables.py --deck cgan`;
+  figures `deck/*.png` from `scripts/flow/translation_deck_figs.py`,
+  colour-vision-safe blue/orange);
 - `slides/translation_appendix.pdf`: the detailed 4-slide appendix (source
   `slides/translation_appendix.tex`, `slides/body.tex`; generated tables
   `slides/tables/*.tex`).
@@ -36,7 +43,9 @@ same marginals.
 | `verdict.csv` | the pre-registered reading, item by item |
 | `tr_profiles.png`, `tr_changes_slide.png`, `tr_displays_slide.png`, `tr_curves_slide.png` | compact versions of the figures for the appendix |
 | `cost.csv`, `outputs.json` | GPU hours, updates and rates by stage, peak memory, NFE and latency; the generated outputs' settings |
-| `deck_*.png` | the short deck's figures: distributions, shape profiles, displays, energy change, method thumbnails |
+| `cgan/` | the OT-FM against CycleGAN report: the same files as above (`population.csv`, `joint.csv`, `refound.csv`, `dependence.csv`, `fidelity.csv`, `migration.csv`, `verdict.csv`, `curves*.csv`, `cost.csv`, `outputs.json`, `tr_*.png`) for OT-FM and the CycleGAN at its training-time milestones |
+| `deck/` | the talk's figures: jet pT spectra with ratios (`deck_pt.png`), substructure, shape profiles, displays, pT change, training curves, method thumbnails |
+| `otfm/`, `deck_otfm/` | the OT-FM-only report (same files as `cgan/`, plus `shape_changes.csv`: mean and rms of the per-jet change of each shape observable, OT-FM against a random JEWEL jet) and its deck's figures (`deck_shape_changes.png`, `deck_shape_scatter.png`: per-jet changes and output against input) |
 
 Samples: `JEWEL test` (target), `JEWEL ref` (a second held-out JEWEL
 sample: the finite-sample floor), `identity` (the PYTHIA test inputs),
@@ -69,9 +78,21 @@ From the repository root after `. ./scripts/flow/env.sh`:
     ODE=midpoint128 STEPS=30 sbatch -p a6k -w saturn -c 32 --mem=64G scripts/flow/translation_report.sh
     cd docs/flow/translation/slides && ~/pyext/tectonic_env/bin/tectonic translation_appendix.tex
 
-    # the short deck: its figures (CPU, ~1 min), then the PDF
-    $PYTHON scripts/flow/translation_deck_figs.py
-    cd docs/flow/translation/slides && ~/pyext/tectonic_env/bin/tectonic translation_deck.tex
+    # the CycleGAN baseline (UVCGAN2): h5 copies of the pools, then 24 GPU h
+    # with checkpoints at 2 h (OT-FM's budget) and 8 h
+    $PYTHON scripts/flow/translation_cgan.py --prepare
+    LABEL=tr_cgan_s0 HOURS=24 MILESTONES=2,8 sbatch -w dahlia scripts/flow/translation_cgan.sbatch
+    # at a milestone: its test outputs and the validation curves (GPU), then the
+    # report, deck tables, deck figures and the deck (CPU)
+    RUN='model_m(uvcgan-v2)_d(resnet)_g(vit-modnet)_tr_cgan_s0'
+    MODE=generate RUNS="$RUN" LABELS=CycleGAN-2h MILESTONE=2 sbatch -w dahlia scripts/flow/translation_post.sbatch
+    MODE=curves RUNS="$RUN" sbatch -w dahlia scripts/flow/translation_post.sbatch
+    MODELS="OT-FM=OT-CFM__midpoint128,CycleGAN 2 h=CycleGAN-2h__gen" \
+        sbatch -p a6k -w saturn -c 32 --mem=64G scripts/flow/translation_cgan_deck.sh
+    # the OT-FM-only deck
+    MODELS="OT-FM=OT-CFM__midpoint128" TAG=otfm CURVES="OT-FM=tr_otcfm_s0" \
+        FIGOUT=docs/flow/translation/deck_otfm DECKTEX=translation_otfm.tex \
+        sbatch -p a6k -w saturn -c 32 --mem=64G scripts/flow/translation_cgan_deck.sh
 
 Caches, runs and outputs (not in git) are under
 `OUTDIR/sphenix/flow/translation/{cache,runs,outputs}`.

@@ -1,0 +1,2 @@
+model,gpu_h,updates,train_min,train_updates,train_updates_per_s,train_peak_gb,coupling_share,n_params,end_to_end_min,latency_ms_midpoint128,nfe_midpoint128
+OT-FM,2.000113174573829,122720,120.00679047442972,122720,17.043480000151657,3.5235629081726074,0.10387681501448869,32282803,120.56896893717348,6.577377445995808,128

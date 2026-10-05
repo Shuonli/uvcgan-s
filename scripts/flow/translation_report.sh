@@ -16,11 +16,18 @@ export OMP_NUM_THREADS=1
 
 ODE=${ODE:-midpoint128}
 STEPS=${STEPS:-30}
+# the pilot's report by default; the CycleGAN comparison overrides MODELS,
+# CURVES and OUT, has no MULTI, and writes the deck tables (DECK=tag)
+MODELS=${MODELS:-"OT-CFM=OT-CFM__$ODE,OT-CFM (4 Euler)=OT-CFM__euler4,alpha-DSBM=alpha-DSBM__sde$STEPS"}
+MULTI=${MULTI-"alpha-DSBM=alpha-DSBM__sde${STEPS}_multi8"}
+CURVES=${CURVES:-"OT-CFM=tr_otcfm_s0,alpha-DSBM=tr_dsbm_e025_s0_pre+tr_dsbm_e025_s0"}
+OUT=${OUT:-docs/flow/translation}
 echo "[$(date +%T)] on $(hostname)"
-"$PYTHON" -u scripts/flow/translation_report.py \
-    --models "OT-CFM=OT-CFM__$ODE,OT-CFM (4 Euler)=OT-CFM__euler4,alpha-DSBM=alpha-DSBM__sde$STEPS" \
-    --multi "alpha-DSBM=alpha-DSBM__sde${STEPS}_multi8" \
-    --curves "OT-CFM=tr_otcfm_s0,alpha-DSBM=tr_dsbm_e025_s0_pre+tr_dsbm_e025_s0" \
-    --out docs/flow/translation --boot 200 --procs 30 || exit 1
-"$PYTHON" -u scripts/flow/translation_tables.py --dir docs/flow/translation || exit 1
+"$PYTHON" -u scripts/flow/translation_report.py --models "$MODELS" \
+    ${MULTI:+--multi "$MULTI"} --curves "$CURVES" --out "$OUT" --boot 200 --procs 30 || exit 1
+if [ -n "${DECK:-}" ]; then
+    "$PYTHON" -u scripts/flow/translation_tables.py --deck "$DECK" || exit 1
+else
+    "$PYTHON" -u scripts/flow/translation_tables.py --dir docs/flow/translation || exit 1
+fi
 echo "[$(date +%T)] done"

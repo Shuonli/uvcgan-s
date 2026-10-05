@@ -11,7 +11,10 @@ steps are the secondary speed setting). A bridge run (dsbm.py) maps it with
 its SDE sampler (dsbm.sample_sde: Euler-Maruyama, --steps steps, noise
 sqrt(eps h) at every step, the last step returning the endpoint prediction),
 forward direction, EMA parameters: one sample per jet from a fixed seed over
-a fixed order and batch size. The physical readout is the models' own: E =
+a fixed order and batch size. A CycleGAN run (translation_cgan.py, the
+repository's UVCGAN2) maps it with one pass of its EMA PYTHIA -> JEWEL
+generator; --milestone H picks the checkpoint saved when its training time
+reached H hours (default: its last). The physical readout is the models' own: E =
 exp(sd z + mu) - 0.1, then clipped at 0, nothing else (no threshold).
 
 Scores (validation: PYTHIA val inputs, JEWEL val as the target sample):
@@ -81,6 +84,9 @@ def parse_cmdargs():
     parser.add_argument('--boot', type = int, default = 200)
     parser.add_argument('--batch', type = int, default = 2000)
     parser.add_argument('--out', default = 'docs/flow/translation')
+    parser.add_argument('--milestone', type = float, default = None,
+        help = 'CycleGAN runs: the checkpoint of this training-time milestone'
+               ' (hours, budget.json); default: the last checkpoint')
     parser.add_argument('--check-file', default = 'solver_check.csv',
         help = '--solver-check: the file written in --out')
     return parser.parse_args()
@@ -136,6 +142,8 @@ def finite(x):
 def w1_sigma(a, b, sd, boot = 0, rng = None):
     """W1(a, b) / sd, and the sd of its bootstrap (both samples resampled)."""
     (a, b) = (finite(a), finite(b))
+    if (len(a) == 0) or (len(b) == 0):
+        return (np.nan, np.nan)           # e.g. no output passes the selection
     value = wasserstein_distance(a, b) / sd
     if not boot:
         return (value, np.nan)
@@ -177,6 +185,61 @@ def run_config(run):
 
 def is_bridge(run):
     return 'stage' in run_config(run)
+
+def is_cgan(run):
+    return run_config(run).get('model') == 'uvcgan-v2'
+
+def cgan_epochs(run):
+    """Epochs with a saved EMA generator, in order."""
+    names = os.listdir(os.path.join(run, 'checkpoints'))
+    return sorted(int(n[:4]) for n in names if n.endswith('_net_avg_gen_ab.pth'))
+
+def cgan_epoch_of(run, milestone):
+    if milestone is None:
+        return cgan_epochs(run)[-1]
+    with open(os.path.join(run, 'budget.json'), encoding = 'utf-8') as f:
+        marks = json.load(f)['milestones']
+    return [ m['epoch'] for m in marks if abs(m['milestone_h'] - milestone) < 1e-9 ][0]
+
+class CycleGANTranslator:
+    """PYTHIA canvases (GeV) -> raw outputs of one checkpoint (epoch) of a
+    CycleGAN run: z of the translation normalisation through the EMA
+    PYTHIA -> JEWEL generator, decoded as the flows' outputs are."""
+    bridge = False
+
+    def __init__(self, run, epoch, device, cmdargs):
+        # pylint: disable=import-outside-toplevel
+        import pandas as pd_
+        from uvcgan_s.config import Args
+        from uvcgan_s.cgan import construct_model
+        args  = Args.load(run)
+        model = construct_model(args.savedir, args.config, is_train = False,
+                                device = device)
+        model.load(epoch)
+        model.eval()
+        self.gen    = model.models['avg_gen_ab']
+        self.device = device
+        self.batch  = cmdargs.batch
+        with open(fc.translation_norm_path(), encoding = 'utf-8') as f:
+            self.norm = fc.Norm(json.load(f))
+        hist  = pd_.read_csv(os.path.join(run, 'history.csv'))
+        steps = args.config.steps_per_epoch
+        self.info = { 'step' : epoch * steps, 'updates' : epoch * steps, 'epoch' : epoch,
+                      'train_time' : float(hist.loc[hist.epoch <= epoch, 'epoch_time'].sum()) }
+
+    def settings(self, cmdargs):
+        del cmdargs
+        return [ ('gen', 1, 'generator') ]
+
+    @torch.no_grad()
+    def __call__(self, src, nfe = None, solver = None, seed = 0, increments = None):
+        # pylint: disable=unused-argument
+        out = []
+        for start in range(0, len(src), self.batch):
+            j = torch.as_tensor(src[start:start + self.batch], device = self.device).float()
+            y = self.gen(self.norm.z(j, 'jet').unsqueeze(1))
+            out.append(self.norm.energy(y[:, 0], 'jet').cpu())
+        return torch.cat(out).numpy()
 
 class Translator:
     """PYTHIA canvases (GeV) -> raw outputs (GeV, >= -0.1) of one checkpoint
@@ -273,14 +336,18 @@ def curves(cmdargs, device):
             old  = pd.read_csv(path)
             rows = old.to_dict('records')
             done = set(zip(old.step, old.setting))
-        for ckpt in checkpoints(run):
-            tr = Translator(run, ckpt, device, cmdargs)
+        cgan = is_cgan(run)
+        for ckpt in (cgan_epochs(run) if cgan else checkpoints(run)):
+            if cgan and (ckpt * 1000, 'gen') in done:
+                continue                  # scored before (CycleGAN epochs of 1000 updates)
+            tr = CycleGANTranslator(run, ckpt, device, cmdargs) if cgan \
+                else Translator(run, ckpt, device, cmdargs)
             for (name, nfe, solver) in tr.settings(cmdargs):
-                if (ckpt_step(ckpt), name) in done:
+                if (tr.info['step'], name) in done:
                     continue
                 out = clip(tr(src['canvas'], nfe, solver, cmdargs.seed))
                 o   = jet_observables(out, src['row'], device)
-                row = { 'run' : os.path.basename(run), 'step' : ckpt_step(ckpt),
+                row = { 'run' : os.path.basename(run), 'step' : tr.info['step'],
                         **tr.info, 'setting' : name, 'n' : len(out),
                         **population(o, o_ref), **dependence(o_in, o),
                         'E_out_over_in' : float(np.mean(o['E'] / o_in['E'])) }
@@ -301,6 +368,9 @@ def labels_of(cmdargs):
     return [ os.path.basename(r.rstrip('/')) for r in cmdargs.runs ]
 
 def final(run, device, cmdargs):
+    if is_cgan(run):
+        return CycleGANTranslator(run, cgan_epoch_of(run, cmdargs.milestone), device,
+                                  cmdargs)
     return Translator(run, checkpoints(run)[-1], device, cmdargs)
 
 def solver_check(cmdargs, device):

@@ -4,6 +4,7 @@
 CSV files. Every number on the slides comes from those files.
 
     translation_tables.py [--dir docs/flow/translation]
+    translation_tables.py --deck cgan     # a deck's tables (slides/tables/cgan_*.tex)
 """
 
 import argparse
@@ -25,7 +26,21 @@ OBS_TEX = { 'E' : '$E$', 'mass' : 'mass', 'girth' : 'girth', 'ptd' : '$p_T^D$',
 def parse_cmdargs():
     parser = argparse.ArgumentParser(description = 'Translation appendix tables')
     parser.add_argument('--dir', default = 'docs/flow/translation')
+    parser.add_argument('--deck', default = None,
+        help = 'report tag (docs/flow/translation/TAG): write that deck\'s tables'
+               ' (slides/tables/TAG_*.tex) instead')
     return parser.parse_args()
+
+DECK = { 'JEWEL ref' : 'JEWEL vs JEWEL', 'identity' : 'PYTHIA input',
+         'random JEWEL' : r'\keyrj random JEWEL jet' }
+DECK_OBS = [ 'E', 'mass', 'girth', 'zlead', 'ptd', 'zg', 'rg' ]
+DECK_TEX = { **OBS_TEX, 'E' : '$p_T$' }
+
+def deck_name(s):
+    if s in DECK:
+        return DECK[s]
+    key = r'\keyot ' if s == 'OT-FM' else (r'\keycg ' if 'CycleGAN' in s else '')
+    return key + s
 
 def write(path, lines):
     with open(path, 'w', encoding = 'utf-8') as f:
@@ -37,6 +52,117 @@ def begin(cols, sep = 3):
              r'\begin{tabular}{' + cols + '}', r'\toprule' ]
 
 END = [ r'\bottomrule', r'\end{tabular}' ]
+
+SHAPE_CHANGES = [ ('girth', 'girth'), ('zlead', r'$z_\mathrm{lead}$'), ('ptd', '$p_T^D$'),
+                  ('mass', 'mass (GeV)'), ('zg', '$z_g$'), ('rg', '$R_g$') ]
+
+def col_head(s):
+    """Two-line column header of a deck table (key line, then the name)."""
+    names = { 'JEWEL ref' : ('JEWEL vs', 'JEWEL'), 'identity' : ('PYTHIA', 'input'),
+              'random JEWEL' : (r'\keyrj random', 'JEWEL jet') }
+    if s in names:
+        return names[s]
+    key = r'\keyot ' if s == 'OT-FM' else (r'\keycg ' if 'CycleGAN' in s else '')
+    parts = s.split(' ', 1)
+    return (key + parts[0], parts[1] if len(parts) > 1 else '')
+
+def head_rows(samples):
+    tops = [ col_head(s) for s in samples ]
+    return [ ' & ' + ' & '.join(t for (t, _) in tops) + r' \\',
+             ' & ' + ' & '.join(b for (_, b) in tops) + r' \\', r'\midrule' ]
+
+def shape_change_table(tag, out):
+    """Mean and rms of the per-jet change (output minus its own input) of
+    each shape observable, all test jets, from the report's observables
+    (translation/report/TAG.npz): the models against a random JEWEL jet.
+    Observables are rows."""
+    import numpy as np                         # pylint: disable=import-outside-toplevel
+    import fm_common as fc                     # pylint: disable=import-outside-toplevel
+    with np.load(os.path.join(fc.translation_root(), 'report', f'{tag}.npz')) as f:
+        obs = { k : f[k] for k in f.files if k.startswith('crop|') }
+    names = sorted({ k.split('|')[1] for k in obs })
+    models = [ n for n in names if n not in ('JEWEL test', 'JEWEL ref', 'identity',
+                                             'random JEWEL') ] + [ 'random JEWEL' ]
+    rows = []
+    stats = {}
+    for m in models:
+        for (q, _) in SHAPE_CHANGES:
+            dlt = obs[f'crop|{m}|{q}'] - obs[f'crop|identity|{q}']
+            dlt = dlt[np.isfinite(dlt)]
+            stats[(m, q)] = (float(np.sqrt(np.mean(dlt**2))), float(np.mean(dlt)))
+            rows += [ { 'model' : m, 'observable' : q, 'stat' : 'rms',
+                        'value' : stats[(m, q)][0] },
+                      { 'model' : m, 'observable' : q, 'stat' : 'mean',
+                        'value' : stats[(m, q)][1] } ]
+    # the rms of the change of each sample, and how much larger the random
+    # JEWEL jet's is than each model's (the means: shape_changes.csv)
+    n = len(models)
+    lines = begin('l' + 'r' * (2 * n - 1), sep = 5)
+    lines.append(r' & \multicolumn{%d}{c}{rms of the change} & \multicolumn{%d}{c}{ratio} \\'
+                 % (n, n - 1))
+    tops = [ col_head(m) for m in models ] + [ ('random /', col_head(m)[0].split()[-1])
+                                               for m in models[:-1] ]
+    lines.append(' & ' + ' & '.join(t for (t, _) in tops) + r' \\')
+    lines.append(' & ' + ' & '.join(b for (_, b) in tops) + r' \\')
+    lines.append(r'\midrule')
+    for (q, label) in SHAPE_CHANGES:
+        cells = [ f'{stats[(m, q)][0]:.3f}' for m in models ] \
+            + [ f"{stats[('random JEWEL', q)][0] / stats[(m, q)][0]:.1f}" for m in models[:-1] ]
+        lines.append(f'{label} & ' + ' & '.join(cells) + r' \\')
+    lines += END
+    write(os.path.join(out, f'{tag}_shape_changes.tex'), lines)
+    pd.DataFrame(rows).to_csv(os.path.join('docs/flow/translation', tag, 'shape_changes.csv'),
+                              index = False)
+
+def deck_tables(d, out, tag):
+    """A deck's population, dependence and cost tables (TAG_*.tex), with
+    observables as rows and samples as columns."""
+    pop = pd.read_csv(os.path.join(d, 'population.csv'))
+    models = [ s for s in pop['sample'] if s not in DECK ]
+    samples = [ 'JEWEL ref', 'identity', 'random JEWEL' ] + models
+    lines = begin('l' + 'r' * len(samples), sep = 4) + head_rows(samples)
+    for q in DECK_OBS:
+        cells = []
+        for s in samples:
+            r = pop[pop['sample'] == s].iloc[0]
+            v = r[f'w1_{q}']
+            text = f'{v:.3f}' if v < 0.1 else f'{v:.2f}'
+            if s in models and bool(r[f'consistent_{q}']):
+                text = r'\textbf{' + text + '}'
+            cells.append(text)
+        lines.append(f'{DECK_TEX[q]} & ' + ' & '.join(cells) + r' \\')
+    lines += END
+    write(os.path.join(out, f'{tag}_population.tex'), lines)
+
+    dep = pd.read_csv(os.path.join(d, 'dependence.csv'))
+    samples = [ 'random JEWEL' ] + models
+    lines = begin('l' + 'r' * len(samples), sep = 5) + head_rows(samples)
+    labels = { 'E' : '$p_T$', 'girth' : 'girth', 'mass' : 'mass', 'core' : 'core fraction',
+               'lead' : 'leading tower' }
+    for q in te.DEP:
+        cells = [ f"{dep[dep['sample'] == s].iloc[0][f'corr_{q}']:.2f}".replace('-0.00', '0.00')
+                  for s in samples ]
+        lines.append(f'{labels[q]} & ' + ' & '.join(cells) + r' \\')
+    lines.append(r'\midrule')
+    cells = [ f"{100 * dep[dep['sample'] == s].iloc[0]['preference_rate']:.0f}\\%"
+              for s in samples ]
+    lines.append('own input preferred & ' + ' & '.join(cells) + r' \\')
+    lines += END
+    write(os.path.join(out, f'{tag}_dependence.tex'), lines)
+
+    import json                                # pylint: disable=import-outside-toplevel
+    with open(os.path.join(d, 'outputs.json'), encoding = 'utf-8') as f:
+        info = json.load(f)
+    lines = begin('lrrrrr', sep = 4)
+    lines.append(r' & GPU h & updates & updates/s & network calls & ms / jet \\')
+    lines.append(r'\midrule')
+    for s in models:
+        m = info[s]
+        lines.append(f"{deck_name(s)} & {m['train_time'] / 3600:.1f} & {m['updates'] / 1e3:.0f}k & "
+                     f"{m['updates'] / m['train_time']:.1f} & {m['nfe']} & {m['ms_per_jet']:.2f}"
+                     + r' \\')
+    lines += END
+    write(os.path.join(out, f'{tag}_cost.tex'), lines)
 
 def population(d, out):
     pop = pd.read_csv(os.path.join(d, 'population.csv'))
@@ -152,6 +278,10 @@ def main():
     cmdargs = parse_cmdargs()
     out = os.path.join(cmdargs.dir, 'slides', 'tables')
     os.makedirs(out, exist_ok = True)
+    if cmdargs.deck:
+        deck_tables(os.path.join(cmdargs.dir, cmdargs.deck), out, cmdargs.deck)
+        shape_change_table(cmdargs.deck, out)
+        return
     population(cmdargs.dir, out)
     joint(cmdargs.dir, out)
     dependence(cmdargs.dir, out)

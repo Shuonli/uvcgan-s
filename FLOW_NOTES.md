@@ -3417,6 +3417,89 @@ noise-level search follows from this pilot.
     $PYTHON scripts/flow/translation_deck_figs.py                  # short deck (2026-10-05)
     cd docs/flow/translation/slides && ~/pyext/tectonic_env/bin/tectonic translation_deck.tex
 
+### Per-jet shape changes against a random JEWEL jet (2026-10-05)
+
+`docs/flow/translation/otfm/shape_changes.csv`, OT-FM-only deck slides 7-8.
+For each of the 20k test jets, the change of a shape observable is the
+output minus its own input. The random JEWEL jet reaches the JEWEL
+distributions too, but ignores its input.
+
+| change of | girth | z_lead | p_T^D | mass, GeV | z_g | R_g |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| mean: OT-FM / random JEWEL | -0.002 / -0.002 | +0.034 / +0.033 | +0.030 / +0.030 | -1.18 / -1.16 | -0.002 / -0.004 | -0.011 / -0.011 |
+| rms: OT-FM | 0.009 | 0.051 | 0.042 | 1.30 | 0.094 | 0.065 |
+| rms: random JEWEL | 0.069 | 0.203 | 0.159 | 2.22 | 0.157 | 0.152 |
+| ratio | 7.4 | 4.0 | 3.8 | 1.7 | 1.7 | 2.3 |
+
+- Both reproduce the JEWEL marginals, so their mean changes agree, as they
+  must.
+- OT-FM changes each jet 1.7-7.4x less.
+- Output against input (`deck_otfm/deck_shape_scatter.png`): OT-FM r = 0.99
+  (girth), 0.97 (z_lead), 0.97 (p_T^D), with z_lead and p_T^D shifted up
+  (harder outputs); random JEWEL r = 0.00.
+- OT-FM's mass change is mostly its pT change (mean -1.2 GeV).
+- These describe the map OT chooses (least change), not a per-jet truth.
+
+### CycleGAN baseline (set up 2026-10-05 13:25, before training)
+
+**Why.** OT flow matching (OT-FM, i.e. OT-CFM) is meant as an alternative
+to the CycleGAN family that UVCGAN-S belongs to. So the translation pilot
+needs a CycleGAN trained on the same task.
+
+**Model.** The repository's own UVCGAN2 (`uvcgan-v2`, the CycleGAN variant
+UVCGAN-S builds on; Torbunov et al., arXiv:2203.02557, 2303.16280; CycleGAN:
+Zhu et al., arXiv:1703.10593), trained by the repository's trainer
+(`scripts/flow/translation_cgan.py`).
+- **Held equal to OT-FM:**
+  - the same 200k PYTHIA and 200k JEWEL training canvases;
+  - the same standardised log(E + 0.1) coordinates (`translation/norm.json`,
+    via h5 copies), decoded the same way and clipped at 0;
+  - the same ViT-ModNet generator (the published UVCGAN-S generator, which
+    is also the OT-FM velocity backbone without its time input) in both
+    directions;
+  - seed 0, one A6000 on dahlia.
+- **CycleGAN settings, the repository's sPHENIX ones where they apply:**
+  - the resnet discriminator with spectral norm and batch norm;
+  - hinge loss, gradient penalty 0.01;
+  - Adam 5e-5 (0.5, 0.99);
+  - batch 32 (this repository's validated batch-32 setting);
+  - EMA 0.9999 of each generator, used for inference;
+  - UVCGAN2's cycle weight 10 and identity weight 0.5;
+  - learning-rate warm-up over the first 2000 updates.
+- **Inference:** one pass of the EMA PYTHIA -> JEWEL generator
+  (deterministic).
+
+**Budget** (training time, the trainer's epoch time). A smoke test measured
+2.7 updates/s at batch 32: each update runs six generator passes and two
+discriminators with a gradient penalty, against one network pass for OT-FM
+(17 updates/s). The README's batch-size table shows the same step time
+for UVCGAN-S (357 ms).
+- **Primary: the checkpoint at 2 GPU hours**, OT-FM's budget.
+- **Secondary:** 8 h and 24 h, the latter the training length this
+  repository's UVCGAN-S studies used, so that the comparison does not rest
+  on an under-trained GAN.
+- Checkpoints every 10 epochs of 1000 updates (about 1 h) give validation
+  curves.
+- No checkpoint is selected on test data. The milestone checkpoints are
+  used as they are.
+
+**Evaluation.** The same 20k test inputs and the same report
+(`translation_report.py`): every metric, figure and pre-registered flag of
+the pilot, applied to OT-FM and to CycleGAN at each milestone, with the
+identity, random-JEWEL and JEWEL-ref references. Added for both: the jet pT
+spectra (cone E_T, and the leading refound anti-kT jet), on a log scale
+with the ratio to JEWEL.
+
+**Reading (fixed now).** The pilot's rules, applied to each model:
+- moves toward JEWEL: 3 sd below the identity;
+- consistent with JEWEL: within 3 sd of the floor;
+- input dependence beyond random JEWEL;
+- artefact flags.
+- "Better" for one model on an observable means its W1 to JEWEL is lower
+  by more than 3 combined bootstrap sd.
+- Successes and failures are reported per model, at the matched budget
+  first. Then whether more CycleGAN training changes the comparison.
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything

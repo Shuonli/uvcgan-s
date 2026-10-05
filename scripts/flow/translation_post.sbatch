@@ -5,7 +5,9 @@
 #                  (docs/flow/translation/solver_check.csv)
 #   MODE=generate  the final checkpoints' outputs on every PYTHIA test input at
 #                  the frozen settings (ODE, STEPS), 8 alpha-DSBM samples of the
-#                  first 1000 test inputs, latency
+#                  first 1000 test inputs, latency; CycleGAN runs: the checkpoint
+#                  of MILESTONE hours (default: the last)
+#   MODE=curves    the validation curves of RUNS (every checkpoint)
 #
 #   MODE=check sbatch -w dahlia scripts/flow/translation_post.sbatch
 #   (a finer ODE check: MODE=check ODE=64:midpoint RUNS=tr_otcfm_s0 LABELS=OT-CFM
@@ -36,6 +38,8 @@ check)
 generate)
     "$PYTHON" -u scripts/flow/translation_eval.py --generate "${RUNS[@]}" \
         --labels "$LABELS" --ode-setting "${ODE:-32:midpoint}" --steps "${STEPS:-30}" \
-        --n-multi 1000 --multi 8 || exit 1 ;;
+        --n-multi 1000 --multi 8 ${MILESTONE:+--milestone "$MILESTONE"} || exit 1 ;;
+curves)
+    "$PYTHON" -u scripts/flow/translation_eval.py --curves "${RUNS[@]}" || exit 1 ;;
 esac
 echo "[$(date +%T)] done"
