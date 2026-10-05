@@ -1,0 +1,94 @@
+{
+    "clean_jets_t3": {
+        "n": 20000,
+        "cone_vac_med": [
+            28.354867935180664,
+            21.953399658203125
+        ],
+        "deck_cone": "28.2 -> 21.9 GeV (slide 20), 28.2 -> 21.8 (slide 145)",
+        "ring_vac_med": [
+            0.40919697284698486,
+            6.621800899505615
+        ],
+        "deck_ring": "0.5 -> 6.4 GeV (slide 20), 0.4 -> 6.6 (slide 145)",
+        "recoil_in_ring_mean_sd": [
+            6.21260404586792,
+            4.521852493286133
+        ],
+        "deck_recoil": "6.0 +- 4.3 GeV (slide 22)",
+        "mass_vac_med": [
+            3.0547335147857666,
+            3.051048517227173
+        ],
+        "deck_mass": "2.97 -> 2.96 GeV (slide 74)",
+        "girth_vac_med": [
+            0.09965848922729492,
+            0.12717565894126892
+        ],
+        "deck_girth_shift": "+0.027 (slide 73), +0.028 (slide 117)",
+        "cone_shift": -6.401467800140381,
+        "deck_cone_shift": "-6.3 GeV (slide 70)",
+        "towers_above_0_in_cone_vac": 10.1213,
+        "zlead_vac": 0.4832201600074768,
+        "deck_towers": "7.9 towers with energy per cone, 48% in one tower (slide 55)",
+        "far_med_minus_vac": [
+            0.10836468636989594,
+            0.22465
+        ],
+        "retained_energy_med_over_vac": [
+            0.9972179532051086,
+            0.01198833342641592,
+            0.073
+        ],
+        "lost_share_vac_med": [
+            3.1511730500119987e-07,
+            0.002798910774635584
+        ],
+        "corr_particle_girth_image_girth": 0.9100783016166085,
+        "corr_f_cone_loss": 0.7885501849012251,
+        "ring_towers_mean": 288.6419982910156,
+        "cone_towers_mean": 55.7864990234375,
+        "deck_towers_count": "cone 52 (slide 9), ring 289 (slide 22)"
+    },
+    "girth_rule_t3g": {
+        "f_mean_sd": [
+            0.252154263635426,
+            0.13667028206094098
+        ],
+        "beta26_mean_sd": [
+            0.25,
+            0.14433756729740643
+        ],
+        "deck": "same mean and similar spread as Beta(2,6) (slide 161)",
+        "clipped_share": 0.0293
+    },
+    "subtraction_t1": {
+        "n": 20000,
+        "ue_per_tower": 0.5827844142913818,
+        "ue_in_cone_mean_sd": [
+            33.28668212890625,
+            5.487752437591553
+        ],
+        "deck_ue_cone": "29.2 GeV in the example, 31 on average (slide 7)",
+        "ue_in_ring_mean": 154.22732543945312,
+        "deck_ue_ring": "170 GeV (slide 22)",
+        "rho_area_offset_rms": [
+            0.8472963942725801,
+            4.539110595596947
+        ],
+        "deck_rho_area": "offset +0.7-0.8 GeV, RMS 4.4 (slides 43, 51, 151)",
+        "jet_cone_mean": 28.263286590576172,
+        "lost_share_vac": 0.0003699189165496266,
+        "rho_r_gt_1p2_mean": 0.5806156498716846,
+        "ring_wobble_after_own_rho": 10.99916433288169,
+        "deck_ring_wobble": "+-12 GeV after each event's own rho (slide 22)"
+    },
+    "fakes_t1_ue": {
+        "n": 5000,
+        "cone_towers": 53.0,
+        "largest_cone_minus_rhoA_median_anywhere": 12.778165817260742,
+        "share_above_10_anywhere": 0.8812,
+        "share_above_10_eta_lt_0p7": 0.881,
+        "deck": "flat rho x A: biggest cone typically 12 GeV, above 10 GeV in 88% (slide 44)"
+    }
+}

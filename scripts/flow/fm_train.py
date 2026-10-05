@@ -80,6 +80,33 @@ def parse_cmdargs():
                ' the squared L2 cost of the standardised states')
     parser.add_argument('--sinkhorn-tol', type = float, default = 1e-4,
         help = 'condjet --coupling entropic: L1 error of the row marginals')
+    parser.add_argument('--toy-kind', default = None, choices = [ 'sub', 'clean', 'ue' ],
+        help = 'toyflow / toycond: the state transform (jamie norm.json)')
+    parser.add_argument('--toy-pairing', default = None,
+        choices = [ 'unpaired', 'synthetic', 'paired', 'hybrid' ],
+        help = 'toy runs: pure unpaired, synthetic paired, true-paired control,'
+               ' or the hybrid (jamie_methods.py)')
+    parser.add_argument('--toy-source', default = None)
+    parser.add_argument('--toy-target', default = None)
+    parser.add_argument('--toy-prior', default = None)
+    parser.add_argument('--toy-ue', default = None)
+    parser.add_argument('--toy-data', default = None)
+    parser.add_argument('--toy-cost', default = 'full', choices = [ 'full', 'nearfar' ],
+        help = 'toy unpaired plans: full-image squared L2, or the pre-specified'
+               ' near-jet / far-region normalised cost (jamie_methods.py)')
+    parser.add_argument('--toy-lambda-u', type = float, default = 1.0,
+        help = 'hybrid: weight of the unpaired term')
+    parser.add_argument('--toy-extra', default = None,
+        help = 'comma separated extra terms (jamie_methods.py)')
+    parser.add_argument('--toy-lambda', default = None,
+        help = 'comma separated weights of --toy-extra')
+    parser.add_argument('--roll-n', type = int, default = 16,
+        help = 'toy extra terms on solved endpoints: images per update')
+    parser.add_argument('--roll-nfe', type = int, default = 16,
+        help = 'toy extra terms on solved endpoints: midpoint evaluations')
+    parser.add_argument('--init', default = None,
+        help = 'continuation: start from this run\'s resume.pt (weights, EMA,'
+               ' optimizer), no warm-up, a fresh step count')
     parser.add_argument('--ot-pool', type = int, default = None,
         help = 'matching pool per domain (default: the batch); the plan is'
                ' solved on the pool and --batch complete pairs drawn from it')
@@ -176,13 +203,23 @@ def write_config(run_dir, cmdargs, n_params):
         old.setdefault('coupling', 'exact')
         old.setdefault('ot_reg', None)
         old.setdefault('sinkhorn_tol', 1e-4)
+        for k in [ 'toy_kind', 'toy_pairing', 'toy_source', 'toy_target', 'toy_prior',
+                   'toy_ue', 'toy_data', 'toy_extra', 'toy_lambda', 'init' ]:
+            old.setdefault(k, None)
+        old.setdefault('toy_lambda_u', 1.0)
+        old.setdefault('toy_cost', 'full')
+        old.setdefault('roll_n', 16)
+        old.setdefault('roll_nfe', 16)
         for key in [ 'method', 'batch', 'lr', 'sigma', 'channels',
                      'res_blocks', 'attn', 'seed', 'ema', 'warmup',
                      'cosine_steps', 'log_bias', 'augment', 'backbone',
                      'cost', 'cost_lambda', 'pairing', 'target_domain',
                      'ot_pool', 'paired_n', 'paired_share', 'path', 'eta',
                      'source_domain', 'norm_path', 'coupling', 'ot_reg',
-                     'sinkhorn_tol' ]:
+                     'sinkhorn_tol', 'toy_kind', 'toy_pairing', 'toy_source',
+                     'toy_target', 'toy_prior', 'toy_ue', 'toy_data', 'toy_extra',
+                     'toy_lambda', 'toy_lambda_u', 'roll_n', 'roll_nfe', 'init',
+                     'toy_cost' ]:
             if old.get(key) != config.get(key):
                 raise RuntimeError(
                     f"resuming '{run_dir}' with {key} = {config.get(key)},"
@@ -256,7 +293,13 @@ def main():
 
     t_start = time.perf_counter()
 
-    if cmdargs.method in fc.JET_METHODS:
+    toy = cmdargs.method in fc.TOY_METHODS
+    if toy:
+        # pylint: disable=import-outside-toplevel
+        import jamie_methods as jm
+        norm = jm.load_norm()
+        cmdargs.inline_events = 0
+    elif cmdargs.method in fc.JET_METHODS:
         # fitted on the training jets by closure_data.py (or, for the
         # translation pilot, by translation_data.py: --norm-path)
         with open(cmdargs.norm_path or fc.Norm.path(method = 'jetflow'), 'r',
@@ -275,13 +318,14 @@ def main():
         norm = fc.Norm.load_or_fit(
             fc.Norm.path(cmdargs.log_bias), bias = cmdargs.log_bias
         )
-    method = fc.Method(cmdargs.method, norm, cmdargs.sigma, cmdargs.augment,
+    method = jm.ToyMethod(cmdargs, norm, device) if toy else \
+        fc.Method(cmdargs.method, norm, cmdargs.sigma, cmdargs.augment,
                        cmdargs.cost, cmdargs.cost_lambda, cmdargs.pairing,
                        cmdargs.target_domain, cmdargs.paired_n, cmdargs.path,
                        cmdargs.eta, cmdargs.source_domain, cmdargs.coupling,
                        cmdargs.ot_reg, cmdargs.sinkhorn_tol)
-    assert (cmdargs.method == 'condjet') or (cmdargs.coupling == 'exact'), \
-        '--coupling: condjet only (the other OT methods have their own plans)'
+    assert (cmdargs.method in ('condjet',) + fc.TOY_METHODS) or (cmdargs.coupling == 'exact'), \
+        '--coupling: condjet and the toy methods only (the other OT methods have their own plans)'
     if cmdargs.pairing == 'semi':
         method.n_paired = int(round(cmdargs.paired_share * cmdargs.batch))
     cmdargs.sigma = method.sigma
@@ -312,7 +356,18 @@ def main():
         'ckpt_time' : 0.0,
     }
 
-    if os.path.exists(resume):
+    if (not os.path.exists(resume)) and cmdargs.init:
+        # a continuation: the base run's weights, EMA and optimizer state; the
+        # rate at its full value (no second warm-up), a fresh step count
+        state = torch.load(os.path.join(cmdargs.init, 'resume.pt'), map_location = device,
+                           weights_only = False)
+        net.load_state_dict(state['raw'])
+        ema.load_state_dict(state['ema'])
+        opt.load_state_dict(state['opt'])
+        cmdargs.warmup = 1
+        print(f"continuation of {cmdargs.init} (its step {state['stats']['step']})")
+        np.random.seed(cmdargs.seed)
+    elif os.path.exists(resume):
         state = torch.load(resume, map_location = device, weights_only = False)
         net.load_state_dict(state['raw'])
         ema.load_state_dict(state['ema'])
@@ -335,6 +390,8 @@ def main():
     # global RNG draws (times, the matcher's) do not depend on the path
     method.path_gen = torch.Generator(device = device)
     method.path_gen.manual_seed(2_000_029 * cmdargs.seed + 7 + stats['step'])
+    if toy:
+        method.set_streams(cmdargs.seed, stats['step'])
     if cmdargs.method == 'condjet':
         # times, noise and the pairs' row draws: one stream each, so that
         # the exact and the entropic coupling train on the same batches,
@@ -428,7 +485,7 @@ def main():
         if method.coupled:
             torch.cuda.synchronize()
             t0 = time.perf_counter()
-            if method.name == 'condjet':
+            if method.name in ('condjet', 'toycond'):
                 (cond, x1) = method.pair(cond, x1)
             else:
                 (x0, x1) = method.couple(x0, x1, cmdargs.batch - method.n_paired)

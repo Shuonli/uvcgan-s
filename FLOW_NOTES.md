@@ -3914,6 +3914,254 @@ inputs):
   needs a pairing that ties it (a cost or batch size that weights energy);
   choosing one is a modelling decision that unpaired data cannot settle.
 
+## Jamie's toy exercises with OT flow matching (set up 2026-10-05 20:05, before training)
+
+**Question.** With a toy whose generating process and conditional truth are
+known, does OT flow matching (our UVCGAN-S-backbone OT-CFM, deterministic D,
+and the noise-driven conditional FM, C) (1) subtract the UE without a halo or
+a lost core, (2) keep a known medium modification when a frozen vacuum-trained
+subtractor sees quenched jets, (3) translate vacuum into quenched jets with
+the right population, input correspondence and conditional law, (4) do so
+while keeping the input event's own UE, and (5) let independent mixture data,
+rather than the synthetic jet prior, decide the decomposition? An experiment,
+not an attempt to make OT-FM win; a negative result with a diagnosis counts.
+
+**Source** (`nagle_cyclegan_explained.pdf`, J. Nagle, 2026-09-30; in the
+repository root, not committed). Printed slide numbers are those of the deck's
+footers; PDF page = printed + 13 from Part 3 on (e.g. printed 37 = page 40,
+142 = 155). Used: 37-64 subtraction, 67-80 frozen subtractor, 83-94 clean
+translation, 97-101 translation with UE, 109 input-dependent quenching,
+116-123 prior against data, 142-146 and 158-161 code and configurations.
+Jamie's toycalo.py, train_sub.py, train_quench.py and Research/toys/README.md
+were not available.
+
+**The toy, reimplemented** (`scripts/flow/toycalo.py`; a reimplementation,
+not an exact reproduction): the jet, UE and quenching functions of slides
+142-144 line by line, with the order of random draws inside each function.
+Not in the listings, chosen and documented:
+- grid 24 x 64, eta in [-1.1, 1.1) (24 equal bins), phi in [0, 2 pi) (64
+  bins), periodic in phi (the deck's displays and the sPHENIX geometry);
+  deposit() adds a particle's energy to the tower containing it and drops
+  particles at |eta| >= 1.1 (the lost energy is recorded);
+- f_from_girth: g = sum(e r) / sum(e) over all vacuum particles, r their
+  distance to the jet axis; f = clip(0.25 + 0.14 (g - 0.096) / 0.038,
+  0.02, 0.60) (slide 161);
+- a non-positive UE multiplicity m (probability ~1e-23) is redrawn so the
+  gamma scale stays positive (never happened: 0 redraws in every pool);
+- every parent has its own random stream (SeedSequence of 20261005, the
+  pool id, the parent index and a role: 0 jet, 1 UE, 2 + k quench replica k).
+
+**Generator checks against the deck** (`docs/flow/jamie_otfm/generator_checks.json`;
+20k jets each):
+
+| quantity | ours | deck |
+| :--- | ---: | :--- |
+| clean jets, \|eta\| < 0.3: cone R < 0.4, vacuum -> quenched | 28.35 -> 21.95 GeV | 28.2 -> 21.9 |
+| ring 0.4-1.0, vacuum -> quenched | 0.41 -> 6.62 GeV | 0.4-0.5 -> 6.4-6.6 |
+| recoil in the ring per jet | 6.2 +- 4.5 GeV | 6.0 +- 4.3 |
+| girth shift; cone shift | +0.0275; -6.40 GeV | +0.027-0.028; -6.3 |
+| mass, vacuum -> quenched | 3.05 -> 3.05 GeV | 2.97 -> 2.96 |
+| z_lead (vacuum) | 0.48 | 48% in one tower |
+| towers in the ring 0.4-1.0 | 288.6 | 289 |
+| UE per tower; UE in the cone (\|eta\| < 0.7 axes) | 0.58; 33.3 +- 5.5 GeV | ~0.6; 29.2 (example), 31 |
+| rho x A (rho at R > 1.2): offset, RMS | +0.85, 4.54 GeV | +0.7-0.8, 4.4 |
+| UE-only: largest cone - rho A above 10 GeV | 88.1% (median 12.8 GeV) | 88% (typically 12) |
+| girth rule: mean and sd of f | 0.252, 0.137 | Beta(2,6): 0.25, 0.144 |
+
+Geometry facts the exercises depend on (the same file):
+- acceptance: vacuum jets lose 3e-7 (|eta| < 0.3) and 3.7e-4 (< 0.7) of
+  their energy outside |eta| < 1.1, quenched jets 0.28%. A quenched image
+  keeps 99.72% +- 1.2% of its vacuum image's energy; 7.3% of jets differ by
+  more than 1%;
+- the toy's quenching changes towers at R >= 1.0 in 22% of jets (particles
+  pushed outward by (1 + f) from up to r = 0.9), +0.11 GeV per jet on
+  average: Exercise 4's protected region is not exactly untouched;
+- particle-level girth is recoverable from the vacuum image's cone girth
+  with r = 0.91 (so no image-girth version of the girth rule is added).
+
+**Data** (`scripts/flow/jamie_data.py`; OUTDIR/sphenix/flow/jamie/cache,
+`manifest.json` with pool ids, seeds, acceptance losses): every pool and set
+has its own parents; validation and test parents are in no training pool.
+- training pools, 40k parents each: e1_jet (vacuum jets, |eta| < 0.7,
+  20-80 GeV, E^-4), e1_jet_flat (flat 5-80 GeV), e1_ue (UE), e1_mix (vacuum
+  jet + UE, other parents), e3_vac (|eta| < 0.3), e3_med (quenched, other
+  parents, Beta(2,6)), e3_pair (40k further parents, 8 quenchings each: the
+  paired control only), e3g_med (girth rule), e4_src (vacuum jet + UE),
+  e4_tgt (quenched jet + another UE), x_broad (half vacuum, half quenched
+  with f ~ U(0, 0.5));
+- held out: Exercise 1 v1_mix (5k), t1_mix (20k), t1_low / t1_high /
+  t1_beyond (flat 5-20, 60-80, 80-100 GeV, 5k each), t1_ue (UE alone, 5k);
+  Exercise 2 and the 2 x 2 v2_pair / t2_pair (5k / 20k: J_vac, J_med, one
+  B shared); Exercise 3 v3_pair / t3_pair (+ t3_ref, an independent
+  quenched sample) and the same for the girth rule; Exercise 4 v4_pair /
+  t4_pair (J_vac + B_a, J_med + B_a) and t4_ref;
+- banks: 256 quenchings of 100 test parents (the first 2000 test parents
+  nearest the energy quantiles 0.005 ... 0.995) and 512 of 4 illustration
+  parents (quantiles 0.1, 0.4, 0.7, 0.95), for Exercises 3, 3g and 4 (with
+  B_a fixed), selected before any model output;
+- normalisation psi = log(E + 0.1), one mean and sd per state kind on its
+  training pools together: sub (e1_mix + e1_ue; Exercises 1, 2, the 2 x 2)
+  -0.609 / 0.695; clean (e3_vac + e3_med; Exercise 3 and its girth rule)
+  -2.281 / 0.243; ue (e4_src + e4_tgt) -0.603 / 0.701. The source and
+  target of a problem share their transform.
+- Exercises 2 and the 2 x 2 use |eta| < 0.3 jets (Jamie's jet_pair), inside
+  Exercise 1's training range (|eta| < 0.7).
+
+**Matching audit (job 20554; training pools only;
+`docs/flow/jamie_otfm/matching_audit.csv`):** 16 batches of 256 + 256, the
+trainer's exact plan on the squared L2 of the standardised full images,
+against random pairs:
+
+| problem | cost: OT / random | share of the cost near a jet (R < 1) | axis offset, median (random) | r(E), r(g) of the pair | r(UE m) |
+| :--- | :--- | ---: | :--- | :--- | ---: |
+| E1-U mixture -> UE | 2840 / 3066 | 0.22 | - | - | 0.66 |
+| E3 vacuum -> quenched | 2070 / 3038 | 1.00 | 0.13 (1.61) | 0.03, 0.04 | - |
+| E3g (girth rule) | 2063 / 3018 | 1.00 | 0.14 (1.56) | 0.01, 0.01 | - |
+| E4 vacuum + UE -> quenched + UE | 2836 / 3063 | 0.40 | 1.49 (1.56) | -0.01, 0.00 | 0.65 |
+| hybrid data -> UE (vacuum; quenched) | 2837; 2835 / 3064 | 0.24 | - | - | 0.68; 0.65 |
+
+- Subtraction and Exercise 4: the plan is dominated by the UE (it matches
+  the event multiplicity, r 0.65-0.68, and barely the event plane) and
+  ignores the jet: in Exercise 4 the paired jets are as far apart as random
+  ones. Per the plan of the study this allows **one pre-specified
+  alternative cost for Exercise 4**: squared L2 over the towers within
+  R < 1.0 of either jet axis and over the rest, each divided by its median
+  over the batch, added (`--toy-cost nearfar`). It is run as a second
+  baseline next to the full-image reference, not instead of it.
+- Clean translation: the plan pairs jets by position (69% within 0.2) and
+  carries almost no energy or shape information (r 0.03, 0.04).
+- Soft plan for Exercise 3: reg = 89 (median row support 4.0 targets;
+  5-95%: 1.4-49), by the condfm pilot's rule (`entropic_reg.json`).
+
+**Models** (fm_train.py --method toyflow / toycond, `jamie_methods.py`; the
+UVCGAN-S ViT-ModNet velocity network with the time embedding, 1 or 2 input
+channels; Adam 2e-4, warm-up 1000, clip 1, EMA 0.9999, batch 256, exact
+minibatch OT unless stated):
+- **D (deterministic OT-CFM):** x_t = (1 - t) a + t b, u = b - a, one
+  output per input from the ODE solved from the source image.
+- **C (conditional FM on an OT pseudo-joint):** (c, y) from the plan, eps
+  drawn after it, noise-to-target path with c as a second channel; each
+  fresh noise one image. Not the same ODE as D, not a physical posterior.
+- **Supervision, labelled on every result:** pure unpaired (independent
+  source and target pools, the plan pairs them); synthetic paired (M = J +
+  B made from the prior and UE pools, trained to its own B); hybrid (both
+  terms); true-paired positive control (C on a vacuum jet and its own
+  quenchings).
+- Subtraction keeps the background-output form: input M, output B_hat,
+  readout J_hat = M - B_hat (raw, signed; clipping only as a labelled
+  readout).
+
+**Run ledger (fixed now; seed 0 unless stated; GPU-hours of training time;
+A6000s on dahlia; final checkpoint at the budget, EMA weights):**
+
+| id | run | supervision | base / init | budget |
+| :--- | :--- | :--- | :--- | ---: |
+| A1 | E1-U: e1_mix -> e1_ue (D) | pure unpaired | scratch | 1.5 h |
+| A2 | E1-P: e1_jet + e1_ue -> e1_ue (D) | synthetic paired | scratch | 1.5 h |
+| A3 | E3-D: e3_vac -> e3_med | pure unpaired | scratch | 1.5 h |
+| A4 | E3-Ch: C, exact plan | pure unpaired | scratch | 1.5 h |
+| A5 | E3-Cs: C, entropic plan (reg 89) | pure unpaired | scratch | 1.5 h |
+| A6 | E3-Cp: C on true quenchings | true-paired control | scratch | 1.5 h |
+| A7 | E3g-D: e3_vac -> e3g_med | pure unpaired | scratch | 1.5 h |
+| A8 | E3g-C: C, exact plan | pure unpaired | scratch | 1.5 h |
+| A9 | E4-D: e4_src -> e4_tgt, full-image cost | pure unpaired | scratch | 1.5 h |
+| A10 | E4-Dnf: the same, near/far cost | pure unpaired (altered coupling) | scratch | 1.5 h |
+| A11 | E4-C: C, exact plan, full-image cost | pure unpaired | scratch | 1.5 h |
+| A12 | E3-D seed 1 | pure unpaired | scratch | 1.5 h |
+| A13 | E4-D seed 1 | pure unpaired | scratch | 1.5 h |
+| B1-B4 | E1-P + unchanged loss; + abs + bal; + abs + bal + ring; flat 5-80 GeV prior | synthetic paired | A2 | 4000 updates each |
+| B5-B6 | E3-D + unchanged; + total-energy term (solved) | pure unpaired | A3 | 4000 |
+| B7-B9 | E3-Ch + unchanged; + ensemble radial profile; + capped diversity (only if A6 passes) | pure unpaired | A4 | 4000 |
+| B10-B12 | E4-D + unchanged; + global output-change penalty; + the same at R >= 1.0 | pure unpaired | A9 | 4000 |
+| B13-B15 | E4-Dnf + far penalty; E4-D seed 1 + far penalty; E4-C + far penalty | pure unpaired | A10, A13, A11 | 4000 |
+| B16-B19 | the 2 x 2: hybrid (prior vacuum or broad) x (mixture data vacuum + UE or quenched + UE), lambda_U = 1 | hybrid | A2 | 4000 |
+| B20-B21 | synthetic only, vacuum and broad priors (lambda_U = 0) | synthetic paired | A2 | 4000 |
+| B22 | hybrid (vacuum prior, quenched data) + batch-mean UE profile | hybrid | A2 | 4000 |
+
+- Estimated 19.5 h (A) + about 13 h (B, the rollout arms at about half the
+  update rate) = 32.5 h; evaluation extra. Continuations restart the EMA
+  warm-up (fresh step count) and continue the base's Adam state; equal
+  updates within a family, wall time and rollout cost reported.
+- **Extra-term weights:** one training-only gradient-scale audit on the
+  base checkpoint: lambda = median over 8 training batches of
+  |grad L_FM| / |grad L_term|, rounded to one significant digit, then
+  frozen. lambda_U = 1.
+- **Solved endpoints for constraints** (energy, invariance, profile,
+  diversity): an actual differentiable midpoint solve of 16 images per
+  update; its NFE is the smallest of 8, 16, 32 whose regularised quantity
+  moves by less than 5% against twice the NFE on 64 training images at the
+  base checkpoint. Exercise 1's GeV, mask and ring terms use the local
+  endpoint surrogate at t <= 0.25 instead (not a solved endpoint; only
+  solved outputs are scored).
+- **Not run (cost or scope), recorded in the coverage table:** a diffusion
+  or SDE sampler and DSBM; Jamie's discriminator architectures, learning
+  rates and cycle-weight sweeps (not applicable to OT-CFM); network widths
+  and a compact backbone; the paired two-channel arm on the toy; the PYTHIA
+  extension; C's diversity term in Exercise 4; longer training except for one
+  concrete convergence question.
+
+**Solver (validation, frozen before test outputs):** per base run, midpoint
+N against 2N from the same input (and for C the same noise, plus a second
+noise at 2N), N = 32, 64, 128, 256: adequate when the key per-image energy
+moves by less than 1% of the rms change the model makes, the W1/sigma of
+cone, ring, girth, mass, p_T^D, z_lead each move by less than their
+bootstrap sd, and for C the change is below 1/10 of that between two
+noises. Continuations use their base's N after one N-vs-2N check each.
+
+**Metrics (on solved test outputs; hidden truth only for scoring):**
+- Exercise 1 (t1 sets; true axis): J_hat cone energy offset and RMS before
+  calibration (calibrated too); negative-energy share; halo = J_hat on
+  truth-empty towers in R < 0.4, 0.4-1.0, > 1.0 (signed and positive); core
+  loss = J_hat - J on true towers above 1 GeV, with the soft true towers'
+  excess beside it; Jamie's ring table on true and empty support; radial
+  profiles, occupancy, leading tower; UE-only fakes by Jamie's largest
+  R = 0.4 cone above 10 GeV and, separately, anti-kT R = 0.4 jets above 10
+  GeV; rho x A (rho from R > 1.2) and per-tower rho with negatives dropped;
+  the 5-20, 60-80 and 80-100 GeV slices as labelled extrapolation tests.
+- Exercise 2 (t2_pair, each jet vacuum and quenched over the same B):
+  truth and reconstructed quenched-minus-vacuum shifts of cone energy,
+  girth, mass, p_T^D, z_lead and the 0.4-1.0 ring, mean and error
+  distributions; recovered fraction only where the truth shift exceeds 5
+  of its standard errors (mass: absolute errors); jets lost below 10 GeV,
+  inclusive first; where missing recoil goes (B_hat - B in the ring);
+  hard-tower loss vacuum against quenched.
+- Exercise 3: population W1/sigma (energy, cone, ring, far, mass, girth,
+  p_T^D, z_lead, z_g, R_g) against t3_pair's quenched jets, with t3_ref as
+  the finite-sample reference; shift recovered for cone, ring, girth
+  (Jamie's pass: 100 +- 10%); dependence on the input (correlations, own-
+  input shape EMD, condition swap at fixed noise) against identity and a
+  random target; the bank: per parent the conditional mean, sd and 10/50/90%
+  quantiles of cone, ring and girth, the conditional W1 of 128 model draws
+  against 128 true quenchings (the other 128 give the true-vs-true
+  reference), 68% and 90% interval coverage, the joint cone-ring
+  distribution; bootstrap over parents.
+- Exercise 3 girth rule: the same, plus whether the conditional mean
+  change follows the input girth or only its energy.
+- Exercise 4: core and ring with rho from the image's own R > 1.2 (signed;
+  the truth J_med + B_a treated alike), the truth-UE subtraction as a
+  labelled oracle; far-region (R >= 1) tower-by-tower correlation and
+  normalised rms change against the input; whether C's spread is in the
+  jet or in regenerated UE; seed 0 against seed 1 per jet.
+- The 2 x 2: the Exercise 2 shifts for each cell, the ring found in vacuum
+  jets, and vacuum fidelity.
+
+**Reading (fixed now):**
+- Jamie's failures are reproduced when (Exercise 1) the positive halo in
+  R < 0.4 exceeds 3 GeV per jet, or the true-tower loss above 1 GeV exceeds
+  10% of their energy; (Exercise 2) the recovered ring shift is below 20%
+  while the vacuum cone offset is within 1 GeV.
+- **Population agreement**, **event-preserving correspondence** and
+  **conditional-distribution correctness** are reported separately. A C
+  model recovers the conditional law if, for cone, ring and girth, its mean
+  conditional W1 is at most 1.5 times the paired control's and its 68%
+  coverage is within 0.58-0.78; otherwise it generates variation, not the
+  law. UE is preserved event by event when the far-region tower correlation
+  is at least 0.99 and the far rms change at most 10% of the UE tower sd.
+- In the 2 x 2 the data matter if the quenched-data and vacuum-data cells of
+  one prior differ in the recovered cone, girth or ring shift by more than 3
+  combined bootstrap sd; the prior invents recoil if a vacuum jet's ring
+  exceeds the truth's by more than 3 sd.
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything

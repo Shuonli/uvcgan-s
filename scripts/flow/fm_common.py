@@ -119,7 +119,10 @@ SHAPE     = (24, 64)
 JET_SHAPE = (16, 16)
 METHODS   = [ 'otcfm', 'sbcfm', 'condcfm', 'regress', 'regress_l1',
               'otcfm1', 'otcfm_pieces', 'postflow', 'regress_mse',
-              'jetflow', 'otcfm1_paired', 'joint_paired', 'condjet' ]
+              'jetflow', 'otcfm1_paired', 'joint_paired', 'condjet',
+              'toyflow', 'toycond' ]
+# the toy study's models (jamie_methods.py), on full 24 x 64 canvases
+TOY_METHODS = ('toyflow', 'toycond')
 COUPLINGS = ('exact', 'entropic')
 
 # training paths (Method.sine_path)
@@ -445,8 +448,10 @@ def construct_net(method, channels = 96, res_blocks = 2, attn = (4,),
         (c_in, c_out) = (1, 1)
     elif method == 'postflow':
         (c_in, c_out) = (2, 1)          # signal state and the mixture
-    elif method == 'condjet':
+    elif method in ('condjet', 'toycond'):
         (c_in, c_out) = (2, 1)          # the state x_t and the source jet c
+    elif method == 'toyflow':
+        (c_in, c_out) = (1, 1)
     else:
         (c_in, c_out) = (2 + cond, 2)
 
