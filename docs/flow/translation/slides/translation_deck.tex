@@ -1,8 +1,9 @@
-% A short deck on the unpaired PYTHIA -> JEWEL jet translation pilot
-% (FLOW_NOTES.md, "PYTHIA -> JEWEL translation pilot"; the detailed appendix is
-% translation_appendix.pdf). Numbers: docs/flow/translation/*.csv
-% (translation_report.py); figures: docs/flow/translation/deck_*.png
-% (translation_deck_figs.py). Build:
+% OT flow matching against CycleGAN for the unpaired PYTHIA -> JEWEL jet
+% translation (FLOW_NOTES.md, "PYTHIA -> JEWEL translation pilot" and
+% "CycleGAN baseline"). Numbers: docs/flow/translation/cgan/*.csv
+% (translation_report.py) via tables/deck_*.tex (translation_tables.py --deck
+% cgan); figures: docs/flow/translation/deck/*.png (translation_deck_figs.py).
+% Build:
 %   cd docs/flow/translation/slides && ~/pyext/tectonic_env/bin/tectonic translation_deck.tex
 \documentclass[aspectratio=169,10pt]{beamer}
 \usetheme{default}
@@ -13,7 +14,7 @@
 \usepackage{xcolor}
 \usepackage{tikz}
 \usetikzlibrary{positioning,arrows.meta}
-\graphicspath{{../}}
+\graphicspath{{../deck/}}
 
 % ink and series colours of the figures (blue / orange: colour-vision safe)
 \definecolor{ink}{HTML}{0B0B0B}
@@ -21,8 +22,9 @@
 \definecolor{muted}{HTML}{898781}
 \definecolor{rule}{HTML}{E1E0D9}
 \definecolor{cOT}{HTML}{2A78D6}
-\definecolor{cDSBM}{HTML}{EB6834}
+\definecolor{cCG}{HTML}{EB6834}
 \definecolor{wash}{HTML}{F4F3EF}
+\definecolor{cRJ}{HTML}{4A3AA7}
 
 \setbeamercolor{normal text}{fg=ink}
 \setbeamercolor{frametitle}{fg=ink}
@@ -44,15 +46,17 @@
 
 % a line key in a series colour, then the name in ink
 \newcommand{\keyot}{{\color{cOT}\rule[0.25em]{1.1em}{1.6pt}}\,}
-\newcommand{\keyds}{{\color{cDSBM}\rule[0.25em]{0.45em}{1.6pt}\hspace{0.2em}\rule[0.25em]{0.45em}{1.6pt}}\,}
-\newcommand{\ot}{\textbf{OT-CFM}}
-\newcommand{\dsbm}{\textbf{$\alpha$-DSBM}}
+\newcommand{\keycg}{{\color{cCG}\rule[0.25em]{0.45em}{1.6pt}\hspace{0.2em}\rule[0.25em]{0.45em}{1.6pt}}\,}
+\newcommand{\keyrj}{{\color{cRJ}\rule[0.25em]{0.6em}{1.6pt}\hspace{0.15em}\rule[0.25em]{0.15em}{1.6pt}}\,}
+\newcommand{\ot}{\textbf{OT-FM}}
+\newcommand{\cg}{\textbf{CycleGAN}}
 \newcommand{\smallnote}[1]{{\footnotesize\color{ink2}#1\par}}
+\newcommand{\refs}[1]{{\scriptsize\color{muted}[#1]}}
 
-\title{Turning PYTHIA jets into JEWEL jets\\with flow matching}
-\subtitle{An unpaired translation pilot on clean calorimeter jet images}
+\title{Optimal-transport flow matching\\as an alternative to CycleGAN}
+\subtitle{Unpaired PYTHIA $\to$ JEWEL translation of clean calorimeter jet images}
 % \author{}
-\date{October 2026}
+\date{October 2026 \quad (CycleGAN: 2-hour results; 8 and 24 hours pending)}
 
 \begin{document}
 
@@ -62,8 +66,8 @@
 \vspace{2.5em}
 \titlepage
 \vfill
-{\footnotesize\color{muted} seed 0, 2 GPU hours per model, 20k held-out jets per sample; full log:
-\texttt{FLOW\_NOTES.md}, results: \texttt{docs/flow/translation}\par}
+{\footnotesize\color{muted} seed 0; 20k held-out jets per sample; full log: \texttt{FLOW\_NOTES.md},
+results: \texttt{docs/flow/translation}\par}
 \end{frame}}
 
 % ---------------------------------------------------------------- 2
@@ -71,8 +75,8 @@
 \begin{columns}[c]
 \column{0.53\textwidth}
 \large
-Can a model trained on \textbf{unpaired} samples map a clean PYTHIA (vacuum) jet to a JEWEL-like
-(medium) jet?
+Can optimal-transport flow matching replace a CycleGAN for \textbf{unpaired} jet translation: clean
+PYTHIA (vacuum) $\to$ JEWEL-like (medium)?
 
 \vspace{0.8em}
 \normalsize
@@ -83,18 +87,18 @@ Two things must hold:
 \end{enumerate}
 
 \vspace{0.6em}
-\smallnote{There is no true JEWEL partner for a PYTHIA jet: any unpaired map is one of many with the same
-distributions. So this tests distributions and dependence, not a per-jet medium modification.}
+\smallnote{There is no true JEWEL partner for a PYTHIA jet: any unpaired map is one of many with the
+same distributions. So this tests distributions and dependence, not a per-jet medium modification.}
 \column{0.47\textwidth}
 \centering
 \begin{tikzpicture}[font=\footnotesize, every node/.style={inner sep=1pt}]
-  \node (in) {\includegraphics[width=2.0cm]{deck_thumb_in.png}};
+  \node (in) {\includegraphics[width=2.0cm]{thumb_in.png}};
   \node[below=2pt of in, text=ink2] {PYTHIA jet};
-  \node (out) [right=1.7cm of in] {\includegraphics[width=2.0cm]{deck_thumb_out.png}};
+  \node (out) [right=1.7cm of in] {\includegraphics[width=2.0cm]{thumb_out.png}};
   \node[below=2pt of out, text=ink2] {output};
-  \draw[-{Stealth[length=6pt]}, line width=1.2pt, cOT] (in) -- node[above=3pt, text=ink] {flow}
-    node[below=3pt, text=ink2] {(ODE)} (out);
-  \node (jw) [below=1.35cm of out] {\includegraphics[width=2.0cm]{deck_thumb_jewel.png}};
+  \draw[-{Stealth[length=6pt]}, line width=1.2pt, ink2] (in) -- node[above=3pt, text=ink] {model}
+    (out);
+  \node (jw) [below=1.35cm of out] {\includegraphics[width=2.0cm]{thumb_jewel.png}};
   \node[below=2pt of jw, text=ink2] {real JEWEL jets};
   \draw[{Stealth[length=5pt]}-{Stealth[length=5pt]}, line width=0.8pt, muted, dashed]
     ([yshift=-14pt]out.south) -- node[right=3pt, text=ink, align=left] {same\\statistics?}
@@ -106,137 +110,169 @@ distributions. So this tests distributions and dependence, not a per-jet medium 
 \end{frame}
 
 % ---------------------------------------------------------------- 3
-\begin{frame}{Setup}
+\begin{frame}{Two ways to learn an unpaired map}
 \begin{columns}[T]
-\column{0.48\textwidth}
-\textbf{Data}: clean jet images, no background
-\begin{itemize}\setlength\itemsep{0.3em}
-\item PYTHIA 2.6M events, JEWEL 870k events
-\item the leading R = 0.4 jet ($\ge$ 10 GeV): 53 towers in GeV on a 16 $\times$ 16 grid
-\item per sample: 200k training jets, 20k held-out test jets, split by event
-\end{itemize}
-\vspace{0.6em}
-\textbf{Compared with}
-\begin{itemize}\setlength\itemsep{0.3em}
-\item \dsbm{}: learns its own, random pairing (same network and budget)
-\item the PYTHIA jet unchanged; a second JEWEL sample (best possible)
-\end{itemize}
-\column{0.52\textwidth}
-\textbf{Model}: \ot{}, optimal-transport flow matching
+\column{0.5\textwidth}
+\keyot\ot{} \refs{1, 2}
 \begin{itemize}\setlength\itemsep{0.3em}
 \item pair each batch of 256 PYTHIA and 256 JEWEL jets by optimal transport (least change in log energy)
-\item learn the velocity along straight lines between pairs (UVCGAN-S network, 32M parameters; 2 hours on
-  one A6000)
-\item translate a jet by solving the flow ODE: 128 network calls, 6.6 ms per jet
+\item regress the velocity along straight lines between the pairs: a plain mean-squared-error loss, no
+  adversary
+\item translate: solve the flow ODE, 128 network calls
+\end{itemize}
+\column{0.5\textwidth}
+\keycg\cg{} \refs{3--5}: the repository's UVCGAN2, which UVCGAN-S builds on
+\begin{itemize}\setlength\itemsep{0.3em}
+\item two generators (PYTHIA $\to$ JEWEL, JEWEL $\to$ PYTHIA) and two discriminators
+\item adversarial, cycle-consistency and identity losses
+\item translate: one pass of the PYTHIA $\to$ JEWEL generator
 \end{itemize}
 \end{columns}
+\vspace{1.2em}
+\colorbox{wash}{\parbox{0.97\linewidth}{\vspace{0.4em}\hspace{0.3em}\textbf{Held equal:} the same 200k + 200k
+training jets (the leading R = 0.4 jet, 53 towers on a 16 $\times$ 16 grid), the same log-energy
+coordinates, the same generator network (the UVCGAN-S ViT-ModNet, 32M parameters), seed 0, and
+\textbf{2 hours on one A6000}. CycleGAN also continues to 8 and 24 hours.\vspace{0.4em}}}
 \end{frame}
 
 % ---------------------------------------------------------------- 4
-\begin{frame}{The output distributions match JEWEL}
-\begin{columns}[c]
-\column{0.55\textwidth}
-\includegraphics[width=\textwidth]{deck_marginals.png}
-\column{0.45\textwidth}
-\footnotesize
-\setlength{\tabcolsep}{3.5pt}
-\begin{tabular}{lrrrr}
-\toprule
- & $E$ & mass & girth & $z_\mathrm{lead}$ \\
-\midrule
-JEWEL vs JEWEL & 0.011 & 0.014 & 0.009 & 0.019 \\
-PYTHIA input & 0.55 & 0.88 & 0.10 & 0.23 \\
-\keyot OT-CFM & \textbf{0.025} & \textbf{0.021} & \textbf{0.012} & \textbf{0.008} \\
-\keyds $\alpha$-DSBM & 0.26 & 0.33 & 0.06 & 0.10 \\
-\bottomrule
-\end{tabular}
-\smallnote{Distance to 20k held-out JEWEL jets (W1 / $\sigma$); lower is better.}
+\begin{frame}{Jet $p_T$ spectra}
+\begin{center}
+\includegraphics[width=0.62\textwidth]{deck_pt.png}
+\end{center}
+\vspace{-0.9em}
+\begin{itemize}\setlength\itemsep{0.2em}
+\item \ot{} reproduces the JEWEL jet $p_T$ spectrum within statistics (cone and re-found jets), although
+  its inputs start near 20 GeV
+\item \cg{} at the same 2 hours: $p_T$ about doubled (mean 65 GeV; JEWEL 27, inputs 32); its 1-hour
+  checkpoint lowered it instead ($\times$0.67): its energy scale had not settled
+\end{itemize}
+\end{frame}
 
-\vspace{0.8em}
+% ---------------------------------------------------------------- 5
+\begin{frame}{Jet substructure}
+\begin{columns}[c]
+\column{0.44\textwidth}
+\includegraphics[width=\textwidth]{deck_marginals.png}
+\column{0.56\textwidth}
+\footnotesize
+\input{tables/cgan_population.tex}
+\smallnote{Distance to 20k held-out JEWEL jets (W1 / $\sigma$, lower is better; jets with $p_T \ge$ 10
+GeV). Bold: as close as a second JEWEL sample, within 3 standard deviations.}
+\vspace{0.6em}
 \normalsize
-\begin{itemize}\setlength\itemsep{0.35em}
-\item \ot{} is as close to JEWEL as a second JEWEL sample, within statistical errors; the same holds for
-  $p_T^D$, $z_g$, $R_g$ and for jets re-found with anti-$k_T$
-\item \dsbm{} closes 51-64\% of the gap
+\begin{itemize}\setlength\itemsep{0.3em}
+\item \ot{}: all seven observables as close to JEWEL as a second JEWEL sample
+\item \cg{} at 2 hours: no observable closer to JEWEL than the PYTHIA input itself; its cores are too hard
+  (leading tower 30 GeV against 9.7)
 \end{itemize}
 \end{columns}
 \end{frame}
 
-% ---------------------------------------------------------------- 5
-\begin{frame}{Jet shapes at fixed energy are reproduced too}
+% ---------------------------------------------------------------- 6
+\begin{frame}{Jet shapes at fixed $p_T$}
 \begin{center}
 \includegraphics[width=0.8\textwidth]{deck_profiles.png}
 \end{center}
 \vspace{-0.4em}
 \begin{itemize}\setlength\itemsep{0.35em}
-\item at the same energy, JEWEL jets are \textbf{narrower} and \textbf{harder} (higher $z_\mathrm{lead}$)
+\item at the same $p_T$, JEWEL jets are \textbf{narrower} and \textbf{harder} (higher $z_\mathrm{lead}$)
   than PYTHIA jets
-\item \ot{} follows both trends in every energy bin; \dsbm{} gets part of the way
+\item \ot{} follows both trends in every $p_T$ bin
+\item \cg{} at 2 hours: at fixed $p_T$ its girth is further from JEWEL than the input's; $z_\mathrm{lead}$
+  moves part of the way
 \end{itemize}
-\end{frame}
-
-% ---------------------------------------------------------------- 6
-\begin{frame}{Each output keeps its input jet}
-\begin{columns}[c]
-\column{0.5\textwidth}
-\includegraphics[width=\textwidth]{deck_displays.png}
-\column{0.5\textwidth}
-\begin{itemize}\setlength\itemsep{0.5em}
-\item \ot{}: input-output correlation 0.94 (energy), 0.99 (girth), 0.91 (mass)
-\item every output is closer in shape to its own input than to another, random input jet, by
-  11$\times$ on average
-\item a random JEWEL jet has the right distributions but correlation 0: matching distributions alone
-  proves nothing
-\item \dsbm{}: 0.80 (energy), 0.98 (girth); two samples of one jet differ more than a sample differs from
-  its input
-\end{itemize}
-\vspace{0.3em}
-\smallnote{Fixed held-out inputs (cone-energy quantiles 0.1, 0.5, 0.9). The JEWEL jet is a reference at the
-same energy quantile, not a truth.}
-\end{columns}
 \end{frame}
 
 % ---------------------------------------------------------------- 7
-\begin{frame}{Caveat: the energy change mirrors the two samples}
-\begin{center}
-\includegraphics[width=0.82\textwidth]{deck_energy.png}
-\end{center}
-\vspace{-0.5em}
-\begin{itemize}\setlength\itemsep{0.35em}
+\begin{frame}{Does each output keep its input jet?}
+\begin{columns}[c]
+\column{0.52\textwidth}
+\includegraphics[width=\textwidth]{deck_displays.png}
+\column{0.48\textwidth}
+\footnotesize
+\input{tables/cgan_dependence.tex}
+\smallnote{Input-output correlation over 20k test jets; own input: share of outputs closer in shape to
+their own input than to another, random input jet.}
+\vspace{0.6em}
+\normalsize
+\begin{itemize}\setlength\itemsep{0.3em}
+\item \ot{}: correlations 0.91-0.99; every output is closer to its own input than to another jet
+\item \cg{} keeps the input too: correlations 0.85-0.99, 99.9\% of outputs closest to their own input
+\end{itemize}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------- 8
+\begin{frame}{Caveat: the $p_T$ change follows the two samples}
+\begin{columns}[c]
+\column{0.5\textwidth}
+\includegraphics[width=\textwidth]{deck_ptchange.png}
+\column{0.5\textwidth}
+\begin{itemize}\setlength\itemsep{0.4em}
 \item the PYTHIA sample starts near 20 GeV (presumably its generator-level jet requirement); JEWEL
   reaches down to 10 GeV
 \item \ot{} lowers 20-25 GeV jets by 40\% and leaves jets above 40 GeV unchanged: a map between two
   differently selected samples, not a quenching mechanism
+\item \cg{} at 2 hours raises $p_T$ by a factor growing from 1.2 (15-20 GeV inputs) to 2.6 (above 50
+  GeV): not a map between the two spectra
+\end{itemize}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------- 9
+\begin{frame}{Training cost}
+\begin{columns}[c]
+\column{0.44\textwidth}
+\includegraphics[width=\textwidth]{deck_curves.png}
+\column{0.56\textwidth}
+\footnotesize
+\input{tables/cgan_cost.tex}
+\smallnote{One A6000; training time without checkpoints; latency at batch 2000.}
+\vspace{0.6em}
+\normalsize
+\begin{itemize}\setlength\itemsep{0.3em}
+\item \ot{}: 123k updates in 2 GPU hours (17 per second), one network pass each
+\item \cg{}: 2.7 updates per second (six generator passes and two discriminators per update), 20k
+  updates in the same 2 hours; but one network pass per jet, 130 times faster to apply
+\end{itemize}
+\end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------- 10
+\begin{frame}{Summary}
+\begin{itemize}\setlength\itemsep{0.5em}
+\item \textbf{At the same 2 GPU hours:} \ot{} (no pairs) produces jets statistically indistinguishable from
+  held-out JEWEL ($p_T$, 7 substructure observables, their $p_T$ dependence, re-found jets), and each output
+  stays tied to its input
+\item \cg{} (the repository's UVCGAN2, same data and generator network) does not: its $p_T$ scale is off
+  by a factor 2 and no observable moves toward JEWEL; its outputs do keep their inputs
+\item its training had not settled at 2 hours (the 1-hour checkpoint erred the other way); its 8- and
+  24-hour checkpoints are being trained, and this deck is rebuilt with them
+\item \ot{}'s $p_T$ change reflects how the two samples were selected, not quenching; no per-jet truth
+  exists
 \end{itemize}
 \end{frame}
 
-% ---------------------------------------------------------------- 8
-\begin{frame}{Summary}
-\begin{columns}[T]
-\column{0.5\textwidth}
-\textbf{Shown}
-\begin{itemize}\setlength\itemsep{0.4em}
-\item trained without pairs in 2 GPU hours, \ot{} produces jets statistically indistinguishable from
-  held-out JEWEL: 7 observables, their energy dependence, re-found jets
-\item each output stays tied to its input (correlations 0.91-0.99)
-\item \dsbm{}, same budget: about half way
-\end{itemize}
-\column{0.5\textwidth}
-\textbf{Not shown}
-\begin{itemize}\setlength\itemsep{0.4em}
-\item a per-jet medium modification: there is no per-jet truth, and optimal transport picks the
-  least-change map
-\item physics in the energy shift: it reflects how the samples were selected
-\item robustness: one seed
-\end{itemize}
-\end{columns}
-\vspace{1.2em}
-\colorbox{wash}{\parbox{0.97\linewidth}{\vspace{0.4em}\hspace{0.3em}\textbf{Next:} train two more seeds.
-Does the same PYTHIA jet get the same output, not only the same distributions?\vspace{0.4em}}}
-
-\vspace{0.8em}
-\smallnote{Practical: the ODE needs 128 network calls (a 4-step solve barely moves the jets); towers
-that should be empty get $\sim$0.002 GeV, 0.1\% of the jet energy.}
+% ---------------------------------------------------------------- 11
+\begin{frame}{References}
+\footnotesize
+\begin{enumerate}\setlength\itemsep{0.4em}
+\item Y. Lipman, R. T. Q. Chen, H. Ben-Hamu, M. Nickel, M. Le, \emph{Flow Matching for Generative
+  Modeling}, ICLR 2023, arXiv:2210.02747
+\item A. Tong, K. Fatras, N. Malkin, G. Huguet, Y. Zhang, J. Rector-Brooks, G. Wolf, Y. Bengio,
+  \emph{Improving and generalizing flow-based generative models with minibatch optimal transport}
+  (OT-CFM), TMLR 2024, arXiv:2302.00482; code: \texttt{github.com/atong01/conditional-flow-matching}
+\item J.-Y. Zhu, T. Park, P. Isola, A. A. Efros, \emph{Unpaired Image-to-Image Translation using
+  Cycle-Consistent Adversarial Networks} (CycleGAN), ICCV 2017, arXiv:1703.10593
+\item D. Torbunov et al., \emph{UVCGAN: UNet Vision Transformer cycle-consistent GAN for unpaired
+  image-to-image translation}, WACV 2023, arXiv:2203.02557
+\item D. Torbunov et al., \emph{UVCGAN v2: An Improved Cycle-Consistent GAN for Unpaired
+  Image-to-Image Translation}, arXiv:2303.16280
+\item \emph{Stratified CycleGAN for unsupervised data decomposition} (UVCGAN-S), arXiv:2510.23717
+\item K. C. Zapp, \emph{JEWEL 2.0.0: directions for use}, Eur. Phys. J. C 74 (2014) 2762,
+  arXiv:1311.0048
+\end{enumerate}
 \end{frame}
 
 \end{document}

@@ -12,9 +12,11 @@ plain-language summary: `FLOW_SUMMARY.md`, Part 12. The CycleGAN baseline:
   a random JEWEL jet;
 - `slides/translation_deck.pdf`: OT flow matching (OT-FM, i.e.
   OT-CFM) against CycleGAN (source `slides/translation_deck.tex`; tables
-  `slides/tables/deck_*.tex` from `translation_tables.py --deck cgan`;
+  `slides/tables/cgan_*.tex` from `translation_tables.py --deck cgan`;
   figures `deck/*.png` from `scripts/flow/translation_deck_figs.py`,
-  colour-vision-safe blue/orange);
+  colour-vision-safe blue/orange). CycleGAN at the matched 2 hours so far
+  (`FLOW_NOTES.md`, "CycleGAN baseline: results at 2 hours"); rebuilt at its
+  8- and 24-hour milestones;
 - `slides/translation_appendix.pdf`: the detailed 4-slide appendix (source
   `slides/translation_appendix.tex`, `slides/body.tex`; generated tables
   `slides/tables/*.tex`).

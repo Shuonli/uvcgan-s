@@ -3230,7 +3230,7 @@ observables; val references: identity 0.321, JEWEL-train draws 0.016):
 | OT-CFM 32 vs 64 NFE | 0.52 | 8.4% of the E change (6.2 GeV rms) | mass 0.027 (0.013) | not adequate |
 | OT-CFM 64 vs 128 | 0.10 | 1.6% | z_g 0.012 (0.015) | not adequate (energy) |
 | OT-CFM 128 vs 256 | 0.035 | 0.54% | R_g 0.004 (0.021) | **adequate: 128 NFE frozen** |
-| OT-CFM 4 Euler vs 256 | 6.38 | 98% | mass 0.66 | does not translate |
+| OT-CFM 4 Euler vs 256 | 6.38 | 98% | mass 0.66 | lowers E too much (mean E_out/E_in 0.67 against 0.82) |
 | alpha-DSBM 30 vs 60 steps, same noise | 0.55 | 0.09 of two independent samples (6.01) | z_g 0.004 (0.019) | **adequate: 30 steps frozen** |
 
 The pre-registered rule named 64 NFE as the fallback, checked against 128.
@@ -3500,7 +3500,41 @@ with the ratio to JEWEL.
 - Successes and failures are reported per model, at the matched budget
   first. Then whether more CycleGAN training changes the comparison.
 
-## Stochastic conditional FM pilot: several JEWEL-like outputs per PYTHIA jet (set up 2026-10-05 16:40, before training)
+### CycleGAN baseline: results at 2 hours (job 20490 training; 20507 outputs, 20508 curves, 20509 report)
+
+`docs/flow/translation/cgan/` (the pilot's report files for OT-FM and
+CycleGAN 2 h), deck `slides/translation_deck.pdf`.
+- **Training:** 20,000 updates (epoch 20) in 2.06 h of training time, 2.7
+  updates/s, against OT-FM's 122,720 in 2.00 h. The milestone checkpoint is
+  used as saved.
+- **Validation (descriptive):** at 1 h the outputs had too little energy
+  (mean E_out/E_in 0.67; E W1/sigma 0.62); at 2 h too much (1.95; 3.81). The
+  energy scale was still swinging.
+- **Test (20k jets), W1/sigma to JEWEL:** E 3.91, mass 3.33, girth 0.14,
+  p_T^D 0.66, z_lead 0.58, z_g 0.12, R_g 0.22: **every observable further
+  from JEWEL than the PYTHIA input itself** (identity 0.55, 0.88, 0.10, 0.26,
+  0.23, 0.034, 0.16). OT-FM is better in all seven by far more than 3
+  combined sd.
+  - Mean cone pT 65.0 GeV (JEWEL 27.1, its inputs 32.3); the gain grows with
+    the input: median output 21 GeV for 15-20 GeV inputs (x1.2), 145 GeV for
+    50-70 GeV (x2.6). Refound jets likewise (pT W1 3.83).
+  - At fixed energy: girth further from JEWEL than the input's (0.67 against
+    0.21); z_lead part of the way (0.23 against 0.42).
+  - Cores far too hard: leading tower 30.1 GeV (JEWEL 9.7), z_lead 0.43
+    (0.34), towers above 1 GeV 8.1 (5.9); sub-0.5 GeV energy 2.35 GeV (2.71).
+    The pre-registered flags (soft floor, flattening) are one-sided and do
+    not fire.
+- **Input dependence:** correlations E 0.85, girth 0.99, mass 0.85, core
+  0.99, leading tower 0.92; 99.9% of outputs closest to their own input
+  (shape EMD to it 0.081, OT-FM 0.041).
+- **Reading (pre-registered):** at the matched budget CycleGAN moves no
+  marginal toward JEWEL: not useful, with input dependence and no artefact
+  flag. OT-FM is better in every observable. Its training had not settled
+  (the 1-h checkpoint erred the other way); 8 h and 24 h follow.
+- **Cost:** one generator pass, 0.050 ms per jet (130 times faster than
+  OT-FM's 128-evaluation solve).
+
+## Stochastic conditional FM pilot: several JEWEL-like outputs per PYTHIA jet (set up 2026-10-05 16:25, before training)
 
 **Question.** The deterministic OT-CFM translator (OT-FM, previous section)
 gives JEWEL-like distributions and keeps a strong dependence on each PYTHIA

@@ -40,6 +40,9 @@ COLOURS = { 'OT-FM' : '#2a78d6', 'CycleGAN' : '#eb6834', 'CycleGAN 8 h' : '#c552
 DASHES  = { 'CycleGAN' : '--', 'CycleGAN 8 h' : (0, (5, 1.5, 1, 1.5)),
             'CycleGAN 24 h' : '-.' }
 RANDOM = '#4a3aa7'      # random JEWEL: violet (passes the CVD check with blue and orange)
+# the stochastic pilot's conditional FM arms: aqua (hard OT), yellow (soft OT);
+# with OT-FM blue and random JEWEL violet they pass the CVD check
+CONDFM = { 'hard' : ('#1baf7a', '--'), 'soft' : ('#eda100', '-.') }
 # report sample names -> deck names
 NAMES = { 'JEWEL test' : 'JEWEL', 'identity' : 'PYTHIA input', 'random JEWEL' : 'random JEWEL' }
 # the sequential ramp of the displays (dataviz reference blue, 100 -> 700)
@@ -62,6 +65,9 @@ def style(name):
         return dict(color = MUTED, lw = 1.4, ls = ':')
     if name == 'random JEWEL':
         return dict(color = RANDOM, lw = 1.5, ls = '-.')
+    if name.startswith('CondFM'):
+        (c, ls) = CONDFM['hard' if 'hard' in name else 'soft']
+        return dict(color = c, lw = 1.5, ls = ls)
     if name.startswith('CycleGAN'):
         key = 'CycleGAN 24 h' if '24' in name else ('CycleGAN 8 h' if ' 8 ' in name + ' '
                                                     else 'CycleGAN')
@@ -121,7 +127,10 @@ def fig_pt(plt, obs, labels, path):
     """Jet pT spectra (log) and their ratio to JEWEL: the R = 0.4 cone pT
     (all outputs) and the leading anti-kT jet refound in each canvas."""
     names = series(labels)
-    bins = np.arange(0, 72.5, 2.5)
+    # up to 70 GeV, or further when a model's spectrum reaches beyond it
+    top99 = max(np.nanpercentile(obs[name][kind][q], 99.5) for name in names
+                for (kind, q) in [ ('crop', 'E'), ('refound', 'pt') ])
+    bins = np.arange(0, min(162.5, max(72.5, 2.5 * np.ceil(top99 / 2.5) + 2.5)), 2.5)
     (fig, axes) = plt.subplots(2, 2, figsize = (5.7, 3.25), sharex = 'col',
                                gridspec_kw = { 'height_ratios' : (2.2, 1), 'hspace' : 0.08 })
     for (c, (kind, q, label)) in enumerate([
@@ -148,7 +157,7 @@ def fig_pt(plt, obs, labels, path):
             r = np.where(ok & (n > 0), (n / n.sum()) / (ref / ref.sum()), np.nan)
             bot.plot(x, np.repeat(r, 2), **style(name))
         bot.set_ylim(0, 2.4)
-        bot.set_xlim(0, 70)
+        bot.set_xlim(0, bins[-1])
         bot.set_xlabel(label, labelpad = 1)
         bot.set_ylabel('ratio to JEWEL' if c == 0 else '')
         bot.axvline(10, color = AXIS, lw = 0.6)
@@ -174,8 +183,10 @@ def fig_marginals(plt, obs, labels, path):
         ax.set_yticks([])
         ax.spines['left'].set_visible(False)
         ax.set_xlim(*rng)
-    legend_below(fig, axes[0][0], ncol = len(names))
-    fig.tight_layout(rect = (0, 0.07, 1, 1), h_pad = 0.6, w_pad = 1.0)
+    ncol = len(names) if len(names) <= 3 else int(np.ceil(len(names) / 2))
+    legend_below(fig, axes[0][0], ncol = ncol)
+    fig.tight_layout(rect = (0, 0.07 if ncol == len(names) else 0.13, 1, 1), h_pad = 0.6,
+                     w_pad = 1.0)
     fig.savefig(path)
     plt.close(fig)
 
@@ -212,17 +223,19 @@ def fig_ptchange(plt, obs, labels, path):
     mids  = 0.5 * (edges[1:] + edges[:-1])
     (fig, ax) = plt.subplots(figsize = (3.3, 2.15))
     ax.axhline(1, color = AXIS, lw = 0.8)
+    top = 1.5
     for name in labels:
         r = obs[name]['crop']['E'] / pt_in
         q = np.array([ np.percentile(r[(pt_in >= a) & (pt_in < b)], [ 16, 50, 84 ])
                        for (a, b) in zip(edges[:-1], edges[1:]) ])
+        top = max(top, 1.08 * q[:, 2].max())
         ax.fill_between(mids, q[:, 0], q[:, 2], color = style(name)['color'], alpha = 0.12,
                         lw = 0)
         ax.plot(mids, q[:, 1], **style(name), marker = 'o', ms = 2.6, mew = 0, label = name)
     ax.set_xlabel(r'input jet $p_T$ (GeV)', labelpad = 1)
     ax.set_title(r'$p_{T,\mathrm{out}} / p_{T,\mathrm{in}}$ (median, 16-84%)', loc = 'left',
                  pad = 3)
-    ax.set_ylim(0.3, 1.5)
+    ax.set_ylim(0.3, min(top, 3.5))
     ax.grid(axis = 'y', color = GRID, lw = 0.5)
     ax.set_axisbelow(True)
     ax.legend(loc = 'lower right', handlelength = 2.4)
@@ -400,7 +413,7 @@ def main():
         c = c[c['setting'] != 'euler4']
         # OT-FM's curve, and CycleGAN's over all its checkpoints
         names = [ m for m in [ 'OT-FM' ] + sorted(set(c['model'])) if (c['model'] == m).any()
-                  and (m == 'OT-FM' or m.startswith('CycleGAN')) ]
+                  and (m == 'OT-FM' or m.startswith(('CycleGAN', 'CondFM'))) ]
         curves = { m : c[c['model'] == m] for m in dict.fromkeys(names) }
         fig_curves(plt, curves, pd.read_csv(os.path.join(tables, 'curves_refs.csv')),
                    out('deck_curves.png'))

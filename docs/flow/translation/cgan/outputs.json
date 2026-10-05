@@ -1,0 +1,41 @@
+{
+    "OT-FM": {
+        "run": "tr_otcfm_s0",
+        "label": "OT-CFM",
+        "setting": "midpoint128",
+        "primary": true,
+        "nfe": 128,
+        "solver": "midpoint",
+        "sampler_seed": null,
+        "step": 122720,
+        "updates": 122720,
+        "train_time": 7200.407428465784,
+        "n": 20000,
+        "raw_min_gev": -0.0036301538348197937,
+        "generate_seconds": 130.96850146353245,
+        "ms_per_jet": 6.577377445995808,
+        "batch": 2000,
+        "gpu": "NVIDIA RTX A6000",
+        "clipped_energy_share": 0.00015956991410348564
+    },
+    "CycleGAN 2 h": {
+        "run": "model_m(uvcgan-v2)_d(resnet)_g(vit-modnet)_tr_cgan_s0",
+        "label": "CycleGAN-2h",
+        "setting": "gen",
+        "primary": true,
+        "nfe": 1,
+        "solver": "generator",
+        "sampler_seed": null,
+        "step": 20000,
+        "updates": 20000,
+        "epoch": 20,
+        "train_time": 7431.839576527476,
+        "n": 20000,
+        "raw_min_gev": -0.02822711318731308,
+        "generate_seconds": 1.2005443796515465,
+        "ms_per_jet": 0.050491677969694136,
+        "batch": 2000,
+        "gpu": "NVIDIA RTX A6000",
+        "clipped_energy_share": 0.0019361716695129871
+    }
+}

@@ -739,7 +739,9 @@ A sequence of cheap diagnostics, then controls:
 - **Settings fixed on held-out validation jets:** the OT-CFM solve needs
   128 network evaluations before each jet's output stops changing (32 were
   not enough); alpha-DSBM's 30-step sampler was enough. The fast 4-step solve of the
-  subtraction study does not work here: it barely changes the jets.
+  subtraction study does not work here: it lowers the jet energy too much
+  (mean 22 GeV against 27 for JEWEL and for the 128-step solve; output over
+  input energy 0.67 against 0.82).
 - **Results** (20k held-out jets each; distance to held-out JEWEL, lower
   is better; "two JEWEL samples" is as close as two samples of this size
   can get):
