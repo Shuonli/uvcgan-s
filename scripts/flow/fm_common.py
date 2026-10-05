@@ -56,6 +56,16 @@ Methods (c.f. FLOW_NOTES.md):
              'tr_pythia', target 'tr_jewel' and the translation
              normalisation, the same method is the OT-CFM of the PYTHIA ->
              JEWEL translation pilot (translation_data.py).
+    condjet  noise-to-target conditional FM of jets (the stochastic
+             translation pilot): x0 = standard Gaussian noise on the 53 cone
+             towers (the canvas padding keeps its fixed value), x1 = a target
+             jet, and the source jet's state an unchanged second input
+             channel. The (source, target) pairs come from a minibatch plan
+             between the two pools, exact OT (`coupling = 'exact'`) or
+             entropic (`'entropic'`, regularisation `ot_reg`), on the squared
+             L2 of the states; one target is drawn for every source row, the
+             noise independently after the pairing (`cond_fm_loss`,
+             `MaskedVelocity`).
 
 Paired arms of the consolidated subtraction benchmark (FLOW_NOTES.md,
 "Consolidated benchmark"). They train on the same real training mixtures as
@@ -109,13 +119,17 @@ SHAPE     = (24, 64)
 JET_SHAPE = (16, 16)
 METHODS   = [ 'otcfm', 'sbcfm', 'condcfm', 'regress', 'regress_l1',
               'otcfm1', 'otcfm_pieces', 'postflow', 'regress_mse',
-              'jetflow', 'otcfm1_paired', 'joint_paired' ]
+              'jetflow', 'otcfm1_paired', 'joint_paired', 'condjet' ]
+COUPLINGS = ('exact', 'entropic')
 
 # training paths (Method.sine_path)
 PATHS = ('straight', 'sine')
 
 # methods whose flow starts from the mixture and uses a minibatch OT plan
-OT_METHODS = ('otcfm', 'sbcfm', 'otcfm1', 'otcfm_pieces', 'jetflow')
+OT_METHODS = ('otcfm', 'sbcfm', 'otcfm1', 'otcfm_pieces', 'jetflow', 'condjet')
+
+# jet -> jet methods on the 16 x 16 canvases
+JET_METHODS = ('jetflow', 'condjet')
 
 # posterior samplers: noise start, conditioned on the mixture, read as the
 # mean of `samples` draws
@@ -144,6 +158,9 @@ SELECTION = {
     'regress_mse'  : (1, 'none', 'direct', 1),
     # the OT-CFM inference setting, kept for the jet -> jet flow
     'jetflow'      : (4, 'euler', 'direct', 1),
+    # the stochastic translation pilot: one sample at midpoint 128, the
+    # deterministic translator's resolved solve, checked again on val
+    'condjet'      : (128, 'midpoint', 'direct', 1),
     # the benchmark's paired arms: selected as the unpaired arm is (the
     # residual M - B with 4 Euler steps); both readouts and the accurate
     # solve are scored at the selected checkpoint
@@ -163,6 +180,7 @@ DOMAINS = {
     'postflow'     : ('background', 'signal'),
     'regress_mse'  : ('background', 'signal'),
     'jetflow'      : ('closure_src', 'closure_tgt'),
+    'condjet'      : ('tr_pythia', 'tr_jewel'),
     'otcfm1_paired' : ('embed_pairs',),
     'joint_paired'  : ('embed_pairs',),
 }
@@ -175,7 +193,7 @@ def is_regression(name):
     return name.startswith('regress')
 
 def image_shape(method):
-    return JET_SHAPE if method == 'jetflow' else SHAPE
+    return JET_SHAPE if method in JET_METHODS else SHAPE
 
 def data_root():
     return os.path.join(os.environ.get('UVCGAN_S_DATA', 'data'), DATA_PATH)
@@ -427,6 +445,8 @@ def construct_net(method, channels = 96, res_blocks = 2, attn = (4,),
         (c_in, c_out) = (1, 1)
     elif method == 'postflow':
         (c_in, c_out) = (2, 1)          # signal state and the mixture
+    elif method == 'condjet':
+        (c_in, c_out) = (2, 1)          # the state x_t and the source jet c
     else:
         (c_in, c_out) = (2 + cond, 2)
 
@@ -536,6 +556,8 @@ class GraphedSinkhorn:
         self.tol  = tol
         self.max_blocks = max_blocks
         self.log_w = float(-np.log(n))
+        self.block  = block
+        self.blocks = 0                  # blocks of sweeps of the last solve
 
         self.kmat = torch.zeros((n, n), device = device)   # -C / reg
         self.f    = torch.zeros(n, device = device)         # phi / reg
@@ -571,7 +593,7 @@ class GraphedSinkhorn:
         self.g.zero_()
 
         err = None
-        for _ in range(self.max_blocks):
+        for self.blocks in range(1, self.max_blocks + 1):
             self.graph.replay()
             err = float((torch.logsumexp(self.log_plan(), dim = 1).exp()
                          - 1 / self.n).abs().sum())
@@ -689,13 +711,114 @@ class ShapeEnergyCost:
             c = json.load(f)
         return ShapeEnergyCost(c['scales'], lam, c['eps'], c['a_s'], c['a_E'])
 
+def jet_active_mask(device):
+    """(1, 1, 16, 16) bool: the 53 towers of the R = 0.4 cone on the jet
+    canvas (closure_data: the 9 x 9 window at [OFFSET, OFFSET + 9)). Every
+    other canvas coordinate is padding, 0 GeV in every jet."""
+    # pylint: disable=import-outside-toplevel
+    from closure_data import OFFSET, cone_mask   # imports this module
+    mask = torch.zeros(JET_SHAPE, dtype = torch.bool)
+    mask[OFFSET:OFFSET + 9, OFFSET:OFFSET + 9] = torch.from_numpy(cone_mask())
+    return mask[None, None].to(device)
+
+def noise_start(eps, mask, pad):
+    """x0 of the noise-to-target path: the noise on the active coordinates,
+    the fixed padding value elsewhere."""
+    return torch.where(mask, eps, torch.as_tensor(pad, dtype = eps.dtype,
+                                                  device = eps.device))
+
+def cond_fm_loss(net, cond, x1, x0, t):
+    """Noise-to-target conditional FM: x_t = (1 - t) x0 + t x1, u_t = x1 -
+    x0, mean((v(t, [x_t, cond]) - u_t)^2) over every element (the flows'
+    normalisation). Padding: x0 = x1 there, so x_t is fixed and u_t = 0."""
+    tt = t.reshape(-1, *([ 1 ] * (x1.dim() - 1))).to(x1.dtype)
+    xt = (1 - tt) * x0 + tt * x1
+    return torch.mean((net(t, torch.cat((xt, cond), dim = 1)) - (x1 - x0))**2)
+
+class MaskedVelocity(torch.nn.Module):
+    """v(t, [x, c]) on the active coordinates, 0 on the padding: integrated
+    from noise_start, the padding keeps its value, as in every training
+    state."""
+
+    def __init__(self, net, mask):
+        super().__init__()
+        self.net  = net
+        self.mask = mask
+
+    def forward(self, t, inp):
+        return self.net(t, inp) * self.mask
+
+@torch.no_grad()
+def sample_cond(net, cond, eps, mask, pad, nfe, solver = 'midpoint'):
+    """One conditional sample per row: dx/dt = v(t, [x, cond]) from x0 =
+    noise_start(eps) (fm_common.integrate). The same (cond, eps) give the same
+    output; diversity comes from eps only."""
+    return integrate(MaskedVelocity(net, mask), noise_start(eps, mask, pad),
+                     cond, nfe, solver)
+
+def row_targets(log_plan, gen):
+    """One target index per source row i, drawn with probability P_ij /
+    sum_j P_ij (rows of a plan given as log P, (n, m)); rows may share a
+    target."""
+    q = torch.softmax(log_plan.double(), dim = 1)
+    return torch.multinomial(q, 1, generator = gen).squeeze(1)
+
+def effective_support(log_plan):
+    """exp(-sum_j q_ij log q_ij) of each row's conditional q = P_i. / P_i.sum()."""
+    lq = torch.log_softmax(log_plan.double(), dim = 1)
+    return torch.exp(-(lq.exp() * lq).sum(1))
+
+class RowCoupling:
+    """(source, target) pairs of condjet: the plan between a batch of source
+    and target states (squared L2 of the flattened states, uniform
+    marginals), then one target per source row (row_targets).
+
+    exact: POT's network simplex (TorchCFM's exact plan; a permutation for
+    uniform marginals of equal size, so every row gets its assigned target).
+    entropic: min <P, C> - reg H(P) by the log-domain Sinkhorn of
+    GraphedSinkhorn, iterated until the L1 error of the row marginals is
+    below tol (the columns are exact after every sweep).
+    """
+
+    def __init__(self, kind, reg = None, tol = 1e-4):
+        assert kind in COUPLINGS, kind
+        assert (kind == 'exact') or (reg is not None and reg > 0), \
+            'the entropic plan needs --ot-reg'
+        self.kind   = kind
+        self.reg    = reg
+        self.tol    = tol
+        self.exact  = OTPlanSampler(method = 'exact')
+        self.solver = None
+        self.last   = {}
+
+    def log_plan(self, src, tgt):
+        (a, b) = (src.reshape(len(src), -1).float(), tgt.reshape(len(tgt), -1).float())
+        if self.kind == 'exact':
+            plan = torch.from_numpy(self.exact.get_map(a, b)).to(a.device)
+            self.last = { 'plan_err' : 0.0 }
+            return torch.log(plan)
+        if (self.solver is None) or (self.solver.n != len(a)):
+            self.solver = GraphedSinkhorn(len(a), self.reg, a.device, tol = self.tol,
+                                          max_blocks = 2000)
+        (_, err) = self.solver(torch.cdist(a, b)**2)
+        self.last = { 'plan_err' : err }
+        return self.solver.log_plan()
+
+    def __call__(self, src, tgt, gen):
+        """(src, tgt[j], j): every source row once, in its order."""
+        log_plan = self.log_plan(src, tgt)
+        j = row_targets(log_plan, gen)
+        self.last['unique_targets'] = float(torch.unique(j).numel() / len(j))
+        return (src, tgt[j], j)
+
 class Method:
     """Training pairs and loss of one method, and its decoding."""
 
     def __init__(self, name, norm, sigma = None, augment = 'none',
                  cost = 'l2', cost_lambda = 1.0, pairing = 'unpaired',
                  target = 'closure_tgt', paired_n = None, path = 'straight',
-                 eta = 0.0, source = 'closure_src'):
+                 eta = 0.0, source = 'closure_src', coupling = 'exact',
+                 ot_reg = None, sinkhorn_tol = 1e-4):
         # pylint: disable=too-many-arguments
         assert name in METHODS, name
         assert augment in ('none', 'jets'), augment
@@ -750,6 +873,15 @@ class Method:
         elif name in SAMPLERS + ('otcfm1_paired', 'joint_paired'):
             self.sigma   = 0.0 if sigma is None else sigma
             self.matcher = ConditionalFlowMatcher(sigma = self.sigma)
+        elif name == 'condjet':
+            # the path is cond_fm_loss's; times, noise and the row draws of
+            # the pairs each have their own generator (set by the trainer),
+            # so that both couplings see the same times and noise
+            self.sigma    = 0.0
+            self.matcher  = None
+            self.coupling = RowCoupling(coupling, ot_reg, sinkhorn_tol)
+            self.time_gen = self.noise_gen = self.pair_gen = None
+            self._padding = None
         else:
             self.sigma   = None
             self.matcher = None
@@ -760,9 +892,23 @@ class Method:
             # targets are made from them
             return (self.source_domain,) if self.name == 'jetflow' \
                 else DOMAINS[self.name][:1]
-        if self.name == 'jetflow':
+        if self.name in JET_METHODS:
             return (self.source_domain, self.target)
         return DOMAINS[self.name]
+
+    def padding(self, device):
+        """condjet: (the active-coordinate mask, the padding's state value)."""
+        if (self._padding is None) or (self._padding[0].device != device):
+            pad = float(self.norm.z(torch.zeros(()), 'jet'))
+            self._padding = (jet_active_mask(device), pad)
+        return self._padding
+
+    def pair(self, cond, x1):
+        """condjet: every condition row with one target drawn from the
+        minibatch plan (RowCoupling); the noise is drawn later, in loss()."""
+        (cond, x1, _) = self.coupling(cond, x1, self.pair_gen)
+        self.last_parts = dict(self.coupling.last)
+        return (cond, x1)
 
     @property
     def coupled(self):
@@ -793,7 +939,7 @@ class Method:
         otcfm1, with an empty signal panel otherwise)."""
         if self.name in ('otcfm1', 'otcfm1_paired'):
             return self.norm.z(mixture, 'bkg').unsqueeze(1)
-        if self.name == 'jetflow':
+        if self.name in JET_METHODS:
             return self.norm.z(mixture, 'jet').unsqueeze(1)
         return self.norm.state(mixture, torch.zeros_like(mixture))
 
@@ -802,6 +948,11 @@ class Method:
 
     def endpoints(self, batch):
         """(x0, x1, cond) of a batch of energies, before any coupling."""
+        if self.name == 'condjet':
+            # the source jet is the condition; x0, the noise, comes later
+            return (None, self.source(batch[self.target]),
+                    self.source(batch[self.source_domain]))
+
         if self.name == 'jetflow':
             src = batch[self.source_domain]
             if (self.pairing != 'unpaired') and (self.modify is None):
@@ -954,6 +1105,13 @@ class Method:
                   L1_WEIGHTS[0] * torch.mean((bkg - bkg_t).abs())
                 + L1_WEIGHTS[1] * torch.mean((sig - sig_t).abs())
             )
+
+        if self.name == 'condjet':
+            # x0 is None: fresh noise for the (already paired) rows
+            (mask, pad) = self.padding(x1.device)
+            t   = torch.rand(len(x1), device = x1.device, generator = self.time_gen)
+            eps = torch.randn(x1.shape, device = x1.device, generator = self.noise_gen)
+            return cond_fm_loss(net, cond, x1, noise_start(eps, mask, pad), t)
 
         # the plan is solved by the caller (so that it can be timed), the
         # matcher's own call only samples t and the interpolant
@@ -1116,6 +1274,28 @@ class JetMapper(torch.nn.Module):
     def forward(self, jets):
         x = integrate(self.net, self.method.source(jets), None, self.nfe,
                       self.solver)
+        out = self.method.norm.energy(x[:, 0], 'jet')
+        return out.clamp(min = 0) if self.clip else out
+
+class CondJetSampler(torch.nn.Module):
+    """condjet: source jets (N, H, W), GeV, and noise (N, 1, H, W) -> one
+    conditional sample per jet, GeV (sample_cond); clipped at 0 unless
+    `clip = False`."""
+
+    def __init__(self, method, net, nfe = 128, solver = 'midpoint', clip = True):
+        # pylint: disable=too-many-arguments
+        super().__init__()
+        self.method = method
+        self.net    = net
+        self.nfe    = nfe
+        self.solver = solver
+        self.clip   = clip
+
+    @torch.no_grad()
+    def forward(self, jets, eps):
+        (mask, pad) = self.method.padding(jets.device)
+        x = sample_cond(self.net, self.method.source(jets), eps, mask, pad,
+                        self.nfe, self.solver)
         out = self.method.norm.energy(x[:, 0], 'jet')
         return out.clamp(min = 0) if self.clip else out
 

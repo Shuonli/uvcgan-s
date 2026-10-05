@@ -1,0 +1,59 @@
+{
+    "path_t0": {
+        "x_t_minus_expected": 0.0,
+        "cond_unchanged": 0.0,
+        "loss_minus_mean_u2": 0.0,
+        "padding_dev": 0.0
+    },
+    "path_t1": {
+        "x_t_minus_expected": 0.0,
+        "cond_unchanged": 0.0,
+        "loss_minus_mean_u2": 0.0,
+        "padding_dev": 0.0
+    },
+    "path_t0.37": {
+        "x_t_minus_expected": 0.0,
+        "cond_unchanged": 0.0,
+        "loss_minus_mean_u2": 0.0,
+        "padding_dev": 0.0
+    },
+    "x_t0_equals_noise_start": 0.0,
+    "x_t1_equals_target": 0.0,
+    "noise_on_active_only": true,
+    "target_padding_is_pad": 0.0,
+    "velocity_minus_finite_difference_max": 8.58157989114261e-12,
+    "velocity_on_padding_max": 0.0,
+    "shuffled_copy_exact": {
+        "conditions_in_order": 0.0,
+        "share_paired_to_own_copy": 1.0,
+        "max_condition_target_diff": 0.0,
+        "target_is_shuffled_row_j": 0.0
+    },
+    "shuffled_copy_entropic": {
+        "conditions_in_order": 0.0,
+        "share_paired_to_own_copy": 1.0,
+        "max_condition_target_diff": 0.0,
+        "target_is_shuffled_row_j": 0.0
+    },
+    "row_draw_frequencies": {
+        "reg": 7.0,
+        "draws_per_row": 20000,
+        "max_abs_freq_minus_q": 0.009652098635908102,
+        "max_z_where_q_gt_0p01": 3.0377911098074644,
+        "share_z_gt_3_where_q_gt_0p01": 0.0005820721853524446,
+        "mass_where_q_lt_1e-6": 6.6406250000000005e-06
+    },
+    "method_pair": {
+        "conditions_in_order": 0.0,
+        "every_target_is_a_batch_target": true,
+        "unique_targets": 0.7265625,
+        "plan_err": 6.030523218214512e-05
+    },
+    "reproducibility": {
+        "network": "condjet UVCGAN velocity, random init (seed 0)",
+        "same_c_same_eps_max_abs_gev": 0.0,
+        "same_c_other_eps_rms_gev": 0.14790096879005432,
+        "nfe_per_sample_call": 128,
+        "padding_dev_after_solve": 0.0
+    }
+}

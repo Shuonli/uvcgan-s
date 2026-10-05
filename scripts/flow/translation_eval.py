@@ -14,7 +14,12 @@ forward direction, EMA parameters: one sample per jet from a fixed seed over
 a fixed order and batch size. A CycleGAN run (translation_cgan.py, the
 repository's UVCGAN2) maps it with one pass of its EMA PYTHIA -> JEWEL
 generator; --milestone H picks the checkpoint saved when its training time
-reached H hours (default: its last). The physical readout is the models' own: E =
+reached H hours (default: its last). A conditional run (fm_train.py --method
+condjet, the stochastic pilot) draws one sample per jet: Gaussian noise of a
+fixed seed on the cone towers (one (N, 1, 16, 16) draw for the whole input
+set, so that a jet keeps its noise whatever the batching), integrated with
+the PYTHIA jet as the condition (fm_common.CondJetSampler); the same seed
+gives the same outputs. The physical readout is the models' own: E =
 exp(sd z + mu) - 0.1, then clipped at 0, nothing else (no threshold).
 
 Scores (validation: PYTHIA val inputs, JEWEL val as the target sample):
@@ -33,12 +38,17 @@ Modes:
                          inputs: ODE midpoint 32 against 64 (and 4 Euler);
                          bridge N against 2N steps with coupled Brownian
                          increments, against two independent samples at N;
+                         conditional runs N against 2N NFE with the same noise,
+                         against two noises at 2N;
                          with bootstrap errors of the validation W1:
                          OUT/solver_check.csv
     --generate RUN ...   the final checkpoint on every PYTHIA test input at
                          the frozen setting (ODE: also 4 Euler steps); bridge
                          runs also --multi samples of the first --n-multi test
-                         inputs; latency on one A6000 (batch --batch):
+                         inputs; conditional runs those too, the same inputs
+                         with the conditions swapped at fixed noise, and a
+                         repeat of the first 2000 outputs; latency on one
+                         A6000 (batch --batch):
                          OUTDIR/sphenix/flow/translation/outputs/NAME.npy and
                          NAME.json
 
@@ -206,6 +216,7 @@ class CycleGANTranslator:
     CycleGAN run: z of the translation normalisation through the EMA
     PYTHIA -> JEWEL generator, decoded as the flows' outputs are."""
     bridge = False
+    cond = False
 
     def __init__(self, run, epoch, device, cmdargs):
         # pylint: disable=import-outside-toplevel
@@ -258,6 +269,7 @@ class Translator:
             (self.method, self.net, self.state, self.config) = \
                 fc.load_run(run, ckpt, device, 'ema')
             self.norm = self.method.norm
+        self.cond = (not self.bridge) and self.config['method'] == 'condjet'
         stats = self.state['stats']
         self.info = { 'step' : int(stats['step']),
                       'updates' : int(stats.get('updates', stats['step'])),
@@ -269,17 +281,31 @@ class Translator:
         if self.bridge:
             return [ (f'sde{self.steps}', self.steps, 'sde') ]
         (nfe, solver) = cmdargs.ode_setting.split(':')
+        if self.cond:
+            return [ (f'{solver}{nfe}', int(nfe), solver) ]
         return [ (f'{solver}{nfe}', int(nfe), solver), ('euler4', 4, 'euler') ]
 
+    def noise(self, n, seed):
+        """Conditional runs: the noise of n jets for a sampler seed."""
+        gen = torch.Generator(device = self.device).manual_seed(seed)
+        return torch.randn((n, 1, *fc.JET_SHAPE), device = self.device, generator = gen)
+
     @torch.no_grad()
-    def __call__(self, src, nfe = None, solver = None, seed = 0, increments = None):
+    def __call__(self, src, nfe = None, solver = None, seed = 0, increments = None,
+                 noise = None):
+        # pylint: disable=too-many-arguments
         out = []
         gen = torch.Generator(device = self.device).manual_seed(seed)
-        if not self.bridge:
+        if self.cond:
+            mapper = fc.CondJetSampler(self.method, self.net, nfe, solver, clip = False)
+            noise = self.noise(len(src), seed) if noise is None else noise
+        elif not self.bridge:
             mapper = fc.JetMapper(self.method, self.net, nfe, solver, clip = False)
         for start in range(0, len(src), self.batch):
             j = torch.as_tensor(src[start:start + self.batch], device = self.device).float()
-            if self.bridge:
+            if self.cond:
+                out.append(mapper(j, noise[start:start + self.batch]).cpu())
+            elif self.bridge:
                 x   = self.norm.z(j, 'jet').unsqueeze(1)
                 inc = None if increments is None else \
                     increments[:, start:start + self.batch]
@@ -401,6 +427,16 @@ def solver_check(cmdargs, device):
             outs[f'sde{n} (seed b)'] = clip(tr(src['canvas'], n, seed = cmdargs.seed + 2))
             pairs = [ ('N vs 2N, same noise', f'sde{n} (coupled)', f'sde{2 * n} (coupled)'),
                       ('two samples at N', f'sde{n} (seed a)', f'sde{n} (seed b)') ]
+        elif tr.cond:
+            # the same noise for both solves; a second noise for the spread
+            (nfe, solver) = cmdargs.ode_setting.split(':')
+            nfe = int(nfe)
+            (a, b, c) = (f'{solver}{nfe}', f'{solver}{2 * nfe}', f'{solver}{2 * nfe} (noise b)')
+            outs[a] = clip(tr(src['canvas'], nfe, solver, cmdargs.seed))
+            outs[b] = clip(tr(src['canvas'], 2 * nfe, solver, cmdargs.seed))
+            outs[c] = clip(tr(src['canvas'], 2 * nfe, solver, cmdargs.seed + 1))
+            pairs = [ (f'{nfe} vs {2 * nfe} NFE, same noise', a, b),
+                      (f'two noises at {2 * nfe} NFE', b, c) ]
         else:
             (nfe, solver) = cmdargs.ode_setting.split(':')
             nfe = int(nfe)
@@ -424,6 +460,19 @@ def solver_check(cmdargs, device):
                 row[f'dw1_{q}'] = scored[a][f'w1_{q}'] - scored[b][f'w1_{q}']
                 row[f'w1_{q}_boot_sd'] = scored[b][f'w1_{q}_boot_sd']
             rows.append(row)
+        if tr.cond:
+            # the existing criterion, and the solver difference against the
+            # spread of two noises: numerical error is not diversity
+            (sv, sp) = (rows[-2], rows[-1])
+            sv['w1_shift_below_boot_sd'] = bool(all(
+                abs(sv[f'dw1_{q}']) < sv[f'w1_{q}_boot_sd'] for q in OBS))
+            sv['E_rms_over_E_change'] = sv['E_rms_gev'] / sv['E_change_rms_gev']
+            sv['E_rms_over_two_noises'] = sv['E_rms_gev'] / sp['E_rms_gev']
+            sv['tower_rms_over_two_noises'] = sv['tower_rms_gev'] / sp['tower_rms_gev']
+            sv['adequate'] = bool(sv['w1_shift_below_boot_sd']
+                                  and sv['E_rms_over_E_change'] < 0.01
+                                  and sv['E_rms_over_two_noises'] < 0.1
+                                  and sv['tower_rms_over_two_noises'] < 0.1)
         print(f'{label}: solver check done', flush = True)
     df = pd.DataFrame(rows)
     os.makedirs(cmdargs.out, exist_ok = True)
@@ -457,7 +506,7 @@ def generate(cmdargs, device):
             np.save(os.path.join(output_dir(), f'{stem}.npy'), raw.astype(np.float32))
             meta = { 'run' : os.path.basename(run), 'label' : label, 'setting' : name,
                      'primary' : k == 0, 'nfe' : nfe, 'solver' : solver,
-                     'sampler_seed' : cmdargs.seed if tr.bridge else None,
+                     'sampler_seed' : cmdargs.seed if (tr.bridge or tr.cond) else None,
                      **tr.info, 'n' : int(len(raw)), 'raw_min_gev' : float(raw.min()),
                      'generate_seconds' : dt,
                      'ms_per_jet' : latency(tr, src['canvas'], nfe, solver, device),
@@ -468,6 +517,8 @@ def generate(cmdargs, device):
                       encoding = 'utf-8') as f:
                 json.dump(meta, f, indent = 4)
             print(f'{stem}: {meta}', flush = True)
+        if tr.cond:
+            conditional_sets(tr, src, label, cmdargs)
         if tr.bridge and cmdargs.multi > 1:
             sub = src['canvas'][:cmdargs.n_multi]
             outs = np.stack([ tr(sub, tr.steps, 'sde', 1000 + k)
@@ -482,6 +533,39 @@ def generate(cmdargs, device):
                             'seeds' : [ 1000 + k for k in range(cmdargs.multi) ],
                             **tr.info }, f, indent = 4)
             print(f'{stem}: {outs.shape}', flush = True)
+
+def conditional_sets(tr, src, label, cmdargs):
+    """Conditional runs, the first --n-multi test inputs: --multi samples
+    each (seeds 1000 + k); the same inputs with the conditions swapped at
+    fixed noise (input i's seed-1000 noise with the condition of input
+    perm[i], a fixed cyclic shift); and a repeat of the first 2000 primary
+    outputs (same conditions, same noise)."""
+    # pylint: disable=too-many-locals
+    (name, nfe, solver) = tr.settings(cmdargs)[0]
+    sub = src['canvas'][:cmdargs.n_multi]
+    n = len(sub)
+    outs = np.stack([ tr(sub, nfe, solver, 1000 + k) for k in range(cmdargs.multi) ])
+    shift = 1 + int(np.random.default_rng(2).integers(n - 1))
+    perm  = (np.arange(n) + shift) % n
+    swap  = tr(sub[perm], nfe, solver, noise = tr.noise(n, 1000))
+    first = tr(src['canvas'][:2000], nfe, solver, cmdargs.seed)
+    again = tr(src['canvas'][:2000], nfe, solver, cmdargs.seed)
+    stem = f'{label}__{name}'
+    np.save(os.path.join(output_dir(), f'{stem}_multi{cmdargs.multi}.npy'),
+            outs.astype(np.float32))
+    np.save(os.path.join(output_dir(), f'{stem}_swap.npy'), swap.astype(np.float32))
+    meta = { 'run' : tr.config['label'], 'label' : label,
+             'samples' : cmdargs.multi, 'inputs' : f'first {n} PYTHIA test jets',
+             'seeds' : [ 1000 + k for k in range(cmdargs.multi) ],
+             'swap' : 'output i = F(c[perm[i]], noise of input i at seed 1000),'
+                      ' perm[i] = (i + shift) % n', 'swap_shift' : shift,
+             'repeat_max_abs_gev' : float(np.abs(first - again).max()),
+             'repeat_n' : 2000, 'nfe' : nfe, 'solver' : solver, **tr.info }
+    with open(os.path.join(output_dir(), f'{stem}_multi{cmdargs.multi}.json'), 'w',
+              encoding = 'utf-8') as f:
+        json.dump(meta, f, indent = 4)
+    print(f'{stem}: multi {outs.shape}, swap {swap.shape}, repeat max |diff|'
+          f" {meta['repeat_max_abs_gev']:.3g} GeV", flush = True)
 
 def main():
     cmdargs = parse_cmdargs()

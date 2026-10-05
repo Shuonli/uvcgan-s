@@ -72,6 +72,14 @@ def parse_cmdargs():
         help = 'jetflow: the normalisation JSON (default: the closure\'s,'
                ' norm_closure.json; the translation pilot:'
                ' OUTDIR/sphenix/flow/translation/norm.json)')
+    parser.add_argument('--coupling', default = 'exact', choices = fc.COUPLINGS,
+        help = 'condjet: the minibatch plan of the (source, target) pairs,'
+               ' exact OT or entropic OT (--ot-reg); one target per source row')
+    parser.add_argument('--ot-reg', type = float, default = None,
+        help = 'condjet --coupling entropic: the regularisation, in units of'
+               ' the squared L2 cost of the standardised states')
+    parser.add_argument('--sinkhorn-tol', type = float, default = 1e-4,
+        help = 'condjet --coupling entropic: L1 error of the row marginals')
     parser.add_argument('--ot-pool', type = int, default = None,
         help = 'matching pool per domain (default: the batch); the plan is'
                ' solved on the pool and --batch complete pairs drawn from it')
@@ -165,12 +173,16 @@ def write_config(run_dir, cmdargs, n_params):
         old.setdefault('eta', 0.0)
         old.setdefault('source_domain', 'closure_src')
         old.setdefault('norm_path', None)
+        old.setdefault('coupling', 'exact')
+        old.setdefault('ot_reg', None)
+        old.setdefault('sinkhorn_tol', 1e-4)
         for key in [ 'method', 'batch', 'lr', 'sigma', 'channels',
                      'res_blocks', 'attn', 'seed', 'ema', 'warmup',
                      'cosine_steps', 'log_bias', 'augment', 'backbone',
                      'cost', 'cost_lambda', 'pairing', 'target_domain',
                      'ot_pool', 'paired_n', 'paired_share', 'path', 'eta',
-                     'source_domain', 'norm_path' ]:
+                     'source_domain', 'norm_path', 'coupling', 'ot_reg',
+                     'sinkhorn_tol' ]:
             if old.get(key) != config.get(key):
                 raise RuntimeError(
                     f"resuming '{run_dir}' with {key} = {config.get(key)},"
@@ -244,7 +256,7 @@ def main():
 
     t_start = time.perf_counter()
 
-    if cmdargs.method == 'jetflow':
+    if cmdargs.method in fc.JET_METHODS:
         # fitted on the training jets by closure_data.py (or, for the
         # translation pilot, by translation_data.py: --norm-path)
         with open(cmdargs.norm_path or fc.Norm.path(method = 'jetflow'), 'r',
@@ -266,7 +278,10 @@ def main():
     method = fc.Method(cmdargs.method, norm, cmdargs.sigma, cmdargs.augment,
                        cmdargs.cost, cmdargs.cost_lambda, cmdargs.pairing,
                        cmdargs.target_domain, cmdargs.paired_n, cmdargs.path,
-                       cmdargs.eta, cmdargs.source_domain)
+                       cmdargs.eta, cmdargs.source_domain, cmdargs.coupling,
+                       cmdargs.ot_reg, cmdargs.sinkhorn_tol)
+    assert (cmdargs.method == 'condjet') or (cmdargs.coupling == 'exact'), \
+        '--coupling: condjet only (the other OT methods have their own plans)'
     if cmdargs.pairing == 'semi':
         method.n_paired = int(round(cmdargs.paired_share * cmdargs.batch))
     cmdargs.sigma = method.sigma
@@ -320,6 +335,14 @@ def main():
     # global RNG draws (times, the matcher's) do not depend on the path
     method.path_gen = torch.Generator(device = device)
     method.path_gen.manual_seed(2_000_029 * cmdargs.seed + 7 + stats['step'])
+    if cmdargs.method == 'condjet':
+        # times, noise and the pairs' row draws: one stream each, so that
+        # the exact and the entropic coupling train on the same batches,
+        # times and noise, step by step
+        for (k, name) in enumerate([ 'time_gen', 'noise_gen', 'pair_gen' ]):
+            gen = torch.Generator(device = device)
+            gen.manual_seed((3_000_017 + k) * cmdargs.seed + 11 + k + stats['step'])
+            setattr(method, name, gen)
     torch.cuda.synchronize()
     stats['load_time'] = stats.get('load_time', 0.0) + time.perf_counter() - t0
     print(f"data in GPU memory: {data.sizes()},"
@@ -405,7 +428,10 @@ def main():
         if method.coupled:
             torch.cuda.synchronize()
             t0 = time.perf_counter()
-            (x0, x1) = method.couple(x0, x1, cmdargs.batch - method.n_paired)
+            if method.name == 'condjet':
+                (cond, x1) = method.pair(cond, x1)
+            else:
+                (x0, x1) = method.couple(x0, x1, cmdargs.batch - method.n_paired)
             torch.cuda.synchronize()
             stats['coupling_time'] += time.perf_counter() - t0
 

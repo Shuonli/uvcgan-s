@@ -3500,6 +3500,194 @@ with the ratio to JEWEL.
 - Successes and failures are reported per model, at the matched budget
   first. Then whether more CycleGAN training changes the comparison.
 
+## Stochastic conditional FM pilot: several JEWEL-like outputs per PYTHIA jet (set up 2026-10-05 16:40, before training)
+
+**Question.** The deterministic OT-CFM translator (OT-FM, previous section)
+gives JEWEL-like distributions and keeps a strong dependence on each PYTHIA
+input, but one input has exactly one output. The eventual physics target is a
+distribution of modified jets given a vacuum jet. Can a noise-driven
+conditional flow keep OT-FM's population and input-dependence results while
+generating individually sharp, meaningfully different samples of one input?
+- Exploratory. With unpaired data the conditional distribution is defined by
+  the chosen coupling of PYTHIA and JEWEL jets; it is not a physical
+  medium-response distribution, and its spread is not a calibrated
+  uncertainty. No OT partner, JEWEL jet or OT target scatter is a jet's truth;
+  no per-jet reconstruction error is reported.
+- The closure failures stand; this pilot does not reopen their gates (authorized
+  without them).
+- Not DSBM and not an SDE bridge: an ordinary noise-to-target flow-matching
+  model sampled with an ODE.
+
+**Data:** the translation pilot's, unchanged: the same pools (200k PYTHIA, 200k
+JEWEL training jets), content deduplication, parent splits, shared
+normalisation (`translation/norm.json`), 16 x 16 canvas, R = 0.4 cone,
+selection and observables. Nothing is rebuilt; validation and test jets are
+used as there.
+
+**Model** (`fm_train.py --method condjet`, `fm_common.cond_fm_loss`,
+`sample_cond`; Lipman et al. 2210.02747; the OT pairing of Tong et al.
+2302.00482):
+- standardised log-energy states; c the PYTHIA jet, y its sampled JEWEL
+  training target, eps standard Gaussian, t ~ U[0, 1]:
+  x_t = (1 - t) eps + t y, u_t = y - eps,
+  loss = mean((v(t, [x_t, c]) - u_t)^2) over every canvas element (the
+  flows' normalisation);
+- the UVCGAN-S flow network (ViT-ModNet with the time embedding of the
+  earlier runs) with two input channels (x_t, c) and one output channel. The
+  condition is neither interpolated nor predicted (these are not the old
+  background/signal channels);
+- **padding:** the noise is applied to the 53 cone towers only. The 203 other
+  canvas coordinates hold the padding value psi(0) in every jet of both
+  samples, in x_0, x_t and y alike (so u_t = 0 there); at sampling the
+  velocity is applied on the cone towers only, so the padding keeps that
+  value exactly, as in every training state;
+- **sampling:** fix c, draw eps, solve dx/dt = v(t, x, c) from x_0 = eps with
+  the midpoint rule. The same (c, eps) give the same output; diversity comes
+  from eps alone. Outputs: E = exp(sd z + mu) - 0.1, clipped at 0, nothing
+  else.
+
+**Two runs (seed 0, 2 A6000 GPU-hours of training time each, couplings
+included, side by side on dahlia):**
+- **hard (control):** each minibatch's exact OT plan between the 256
+  conditions and 256 JEWEL targets (squared L2 of the standardised,
+  jet-centred states; TorchCFM's exact plan, POT network simplex);
+- **soft (treatment):** the balanced entropic plan with uniform marginals,
+  min <P, C> - reg H(P), the same cost, by the log-domain Sinkhorn of
+  `GraphedSinkhorn` (row marginals to an L1 error below 1e-4, the columns
+  exact after each sweep), reg = 7 (fixed below);
+- **pairs:** for each condition row i one actual target j with probability
+  P_ij / sum_j P_ij (rows may share a target; the target marginal holds in
+  expectation). Never a weighted-average image. For the exact plan (a
+  permutation) this is the assigned target. Both arms draw pairs this way, so
+  they differ in the plan only. (The OT-CFM run drew pairs from the same kind
+  of exact plan with replacement, TorchCFM's `sample_plan`; one draw per row
+  keeps every condition of a batch once.) The noise is drawn after the
+  pairing, independently; no noise-target matching.
+- **held equal:** batch 256, the batch sequence (the same generator draws of
+  PYTHIA and JEWEL indices), initialisation (seed 0), Adam 2e-4, warm-up
+  1000, clip 1, EMA 0.9999, and the times and noise of every step (each from
+  its own generator, so the plan cannot shift them; the arms differ in the
+  number of updates only if the couplings' costs differ).
+- **hard-plan pairs vary between batches,** so the hard arm can learn a
+  conditional spread too; neither arm is assumed deterministic.
+- Checkpoints every 10 min; validation curves at midpoint 128 (descriptive);
+  **primary: the final checkpoint at the budget.** No seed, architecture,
+  regularisation or loss sweep; no shape, adversarial, cycle or diversity loss.
+
+**Coupling audit (job 20510; training jets only; fixed before training;
+`docs/flow/translation/condfm/coupling_audit*`):** 32 fixed batches of 256
+PYTHIA and 256 JEWEL training jets (seed 20261005), the trainer's cost.
+- reg set so that the median row effective support exp(-sum_j q_ij log q_ij)
+  is about 4 targets (accepted range 3-5): bisection, rounded to two digits,
+  **reg = 7.0** (0.023 of the median pair cost, 307). Median support 4.00;
+  5 / 25 / 75 / 95%: 1.6 / 2.7 / 5.8 / 9.2; row entropy 1.37 +- 0.53.
+  (reg 4: median 2.4; reg 8: 4.7; reg 16: 16.)
+- Marginals: rows within 1e-4 in L1 (largest single row 1.0% off), columns
+  within 2e-7; 100-150 Sinkhorn sweeps, 4.8 ms per batch.
+- Sampled pairs (8192 rows each):
+
+| pairs | mean cost | E_target - E_condition: mean / rms, GeV | normalised-shape EMD | rms change: girth / z_lead / p_T^D |
+| :--- | ---: | :--- | ---: | :--- |
+| hard (exact plan) | 146 | -4.95 / 11.8 | 0.235 | 0.037 / 0.175 / 0.132 |
+| soft (reg 7) | 150 | -4.96 / 11.9 | 0.240 | 0.038 / 0.178 / 0.133 |
+| random pairs | 310 | -4.95 / 12.7 | 0.465 | 0.068 / 0.197 / 0.154 |
+
+  - The soft draw is the hard assignment for 50% of rows; otherwise the soft
+    target is 0.29 in shape EMD and 9.3 GeV rms from the hard one. 74% of a
+    batch's targets are distinct under soft draws.
+  - So within one batch, soft pairs are barely further apart than hard pairs.
+    Both are far wider than OT-FM's own per-jet change (shape EMD 0.041 to
+    its input): a single minibatch OT partner is not close to its condition.
+    Neither scatter is a physical truth.
+- This sets a modest diversity scale for engineering purposes, not a physical
+  fluctuation scale; it is not tuned against any model result.
+
+**Checks before training (all passed; `condfm/checks.json`,
+`gauss_check.json`):**
+- the path inside `cond_fm_loss`: x_t at t = 0 and 1 equal x_0 and y exactly,
+  the condition reaches the network unchanged, the padding stays fixed, and
+  u_t is the derivative of x_t (finite difference to 9e-12);
+- indexing after the plans: a shuffled copy of a batch is paired back to its
+  own copy by both plans (256 of 256); the conditions keep their order; row
+  draws follow P_i. / P_i.sum() (20k draws a row: largest z 3.0 over the
+  entries above 0.01, as expected by chance);
+- fixed-noise reproducibility with the translation network: the same (c, eps)
+  give identical outputs (max difference 0), another eps a different one;
+  128 network evaluations per sample, padding exact;
+- **Gaussian positive control** (no conditional-sampler control existed): y =
+  c + 0.2 xi in 12 active coordinates plus 4 padding coordinates, trained with
+  `cond_fm_loss` and sampled with `sample_cond` (a small MLP, 15k updates, 1
+  min). For 8 fixed c, 20k samples each: mean within 0.013 of c (limit 0.02;
+  ignoring c would miss by about 1), sd 0.196-0.208 (limit 0.19-0.21;
+  ignoring the noise would give 0), padding exact, 128 vs 256 NFE differ by
+  2e-5.
+
+**Solver (validation only, then frozen before any test output):** the final
+checkpoint, 2000 PYTHIA val inputs against JEWEL val, midpoint 128 against
+256 NFE from the identical noise; also two different noises at 256.
+- Adequate at 128 if (the pilot's criterion) every W1 / sigma moves by less
+  than its bootstrap sd and the per-jet cone energy moves by less than 1% of
+  the rms energy change the model makes (E_out - E_in); and (new) the
+  solver's per-jet energy and tower differences are below 1/10 of those
+  between two noises (numerical error must not pass for diversity).
+- Otherwise 256 against 512, once; any remaining limitation is reported.
+  Four-step Euler is not used.
+
+**Evaluation** (sampler seeds: test 0; repeated samples 1000-1007):
+- **Population** (one output per held-out PYTHIA input, 20k): the pilot's
+  benchmark unchanged (`translation_report.py`): E, mass, girth, p_T^D,
+  z_lead, z_g, R_g with W1 / sigma to JEWEL test and bootstrap sd; girth and
+  z_lead in energy bins; the refound anti-kT jets; acceptance and migration;
+  input-output correlations and own-input preference; occupancy, core and
+  soft-tower diagnostics; the same final selections on outputs and JEWEL.
+  JEWEL ref is a finite-sample reference, not a strict floor.
+- **Compared with** the existing outputs, not retrained: OT-FM at 128 NFE,
+  alpha-DSBM (eps 0.25, 30 SDE steps), identity, random JEWEL, JEWEL ref, and
+  CycleGAN at the training-time milestones available when the report runs
+  (labelled 2 h, 8 h).
+- **Repeated samples** (the first 1000 test inputs, a random subset; 8 outputs
+  each; bootstrap over inputs, never over the 8 samples):
+  - within-input fluctuations of E, mass, girth, p_T^D, z_lead, z_g, R_g,
+    leading tower and core fraction against their variation across inputs,
+    and against the size of the model's change (output - input); the
+    within-input correlations of the fluctuations; whether diversity is
+    mainly energy with shape nearly fixed;
+  - normalised-shape EMD between samples of one input, from a sample to its
+    own input, and to an unrelated input;
+  - **condition swap at fixed noise:** input i's noise with input k's
+    condition (a fixed cyclic shift k = perm[i]); does the output follow the
+    condition (close to k's own samples, far from i's) or the noise?
+  - individual samples of the five predetermined display inputs (the first
+    1000 test jets nearest the 10/30/50/70/90% energy quantiles): images,
+    profiles, leading and core towers, each sample separately; no averaged
+    image; no best-of-8.
+  - alpha-DSBM's existing 8 samples of the same inputs as a reference.
+- **Variability kept apart:** all spreads here are sampling variability of one
+  trained model per arm. Training-seed variability is not measured (one seed
+  each), so differences between the two arms include training noise of
+  unknown size.
+
+**Reading (fixed now; each arm separately):**
+- **population:** the pilot's rule (moves toward JEWEL in >= 4 of 7 marginals
+  and in both joints), plus **competitive with OT-FM:** no fixed-crop
+  observable worse than OT-FM's by more than 3 combined bootstrap sd;
+- **input dependence beyond random JEWEL:** the pilot's rule on the single
+  outputs;
+- **sharp samples:** no soft-floor or flattening flag (the pilot's rules), and
+  in the repeated samples at most 10% of samples (twice JEWEL's 5% tail) with
+  a core fraction below JEWEL test's 5% quantile or with energy in sub-0.5 GeV
+  towers above JEWEL's 95% quantile;
+- **diversity above numerical error:** the rms energy and tower differences
+  between two samples of one input at least 10 times the solver's (same
+  noise), and the between-sample shape EMD above 0 by 3 bootstrap sd;
+- **conditioning used:** swapped outputs closer in shape to the supplied
+  condition's own samples than to the noise's original input's, at a rate
+  above 0.5 by 3 standard errors;
+- **useful:** all of the above. Ignored noise, ignored conditioning,
+  structural degradation and an unresolved solver are reported as such and
+  not repaired by extra losses or post-processing. More spread is not by
+  itself better; the soft arm is judged on the same items as the hard one.
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything
