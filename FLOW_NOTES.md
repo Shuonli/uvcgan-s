@@ -4618,10 +4618,11 @@ mean gradient norms over the logged steps 0.022-0.038 (synthetic) and
 - **The batch-mean UE profile constraint (B22, lambda 3, on the one-step
   surrogate around the mixture axes) breaks the subtraction:** the solved
   background over-subtracts the ring (vacuum jets -3.9 GeV, quenched ring
-  change -24%, 29% of quenched jets lost, girth 63%). Consistent with the
-  one-step diagnosis: the surrogate under-estimates the UE level, so
-  matching its profile pushes the solved B_hat above the true UE. Jamie's
-  averaging rule: little help, +2.8 GeV ring in vacuum jets.
+  change -24%, 29% of quenched jets lost, girth 63%). Why it over-subtracts
+  is not diagnosed: E1-P's one-step estimate (the run's start) is unbiased
+  far from the jet (0.579 against 0.579 GeV a tower), so a simple bias of
+  the surrogate does not explain it. Jamie's averaging rule: little help,
+  +2.8 GeV ring in vacuum jets.
 
 ### Answers to the six questions
 
