@@ -3914,7 +3914,7 @@ inputs):
   needs a pairing that ties it (a cost or batch size that weights energy);
   choosing one is a modelling decision that unpaired data cannot settle.
 
-## Jamie's toy exercises with OT flow matching (set up 2026-10-05 20:05, before training)
+## Jamie's toy exercises with OT flow matching (set up 2026-10-05 19:45, before training)
 
 **Question.** With a toy whose generating process and conditional truth are
 known, does OT flow matching (our UVCGAN-S-backbone OT-CFM, deterministic D,

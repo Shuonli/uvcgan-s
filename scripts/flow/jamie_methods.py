@@ -159,6 +159,8 @@ class ToyMethod:
             assert 'source' in self.pools and 'target' in self.pools
         self.gens = {}
         self.div_cap = None
+        # independent target images, for the profile and diversity terms
+        self.need_ref = any(e in ('profile', 'div') for e in self.extra)
 
     # --- fm_train interface
 
@@ -220,7 +222,7 @@ class ToyMethod:
                               generator = self.gens['data'])
             out['pair'] = { 'src' : src.x[i].float(), 'tgt' : src.reps[i, r].float(),
                             'axis' : src.axis[i] }
-        if ('profile' in self.extra) or ('div' in self.extra):
+        if self.need_ref:
             t = self.pools['target']
             j = self.idx(t, batch)
             out['ref'] = { 'tgt' : t.x[j].float(), 'axis' : t.axis[j] }
