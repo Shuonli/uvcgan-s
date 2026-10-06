@@ -37,5 +37,25 @@
         "batch": 2000,
         "gpu": "NVIDIA RTX A6000",
         "clipped_energy_share": 0.0019361716695129871
+    },
+    "CycleGAN 8 h": {
+        "run": "model_m(uvcgan-v2)_d(resnet)_g(vit-modnet)_tr_cgan_s0",
+        "label": "CycleGAN-8h",
+        "setting": "gen",
+        "primary": true,
+        "nfe": 1,
+        "solver": "generator",
+        "sampler_seed": null,
+        "step": 76000,
+        "updates": 76000,
+        "epoch": 76,
+        "train_time": 29041.551923707128,
+        "n": 20000,
+        "raw_min_gev": -0.010425657033920288,
+        "generate_seconds": 1.1161286309361458,
+        "ms_per_jet": 0.05089261755347252,
+        "batch": 2000,
+        "gpu": "NVIDIA RTX A6000",
+        "clipped_energy_share": 8.552825602237135e-05
     }
 }

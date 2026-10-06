@@ -120,7 +120,9 @@ def deck_tables(d, out, tag):
     pop = pd.read_csv(os.path.join(d, 'population.csv'))
     models = [ s for s in pop['sample'] if s not in DECK ]
     samples = [ 'JEWEL ref', 'identity', 'random JEWEL' ] + models
-    lines = begin('l' + 'r' * len(samples), sep = 4) + head_rows(samples)
+    # narrower columns once a third model is in
+    lines = begin('l' + 'r' * len(samples), sep = 4 if len(samples) <= 5 else 2.5) \
+        + head_rows(samples)
     for q in DECK_OBS:
         cells = []
         for s in samples:
@@ -136,7 +138,8 @@ def deck_tables(d, out, tag):
 
     dep = pd.read_csv(os.path.join(d, 'dependence.csv'))
     samples = [ 'random JEWEL' ] + models
-    lines = begin('l' + 'r' * len(samples), sep = 5) + head_rows(samples)
+    lines = begin('l' + 'r' * len(samples), sep = 5 if len(samples) <= 3 else 3) \
+        + head_rows(samples)
     labels = { 'E' : '$p_T$', 'girth' : 'girth', 'mass' : 'mass', 'core' : 'core fraction',
                'lead' : 'leading tower' }
     for q in te.DEP:

@@ -1,3 +1,4 @@
 model,marginals_moved,n_moved,consistent_with_jewel,joint_girth_moved,joint_zlead_moved,dependence_beyond_random,soft_floor,flattening,useful
 OT-FM,"E, mass, girth, ptd, zlead, rg",6,"E, mass, girth, ptd, zlead, zg, rg",True,True,True,False,False,True
 CycleGAN 2 h,-,0,-,False,True,True,False,False,False
+CycleGAN 8 h,"E, mass, girth, ptd, zlead, rg",6,"girth, zg, rg",True,True,True,False,False,True

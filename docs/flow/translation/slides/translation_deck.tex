@@ -56,7 +56,7 @@
 \title{Optimal-transport flow matching\\as an alternative to CycleGAN}
 \subtitle{Unpaired PYTHIA $\to$ JEWEL translation of clean calorimeter jet images}
 % \author{}
-\date{October 2026 \quad (CycleGAN: 2-hour results; 8 and 24 hours pending)}
+\date{October 2026 \quad (CycleGAN at 2 and 8 hours; 24 hours pending)}
 
 \begin{document}
 
@@ -138,33 +138,35 @@ coordinates, the same generator network (the UVCGAN-S ViT-ModNet, 32M parameters
 % ---------------------------------------------------------------- 4
 \begin{frame}{Jet $p_T$ spectra}
 \begin{center}
-\includegraphics[width=0.62\textwidth]{deck_pt.png}
+\includegraphics[width=0.56\textwidth]{deck_pt.png}
 \end{center}
 \vspace{-0.9em}
 \begin{itemize}\setlength\itemsep{0.2em}
 \item \ot{} reproduces the JEWEL jet $p_T$ spectrum within statistics (cone and re-found jets), although
   its inputs start near 20 GeV
-\item \cg{} at the same 2 hours: $p_T$ about doubled (mean 65 GeV; JEWEL 27, inputs 32); its 1-hour
-  checkpoint lowered it instead ($\times$0.67): its energy scale had not settled
+\item \cg{} at the same 2 hours: $p_T$ about doubled (mean 65 GeV; JEWEL 27); at 8 hours on the JEWEL
+  scale (mean 26.0 GeV), but 5 times \ot{}'s distance ($W_1/\sigma$ 0.12 against 0.025); its energy scale
+  swung for 5 hours before settling
 \end{itemize}
 \end{frame}
 
 % ---------------------------------------------------------------- 5
 \begin{frame}{Jet substructure}
 \begin{columns}[c]
-\column{0.44\textwidth}
+\column{0.38\textwidth}
 \includegraphics[width=\textwidth]{deck_marginals.png}
-\column{0.56\textwidth}
+\column{0.62\textwidth}
 \footnotesize
 \input{tables/cgan_population.tex}
 \smallnote{Distance to 20k held-out JEWEL jets (W1 / $\sigma$, lower is better; jets with $p_T \ge$ 10
 GeV). Bold: as close as a second JEWEL sample, within 3 standard deviations.}
-\vspace{0.6em}
+\vspace{0.3em}
 \normalsize
 \begin{itemize}\setlength\itemsep{0.3em}
 \item \ot{}: all seven observables as close to JEWEL as a second JEWEL sample
-\item \cg{} at 2 hours: no observable closer to JEWEL than the PYTHIA input itself; its cores are too hard
-  (leading tower 30 GeV against 9.7)
+\item \cg{} at 2 hours: no observable closer to JEWEL than the input (cores far too hard). At 8 hours
+  6 of 7 move toward JEWEL; girth, $z_g$, $R_g$ as close as a second JEWEL sample; $p_T$, mass, $p_T^D$,
+  $z_\mathrm{lead}$ 5-9 times \ot{}'s distance
 \end{itemize}
 \end{columns}
 \end{frame}
@@ -179,17 +181,17 @@ GeV). Bold: as close as a second JEWEL sample, within 3 standard deviations.}
 \item at the same $p_T$, JEWEL jets are \textbf{narrower} and \textbf{harder} (higher $z_\mathrm{lead}$)
   than PYTHIA jets
 \item \ot{} follows both trends in every $p_T$ bin
-\item \cg{} at 2 hours: at fixed $p_T$ its girth is further from JEWEL than the input's; $z_\mathrm{lead}$
-  moves part of the way
+\item \cg{} at 2 hours: girth at fixed $p_T$ further from JEWEL than the input's; at 8 hours both trends,
+  less closely than \ot{} ($W_1/\sigma$ at fixed $p_T$ 0.04 and 0.06 against 0.02)
 \end{itemize}
 \end{frame}
 
 % ---------------------------------------------------------------- 7
 \begin{frame}{Does each output keep its input jet?}
 \begin{columns}[c]
-\column{0.52\textwidth}
+\column{0.44\textwidth}
 \includegraphics[width=\textwidth]{deck_displays.png}
-\column{0.48\textwidth}
+\column{0.56\textwidth}
 \footnotesize
 \input{tables/cgan_dependence.tex}
 \smallnote{Input-output correlation over 20k test jets; own input: share of outputs closer in shape to
@@ -198,7 +200,8 @@ their own input than to another, random input jet.}
 \normalsize
 \begin{itemize}\setlength\itemsep{0.3em}
 \item \ot{}: correlations 0.91-0.99; every output is closer to its own input than to another jet
-\item \cg{} keeps the input too: correlations 0.85-0.99, 99.9\% of outputs closest to their own input
+\item \cg{} keeps the input too: correlations 0.75-0.99 at 8 hours, every output closest to its own
+  input
 \end{itemize}
 \end{columns}
 \end{frame}
@@ -214,8 +217,8 @@ their own input than to another, random input jet.}
   reaches down to 10 GeV
 \item \ot{} lowers 20-25 GeV jets by 40\% and leaves jets above 40 GeV unchanged: a map between two
   differently selected samples, not a quenching mechanism
-\item \cg{} at 2 hours raises $p_T$ by a factor growing from 1.2 (15-20 GeV inputs) to 2.6 (above 50
-  GeV): not a map between the two spectra
+\item \cg{} at 2 hours raised $p_T$ by 1.2-2.6; at 8 hours it makes nearly the same spectrum map as \ot{}
+  (median output 16 GeV for 20-25 GeV inputs, 41 GeV for 40-50 GeV)
 \end{itemize}
 \end{columns}
 \end{frame}
@@ -223,9 +226,9 @@ their own input than to another, random input jet.}
 % ---------------------------------------------------------------- 9
 \begin{frame}{Training cost}
 \begin{columns}[c]
-\column{0.44\textwidth}
+\column{0.41\textwidth}
 \includegraphics[width=\textwidth]{deck_curves.png}
-\column{0.56\textwidth}
+\column{0.59\textwidth}
 \footnotesize
 \input{tables/cgan_cost.tex}
 \smallnote{One A6000; training time without checkpoints; latency at batch 2000.}
@@ -233,8 +236,8 @@ their own input than to another, random input jet.}
 \normalsize
 \begin{itemize}\setlength\itemsep{0.3em}
 \item \ot{}: 123k updates in 2 GPU hours (17 per second), one network pass each
-\item \cg{}: 2.7 updates per second (six generator passes and two discriminators per update), 20k
-  updates in the same 2 hours; but one network pass per jet, 130 times faster to apply
+\item \cg{}: 2.6-2.7 updates per second (six generator passes and two discriminators per update): 20k
+  updates in 2 hours, 76k in 8; one network pass per jet, 130 times faster to apply
 \end{itemize}
 \end{columns}
 \end{frame}
@@ -245,10 +248,11 @@ their own input than to another, random input jet.}
 \item \textbf{At the same 2 GPU hours:} \ot{} (no pairs) produces jets statistically indistinguishable from
   held-out JEWEL ($p_T$, 7 substructure observables, their $p_T$ dependence, re-found jets), and each output
   stays tied to its input
-\item \cg{} (the repository's UVCGAN2, same data and generator network) does not: its $p_T$ scale is off
-  by a factor 2 and no observable moves toward JEWEL; its outputs do keep their inputs
-\item its training had not settled at 2 hours (the 1-hour checkpoint erred the other way); its 8- and
-  24-hour checkpoints are being trained, and this deck is rebuilt with them
+\item \cg{} (the repository's UVCGAN2, same data and generator network) does not at 2 hours: $p_T$ off by
+  a factor 2. At 8 hours (4$\times$ the budget) it is useful by the same rule: 6 of 7 observables toward
+  JEWEL, girth and soft drop as close as a second JEWEL sample, inputs kept; $p_T$, mass, $p_T^D$ and
+  $z_\mathrm{lead}$ still 5-9 times further from JEWEL than \ot{}'s
+\item its training swung for 5 hours (the 1-hour checkpoint erred low, 2 hours high); 24 hours pending
 \item \ot{}'s $p_T$ change reflects how the two samples were selected, not quenching; no per-jet truth
   exists
 \end{itemize}

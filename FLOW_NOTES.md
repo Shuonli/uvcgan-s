@@ -3534,6 +3534,39 @@ CycleGAN 2 h), deck `slides/translation_deck.pdf`.
 - **Cost:** one generator pass, 0.050 ms per jet (130 times faster than
   OT-FM's 128-evaluation solve).
 
+### CycleGAN baseline: results at 8 hours (job 20490 training; chain 20505: outputs 20660, curves 20661, deck 20662)
+
+Same report files, a third column (`CycleGAN 8 h`).
+- **Training:** 76,000 updates (epoch 76) in 8.07 h of training time, 2.6
+  updates/s.
+- **Validation (descriptive), E W1/sigma by checkpoint:** 0.62 (1.0 h),
+  3.81 (2.1 h), 1.98 (3.1 h), 0.66 (4.2 h), 0.15 (5.2 h), 0.12 (6.3 h),
+  0.17 (7.4 h), 0.16 (8.1 h). The energy scale settled after about 5 h and
+  then stayed within 0.12-0.17 (OT-FM at 32 NFE: 0.04 at 2 h).
+- **Test (20k jets), W1/sigma to JEWEL:** E 0.123, mass 0.107, girth 0.015,
+  p_T^D 0.073, z_lead 0.076, z_g 0.017, R_g 0.011.
+  - Six of seven move toward JEWEL (not z_g, which no model can: its input
+    distance is within noise). Girth, z_g and R_g are consistent with JEWEL.
+  - E, mass, p_T^D and z_lead are 5-9 times OT-FM's distance (0.025, 0.021,
+    0.010, 0.008): OT-FM is better in these four by 6-10 combined sd, and
+    no different in the other three.
+  - Mean cone pT 26.0 GeV (JEWEL 27.1, OT-FM 27.2). Refound jets the same
+    pattern (pT W1 0.126; OT-FM 0.018).
+  - At fixed energy: girth 0.042, z_lead 0.056 (OT-FM 0.018, 0.024; JEWEL
+    ref 0.032, 0.025). Both trends move.
+  - Cores no longer too hard: leading tower 9.0 GeV (JEWEL 9.7), z_lead
+    0.330 (0.342), towers above 1 GeV 5.8 (5.8). No flag fires.
+- **Input dependence:** correlations E 0.82, girth 0.99, mass 0.75, core
+  0.99, leading tower 0.87; every output closest to its own input (shape
+  EMD to it 0.035; OT-FM 0.041).
+- **Spectrum map:** nearly OT-FM's. Median output 15.5 GeV for 20-25 GeV
+  inputs (OT-FM 14.0), 29.1 for 30-40 (30.1), 41.1 for 40-50 (42.7).
+- **Reading (pre-registered):** at 8 h (4 times OT-FM's budget) CycleGAN is
+  useful by the pilot's rule: six marginals and both fixed-energy trends
+  move, inputs kept, no flag. OT-FM at 2 h stays closer to JEWEL in E,
+  mass, p_T^D and z_lead and is no worse anywhere. The 24-h checkpoint
+  (chain 20506) decides whether longer training closes the gap.
+
 ## Stochastic conditional FM pilot: several JEWEL-like outputs per PYTHIA jet (set up 2026-10-05 16:25, before training)
 
 **Question.** The deterministic OT-CFM translator (OT-FM, previous section)

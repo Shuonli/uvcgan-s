@@ -798,9 +798,13 @@ A sequence of cheap diagnostics, then controls:
   the jet energy (mean 65 GeV against JEWEL's 27) and makes the cores far
   too hard, while keeping each output tied to its input (correlations
   0.85-0.99). Its 1-hour checkpoint erred the other way (too little
-  energy), so its training had not settled; checkpoints at 8 and 24 hours
-  are being evaluated. It applies 130 times faster (one network pass).
-  Deck: `docs/flow/translation/slides/translation_deck.pdf`.
+  energy): its training swung for about 5 hours before settling. At 8
+  hours (4 times the budget) it is useful by the same rule: six of seven
+  observables move toward JEWEL, girth and the soft-drop pair as close as
+  a second JEWEL sample, inputs kept (correlations 0.75-0.99). Energy,
+  mass, p_T^D and z_lead remain 5-9 times OT-CFM's distance. The 24-hour
+  checkpoint is being evaluated. It applies 130 times faster (one network
+  pass). Deck: `docs/flow/translation/slides/translation_deck.pdf`.
 - **Cost:**
   - OT-CFM: 2 GPU hours, 6.6 ms per jet at 128 evaluations;
   - alpha-DSBM: 2 GPU hours (89% of its second stage spent generating its
@@ -849,6 +853,7 @@ A sequence of cheap diagnostics, then controls:
 | **noise-driven, hard** | 0.055 | 0.055 | 0.017 | 0.015 | 0.012 | 0.006 | 0.013 | 0.19, 0.72 |
 | **noise-driven, soft** | 0.056 | 0.059 | 0.020 | 0.019 | 0.017 | 0.007 | 0.017 | 0.18, 0.71 |
 | CycleGAN at 2 hours | 3.9 | 3.3 | 0.14 | 0.66 | 0.58 | 0.12 | 0.22 | 0.85, 0.99 |
+| CycleGAN at 8 hours | 0.12 | 0.11 | 0.015 | 0.073 | 0.076 | 0.017 | 0.011 | 0.82, 0.99 |
 
 - **What worked:**
   - each output is a sharp, realistic jet: tower counts, leading tower,
@@ -935,7 +940,8 @@ A sequence of cheap diagnostics, then controls:
   seeds, and how much it changes with the matching rule (Part 12).
 - Which pairing should define a conditional translation: the minibatch-OT
   pairs keep a jet's shape class, not its energy (Part 13).
-- CycleGAN at 8 and 24 hours of training (Part 12; running).
+- CycleGAN at 24 hours of training (Part 12; running; at 8 hours useful,
+  but 5-9 times OT-CFM's distance in energy, mass, p_T^D and z_lead).
 
 - A small paired HYBRID sample (several medium versions per vacuum shower),
   obtained from the authors, to measure how random the modification is. It
