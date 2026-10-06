@@ -39,6 +39,9 @@ E_BINS = [ 10, 20, 25, 30, 40, 50, 80 ]
 POP_OBS = [ 'total', 'cone', 'ring', 'far', 'mass', 'girth', 'ptd', 'zlead', 'zg', 'rg' ]
 SHAPE_OBS = [ 'cone', 'girth', 'mass', 'ptd', 'zlead', 'ring' ]
 BANK_OBS = [ 'cone', 'ring', 'girth' ]
+# the second-seed confirmations: the same inputs' outputs of the two seeds
+SEED_PAIRS = { '3' : [ ('D', 'D seed 1') ],
+               '4' : [ ('D', 'D seed 1'), ('D+far', 'D seed 1+far') ] }
 
 def parse_cmdargs():
     parser = argparse.ArgumentParser(description = 'Toy study report')
@@ -355,7 +358,49 @@ def ex2(models, cmdargs, tag = 'ex2'):
         rows.append(row)
     write(pd.DataFrame(rows), out, f'{tag}_shifts.csv')
     write(pd.DataFrame(errs), out, f'{tag}_errors.csv')
+    if tag == 'prior_data':
+        prior_data_effects(rows, out)
     return rows
+
+def prior_data_effects(rows, out):
+    """The 2 x 2's pre-registered readings: per prior, quenched-data minus
+    vacuum-data cell in the recovered cone, girth and ring shifts, in
+    combined bootstrap sd ('data matter' beyond 3); each cell's ring in
+    vacuum jets against the truth's (beyond 3 sd: recoil invented), and,
+    since the vacuum-prior cells already leave a ring halo, the broad minus
+    the vacuum prior at the same data."""
+    by = { r['model'] : r for r in rows }
+    eff = []
+    for prior in ('vac', 'broad'):
+        (q, v) = (by.get(f'{prior} prior x quench data'), by.get(f'{prior} prior x vac data'))
+        syn = by.get(f'{prior} prior: syn')
+        if q is None or v is None:
+            continue
+        row = { 'prior' : prior }
+        for k in ('cone', 'girth', 'ring'):
+            d = q[f'{k}_shift'] - v[f'{k}_shift']
+            row[f'{k}_quench_minus_vac_data'] = d
+            row[f'{k}_z'] = d / np.hypot(q[f'{k}_shift_sd'], v[f'{k}_shift_sd'])
+            if syn is not None:
+                row[f'{k}_quench_data_minus_syn'] = q[f'{k}_shift'] - syn[f'{k}_shift']
+                row[f'{k}_vac_data_minus_syn'] = v[f'{k}_shift'] - syn[f'{k}_shift']
+        row['data_matter'] = bool(max(abs(row[f'{k}_z']) for k in ('cone', 'girth', 'ring')) > 3)
+        for (lab, r) in (('vac_data', v), ('quench_data', q)):
+            ex = r['vac_ring_hat'] - r['vac_ring_true']
+            row[f'vac_ring_excess_{lab}'] = ex
+            row[f'invents_recoil_{lab}'] = bool(ex > 3 * r['vac_ring_excess_sd'])
+        eff.append(row)
+    for data in ('vac', 'quench'):
+        (b, v) = (by.get(f'broad prior x {data} data'), by.get(f'vac prior x {data} data'))
+        if b is not None and v is not None:
+            eff.append({ 'prior' : f'broad minus vac, {data} data',
+                         'vac_ring_broad_minus_vac' : b['vac_ring_hat'] - v['vac_ring_hat'],
+                         'vac_ring_broad_minus_vac_z' : (b['vac_ring_hat'] - v['vac_ring_hat'])
+                         / np.hypot(b['vac_ring_excess_sd'], v['vac_ring_excess_sd']),
+                         **{ f'{k}_broad_minus_vac' : b[f'{k}_shift'] - v[f'{k}_shift']
+                             for k in ('cone', 'girth', 'ring') } })
+    if eff:
+        write(pd.DataFrame(eff), out, 'prior_data_effects.csv')
 
 # --- Exercise 3 (clean) and 4 (with UE): translation
 
@@ -509,11 +554,54 @@ def translation(models, cmdargs, ex):
                           'emd_other_input' : float(oth[ok].mean()),
                           'own_preferred' : float(np.mean(own[ok] < oth[ok])) })
     write(pd.DataFrame(emd_rows), out, f'{tag}_emd.csv')
+    seeds(ex, o_in, o_tr, o_mod, cands, inp, dr, out)
     bank(models, cmdargs, ex, d, ax, bankname, out)
     swaps(models, cmdargs, ex, d, ax, out)
     if girth:
         girth_rule(o_in, o_tr, o_mod, d, out)
     return pop
+
+def seeds(ex, o_in, o_tr, o_mod, cands, inp, dr, out):
+    """Second seed: per input, the two seeds' outputs against each other, as
+    changes from the input (observables) and tower by tower by region; and
+    each seed's change against the true change of that jet (one draw)."""
+    # pylint: disable=too-many-locals
+    rows = []
+    keys = [ 'cone', 'ring', 'far', 'girth' ] + ([ 'cone_sub', 'ring_sub' ] if ex == '4' else [])
+    for (a, b) in SEED_PAIRS.get(ex, []):
+        if a not in o_mod or b not in o_mod:
+            continue
+        row = { 'pair' : f'{a} vs {b}' }
+        for q in keys:
+            (ca, cb) = (o_mod[a][q] - o_in[q], o_mod[b][q] - o_in[q])
+            ct = o_tr[q] - o_in[q]
+            ok = np.isfinite(ca) & np.isfinite(cb) & np.isfinite(ct)
+            (ca, cb, ct) = (ca[ok], cb[ok], ct[ok])
+            row[f'{q}_corr_change_truth_a'] = float(np.corrcoef(ca, ct)[0, 1])
+            row[f'{q}_corr_change_truth_b'] = float(np.corrcoef(cb, ct)[0, 1])
+            row[f'{q}_mean_change_a'] = float(ca.mean())
+            row[f'{q}_mean_change_b'] = float(cb.mean())
+            row[f'{q}_rms_change_a'] = float(np.sqrt(np.mean(ca**2)))
+            row[f'{q}_rms_seed_diff'] = float(np.sqrt(np.mean((ca - cb)**2)))
+            row[f'{q}_corr_changes'] = float(np.corrcoef(ca, cb)[0, 1])
+        for (name, lo, hi) in [ ('cone', 0.0, 0.4), ('ring', 0.4, 1.0), ('far', 1.0, 1e9) ]:
+            m = (dr >= lo) & (dr < hi)
+            row[f'towers_{name}_rms_seed_diff'] = float(np.sqrt(((cands[a] - cands[b])**2)[m].mean()))
+            row[f'towers_{name}_rms_change_a'] = float(np.sqrt(((cands[a] - inp)**2)[m].mean()))
+        rows.append(row)
+    if rows:
+        write(pd.DataFrame(rows), out, f'ex{ex}_seeds.csv')
+
+def draw_spread(x, dr):
+    """(P, n, 24, 64) draws: the mean over parents of the draw-to-draw sd of
+    the near (R < 1) and far (R >= 1) energy sums and of single towers there."""
+    out = {}
+    for (name, m) in [ ('near', dr < 1.0), ('far', dr >= 1.0) ]:
+        mm = m[:, None]
+        out[f'{name}_sum_draw_sd'] = float(np.mean(np.std((x * mm).sum((2, 3)), axis = 1)))
+        sd = np.std(x, axis = 1)
+        out[f'{name}_tower_draw_sd'] = float((sd * m).sum() / m.sum())
+    return out
 
 def bank(models, cmdargs, ex, d, ax, bankname, out):
     """Conditional distributions: 128 model draws per parent against 128 true
@@ -569,12 +657,31 @@ def bank(models, cmdargs, ex, d, ax, bankname, out):
             row['cone_ring_corr_model'] = float(np.nanmean(cc))
             row['cone_ring_corr_truth'] = float(np.nanmean(ct))
         return row
-    rows.append(score('truth (true-vs-true reference)', tr_b))
+    dr_p = dr_of(a)
+    row = score('truth (true-vs-true reference)', tr_b)
+    # the best per-jet correlation any deterministic predictor can reach with
+    # one true quenching: the parent's mean change against single draws'
+    # changes (all 256 quenchings of each bank parent)
+    inp_p = (d['jet'] + d['ue'])[parents] if ue_case else d['jet'][parents]
+    o_in = per_draw(inp_p[:, None].astype(np.float32))
+    for q in BANK_OBS:
+        dlt = tr[q] - o_in[q]
+        mu = np.repeat(np.nanmean(dlt, axis = 1, keepdims = True), k, axis = 1)
+        ok = np.isfinite(dlt) & np.isfinite(mu)
+        row[f'ceiling_corr_change_{q}'] = float(np.corrcoef(mu[ok], dlt[ok])[0, 1])
+    if ue_case:
+        # where the draws differ: the jet's neighbourhood or the far UE
+        row.update(draw_spread(reps[:, half:], dr_p))
+    rows.append(row)
     for (lab, dirn) in models:
         x = output(dirn, f'{bankname}_bank')
         if x is None:
             continue
-        rows.append(score(lab, per_draw(x.astype(np.float32))))
+        x = x.astype(np.float32)
+        row = score(lab, per_draw(x))
+        if ue_case and x.shape[1] > 1:
+            row.update(draw_spread(x, dr_p))
+        rows.append(row)
     write(pd.DataFrame(rows), out, f'ex{ex}_conditional.csv')
 
 def swaps(models, cmdargs, ex, d, ax, out):

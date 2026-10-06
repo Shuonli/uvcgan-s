@@ -1,0 +1,59 @@
+{
+    "base": "/home/shuhang/cycleGAN/outdir/sphenix/flow/jamie/runs/E3-Ch_s0",
+    "label": "E3-Ch_profile",
+    "terms": [
+        "profile"
+    ],
+    "lambda": {
+        "profile": 0.01
+    },
+    "ratios": {
+        "profile": [
+            0.020222266754685036,
+            0.013978375625036323,
+            0.0070166874030773915,
+            0.01600484470774427,
+            0.01325792591416761,
+            0.13302560260768342,
+            0.011108593715312564,
+            0.025134271928554688
+        ]
+    },
+    "rollout_checks": {
+        "8": {
+            "values_K": {
+                "profile": 0.11330006271600723
+            },
+            "values_2K": {
+                "profile": 0.11080195754766464
+            },
+            "rel_change": {
+                "profile": 0.022545677203112218
+            }
+        },
+        "16": {
+            "values_K": {
+                "profile": 0.11080195754766464
+            },
+            "values_2K": {
+                "profile": 0.12511253356933594
+            },
+            "rel_change": {
+                "profile": 0.11438163398505984
+            }
+        },
+        "32": {
+            "values_K": {
+                "profile": 0.12511253356933594
+            },
+            "values_2K": {
+                "profile": 0.13144728541374207
+            },
+            "rel_change": {
+                "profile": 0.048192336756646824
+            }
+        }
+    },
+    "roll_nfe": 8,
+    "rollout_resolved": true
+}

@@ -5,6 +5,11 @@ frozen-solver outputs on the held-out sets. jamie_report.py scores them.
 
     jamie_eval.py RUN --check [--nfe 32]       step doubling on validation
     jamie_eval.py RUN --generate --nfe N       test outputs at the frozen solve
+    jamie_eval.py RUN --euler4 --label L       four Euler steps against L's
+                                               frozen solve (a speed diagnostic)
+    jamie_eval.py RUN --vnorm --label L        the velocity along a fine solve
+    jamie_eval.py RUN --onestep --label L      subtraction: the one-step mean
+                                               against the solved output
 
 A run is scored with its final checkpoint (the budget's), EMA weights. D
 (toyflow) solves dx/dt = v(t, x) from the source image; C (toycond) from
@@ -30,6 +35,31 @@ the model makes (output - input), every W1/sigma of the key observables
 moves by less than its bootstrap sd, and, for C, the per-image change is
 below 1/10 of that between two noises. Otherwise N is doubled
 (condfm_post.sbatch's rule).
+
+Four-step Euler (NFE 4) is only a speed diagnostic: the same validation
+inputs (and noise) as the frozen solve, the key energy's per-image change
+against the frozen solve's, W1 shifts and the time per image; appended to
+solver/euler4.csv.
+
+The velocity along the path (--vnorm, why a solve converges slowly): 64
+validation inputs (C: fixed noise) solved with 1024 midpoint evaluations;
+per step, the rms over towers of v (standardised units per unit time), its
+change from the previous step, and the largest single-tower |v|, averaged
+over the images; and how a second trajectory, started 1e-3 (rms per
+tower) away, separates from the first: the rms distance over its starting
+value (median and 90th percentile over the images), for a perturbation of
+every tower, of the input's occupied towers only (E > 0) and of its empty
+towers only (D on clean jets: towers empty at both ends sit at the floor
+value in every training path); solver/LABEL_vnorm.csv.
+A solve whose step-doubling error does not shrink while the velocity stays
+smooth has an expanding flow: nearby starts end far apart.
+
+The one-step mean (--onestep, subtraction runs): on the first --n-check
+validation mixtures, B_1 = x_0 + v(0, x_0), the regression's estimate of the
+mean target given the input, against the solved output at L's frozen NFE:
+the jet's hard-tower loss, cone offset and B_hat on the true hard towers;
+appended to ex1/ex1_onestep.csv. The ODE moves the input distribution onto
+the target distribution and need not end at that mean.
 """
 
 import argparse
@@ -55,6 +85,9 @@ def parse_cmdargs():
     parser.add_argument('--curves', action = 'store_true',
         help = 'every checkpoint on --n-check validation inputs at --nfe (descriptive)')
     parser.add_argument('--generate', action = 'store_true')
+    parser.add_argument('--euler4', action = 'store_true')
+    parser.add_argument('--vnorm', action = 'store_true')
+    parser.add_argument('--onestep', action = 'store_true')
     parser.add_argument('--nfe', type = int, default = 32)
     parser.add_argument('--n-check', type = int, default = 1000)
     parser.add_argument('--batch', type = int, default = 1000)
@@ -100,7 +133,7 @@ class Model:
         return torch.randn((n, 1, 24, 64), device = self.device, generator = g)
 
     @torch.no_grad()
-    def __call__(self, images, nfe, seed = 0, batch = 1000, noise = None):
+    def __call__(self, images, nfe, seed = 0, batch = 1000, noise = None, solver = 'midpoint'):
         """Raw GeV outputs for (n, 24, 64) input images."""
         out = []
         if self.cond and noise is None:
@@ -109,9 +142,9 @@ class Model:
             x = torch.as_tensor(np.asarray(images[s:s + batch], np.float32), device = self.device)
             z = self.norm.z(x, self.kind).unsqueeze(1)
             if self.cond:
-                y = fc.integrate(self.net, noise[s:s + batch], z, nfe, 'midpoint')
+                y = fc.integrate(self.net, noise[s:s + batch], z, nfe, solver)
             else:
-                y = fc.integrate(self.net, z, None, nfe, 'midpoint')
+                y = fc.integrate(self.net, z, None, nfe, solver)
             out.append(self.norm.energy(y[:, 0], self.kind).cpu())
         return torch.cat(out).numpy()
 
@@ -207,6 +240,135 @@ def check(cmdargs, model, device):
     pd.concat([ old, pd.DataFrame(rows) ]).to_csv(path, index = False)
     print(json.dumps(row, indent = 2), flush = True)
     return row['adequate']
+
+def euler4(cmdargs, model, device):
+    """Four Euler steps against the frozen midpoint solve (module docstring)."""
+    # pylint: disable=too-many-locals
+    label = cmdargs.label or model.info['run']
+    with open(os.path.join(cmdargs.out, f'{label}_frozen.json'), encoding = 'utf-8') as f:
+        nfe = int(json.load(f)['nfe'])
+    (_, _, val) = family(model)
+    d = cache(val)
+    n = cmdargs.n_check
+    (_, (inp, ax)) = next(iter(inputs(model, val, { k : v[:n] for (k, v) in d.items() }).items()))
+    ax = ax[:n]
+    model(inp[:100], 4, seed = 0, solver = 'euler')              # warm-up
+    (outs, secs) = ({}, {})
+    for (k, solver, m) in [ ('frozen', 'midpoint', nfe), ('euler4', 'euler', 4) ]:
+        torch.cuda.synchronize()
+        t0 = time.time()
+        outs[k] = model(inp, m, seed = 0, solver = solver)
+        torch.cuda.synchronize()
+        secs[k] = time.time() - t0
+    rd = model.kind == 'sub'
+    obs = { k : jo.observables(inp - v if rd else v, ax, device) for (k, v) in outs.items() }
+    (e_f, e_in) = key_energy(model, outs['frozen'], inp, ax, device)
+    (e_4, _) = key_energy(model, outs['euler4'], inp, ax, device)
+    row = { 'run' : model.info['run'], 'label' : label, 'set' : val, 'n' : n, 'frozen_nfe' : nfe,
+            'key_change_rms' : float(np.sqrt(np.mean((e_f - e_in)**2))),
+            'key_rms_euler4_vs_frozen' : float(np.sqrt(np.mean((e_4 - e_f)**2))),
+            'key_mean_euler4_minus_frozen' : float(np.mean(e_4 - e_f)),
+            'ms_per_image_frozen' : 1e3 * secs['frozen'] / n,
+            'ms_per_image_euler4' : 1e3 * secs['euler4'] / n }
+    row['key_over_change'] = row['key_rms_euler4_vs_frozen'] / max(row['key_change_rms'], 1e-9)
+    for q in OBS_CHECK:
+        (a, b) = (obs['euler4'][q], obs['frozen'][q])
+        (a, b) = (a[np.isfinite(a)], b[np.isfinite(b)])
+        row[f'w1_{q}_euler4_vs_frozen'] = wasserstein_distance(a, b) / max(float(b.std()), 1e-9)
+    path = os.path.join(cmdargs.out, 'euler4.csv')
+    old = pd.read_csv(path) if os.path.exists(path) else pd.DataFrame()
+    old = old[old['label'] != label] if len(old) else old
+    pd.concat([ old, pd.DataFrame([ row ]) ]).to_csv(path, index = False)
+    print(json.dumps(row, indent = 2), flush = True)
+
+@torch.no_grad()
+def vnorm(cmdargs, model, device, n = 64, steps = 512):
+    """The velocity along a fine midpoint solve (module docstring)."""
+    label = cmdargs.label or model.info['run']
+    (_, _, val) = family(model)
+    d = cache(val)
+    (_, (inp, _)) = next(iter(inputs(model, val, { k : v[:n] for (k, v) in d.items() }).items()))
+    z = model.norm.z(torch.as_tensor(np.asarray(inp, np.float32), device = device),
+                     model.kind).unsqueeze(1)
+    (x, cond) = ((model.noise(n, 0), z) if model.cond else (z, None))
+    g = torch.Generator(device = device).manual_seed(7)
+    occ = torch.as_tensor(np.asarray(inp) > 0, device = device).unsqueeze(1)
+    masks = { 'all' : torch.ones_like(occ), 'occupied' : occ, 'empty' : ~occ }
+    eps = torch.randn(x.shape, device = device, generator = g)
+    xps = {}
+    for (k, m) in masks.items():
+        e = eps * m
+        e = e / e.pow(2).mean((1, 2, 3), keepdim = True).sqrt().clamp(min = 1e-12)
+        xps[k] = x + 1e-3 * e
+    d0 = { k : (v - x).pow(2).mean((1, 2, 3)).sqrt() for (k, v) in xps.items() }
+    def velocity(t, x):
+        i = x if cond is None else torch.cat((x, cond), dim = 1)
+        return model.net(torch.full((n,), t, device = device), i)
+    def step(t, x):
+        v = velocity(t, x)
+        return velocity(t + 0.5 * h, x + 0.5 * h * v)
+    h = 1.0 / steps
+    rows = []
+    prev = None
+    for k in range(steps):
+        t = k * h
+        vm = step(t, x)
+        xps = { k : v + h * step(t, v) for (k, v) in xps.items() }
+        rms = vm.pow(2).mean((1, 2, 3)).sqrt()
+        x = x + h * vm
+        row = { 't' : t + 0.5 * h, 'v_rms' : float(rms.mean()),
+                'v_max' : float(vm.abs().amax((1, 2, 3)).mean()),
+                'dv_rms' : float((vm - prev).pow(2).mean((1, 2, 3)).sqrt().mean())
+                           if prev is not None else np.nan }
+        for (k, v) in xps.items():
+            sep = ((v - x).pow(2).mean((1, 2, 3)).sqrt() / d0[k]).cpu().numpy()
+            row[f'sep_{k}_median'] = float(np.median(sep))
+            row[f'sep_{k}_p90'] = float(np.percentile(sep, 90))
+        rows.append(row)
+        prev = vm
+    os.makedirs(cmdargs.out, exist_ok = True)
+    pd.DataFrame(rows).to_csv(os.path.join(cmdargs.out, f'{label}_vnorm.csv'), index = False)
+    print(pd.DataFrame(rows).iloc[::32].round(3).to_string(index = False), flush = True)
+
+@torch.no_grad()
+def onestep(cmdargs, model, device):
+    """Subtraction: the one-step mean against the solved output (module
+    docstring)."""
+    # pylint: disable=too-many-locals
+    label = cmdargs.label or model.info['run']
+    with open(os.path.join(cmdargs.out, f'{label}_frozen.json'), encoding = 'utf-8') as f:
+        nfe = int(json.load(f)['nfe'])
+    (_, _, val) = family(model)
+    d = { k : v[:cmdargs.n_check] for (k, v) in cache(val).items() }
+    (_, (inp, ax)) = next(iter(inputs(model, val, d).items()))
+    jet = d['jet']
+    ue = d['ue']
+    (_, _, dr) = jo.offsets(ax, device)
+    cone = (dr < 0.4).cpu().numpy()
+    bs = []
+    for s in range(0, len(inp), cmdargs.batch):
+        x = torch.as_tensor(np.asarray(inp[s:s + cmdargs.batch], np.float32), device = device)
+        z = model.norm.z(x, model.kind).unsqueeze(1)
+        v = model.net(torch.zeros(len(z), device = device), z)
+        bs.append(model.norm.energy((z + v)[:, 0], model.kind).cpu())
+    outs = { 'one-step mean at t = 0' : torch.cat(bs).numpy(),
+             f'solved, {nfe} NFE' : model(inp, nfe, seed = 0, batch = cmdargs.batch) }
+    hard = jet >= 1.0
+    rows = []
+    for (name, b) in outs.items():
+        j = inp - b
+        rows.append({ 'label' : label, 'estimate' : name, 'n' : len(inp),
+                      'hard_loss_rel' : float(((j - jet) * hard).sum() / (jet * hard).sum()),
+                      'cone_offset' : float(((j - jet) * cone).sum((1, 2)).mean()),
+                      'bhat_on_hard_mean' : float(b[hard].mean()),
+                      'true_ue_on_hard_mean' : float(ue[hard].mean()),
+                      'bhat_far_mean' : float(b[dr.cpu().numpy() >= 1.0].mean()),
+                      'true_ue_far_mean' : float(ue[dr.cpu().numpy() >= 1.0].mean()) })
+    path = os.path.join('docs/flow/jamie_otfm/ex1', 'ex1_onestep.csv')
+    old = pd.read_csv(path) if os.path.exists(path) else pd.DataFrame()
+    old = old[old['label'] != label] if len(old) else old
+    pd.concat([ old, pd.DataFrame(rows) ]).to_csv(path, index = False)
+    print(pd.DataFrame(rows).round(4).to_string(index = False), flush = True)
 
 def generate(cmdargs, model, device):
     # pylint: disable=too-many-locals
@@ -316,7 +478,7 @@ def curves(cmdargs, device):
 
 def main():
     cmdargs = parse_cmdargs()
-    device = torch.device('cuda')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     if cmdargs.curves:
         curves(cmdargs, device)
         return
@@ -325,6 +487,12 @@ def main():
         check(cmdargs, model, device)
     if cmdargs.generate:
         generate(cmdargs, model, device)
+    if cmdargs.euler4:
+        euler4(cmdargs, model, device)
+    if cmdargs.vnorm:
+        vnorm(cmdargs, model, device)
+    if cmdargs.onestep:
+        onestep(cmdargs, model, device)
 
 if __name__ == '__main__':
     main()

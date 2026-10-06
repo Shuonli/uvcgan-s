@@ -14,6 +14,14 @@ data at the base checkpoint, before the continuation; then frozen.
   training images (and noise), K = 8, 16, 32: the smallest K whose value
   moves by less than 5%.
 Written to docs/flow/jamie_otfm/weights/NAME.json.
+
+    jamie_weights.py --transfer RUN --label NAME
+
+After a continuation: its own solved-endpoint terms with its final EMA
+weights at the training rollout's NFE and at the run's frozen test solve,
+on the same training batches and noise (4 batches of --roll-n images). A
+constraint learned through a coarse rollout need not hold for the accurate
+solve that the scored outputs come from; weights/NAME_transfer.json.
 """
 
 import argparse
@@ -50,8 +58,61 @@ def grad_norm(loss, params):
     g = torch.autograd.grad(loss, params, retain_graph = True, allow_unused = True)
     return float(torch.sqrt(sum((x**2).sum() for x in g if x is not None)))
 
+def transfer(run, label, out, batches = 4):
+    """The terms at the training rollout's NFE and at the test solve
+    (module docstring)."""
+    # pylint: disable=too-many-locals
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    with open(os.path.join(run, 'config.json'), encoding = 'utf-8') as f:
+        c = json.load(f)
+    terms = [ t for t in (c.get('toy_extra') or '').split(',') if t in ROLLOUT_TERMS ]
+    targs = argparse.Namespace(**c)
+    targs.toy_extra = None
+    targs.toy_lambda = None
+    method = jm.ToyMethod(targs, jm.load_norm(), device)
+    method.need_ref = any(t in ('profile', 'div') for t in terms)
+    net = fc.construct_net(c['method'], c['channels'], c['res_blocks'], c['attn'],
+                           c.get('backbone', 'unet')).to(device)
+    state = torch.load(fc.list_checkpoints(run)[-1], map_location = device, weights_only = False)
+    net.load_state_dict(state['ema'])
+    net.eval()
+    with open(os.path.join('docs/flow/jamie_otfm/solver', f'{label}_frozen.json'),
+              encoding = 'utf-8') as f:
+        n_test = int(json.load(f)['nfe'])
+    nfes = { 'train' : int(c['roll_nfe']), 'test' : n_test }
+    vals = { t : { k : [] for k in nfes } for t in terms }
+    with torch.no_grad():
+        for b in range(batches):
+            for (key, nfe) in nfes.items():
+                method.set_streams(777 + b, 0)
+                batch = method.draw(None, 256)
+                (x0, x1, cond) = method.endpoints(batch)
+                if method.coupled:
+                    if method.name == 'toycond':
+                        (cond, x1) = method.pair(cond, x1)
+                    else:
+                        (x0, x1) = method.couple(x0, x1)
+                method.roll_nfe = nfe
+                for t in terms:
+                    vals[t][key].append(float(getattr(method, f'term_{t}')(net, x0, x1, cond)))
+    res = { 'run' : run, 'label' : label, 'nfe' : nfes,
+            'terms' : { t : { k : float(np.mean(v)) for (k, v) in d.items() } for (t, d) in vals.items() },
+            'per_batch' : vals }
+    os.makedirs(out, exist_ok = True)
+    with open(os.path.join(out, f'{label}_transfer.json'), 'w', encoding = 'utf-8') as f:
+        json.dump(res, f, indent = 4)
+    print(json.dumps({ k : v for (k, v) in res.items() if k != 'per_batch' }, indent = 4))
+
 def main():
     # pylint: disable=too-many-locals
+    if '--transfer' in sys.argv:
+        q = argparse.ArgumentParser(description = 'Rollout transfer of a continuation')
+        q.add_argument('--transfer', required = True)
+        q.add_argument('--label', required = True)
+        q.add_argument('--out', default = 'docs/flow/jamie_otfm/weights')
+        r = q.parse_args()
+        transfer(r.transfer, r.label, r.out)
+        return
     (a, targs) = parse_cmdargs()
     device = torch.device('cuda')
     norm = jm.load_norm()

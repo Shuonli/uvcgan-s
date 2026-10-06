@@ -11,6 +11,8 @@
 #   LABEL=E3-D_ctl FIXED=64 sbatch -w dahlia scripts/flow/jamie_post.sbatch
 #   LABEL=E3-D_ctl BASE=E3-D_s0 sbatch -w dahlia scripts/flow/jamie_post.sbatch
 #
+# SETS=t2_pair limits the test outputs to those sets (the 2 x 2 cells).
+#
 #SBATCH -p a6k
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -66,5 +68,5 @@ json.dump({ 'nfe' : int(sys.argv[2]), 'solver' : 'midpoint',
             'resolved' : sys.argv[3] == 'True' }, open(sys.argv[1], 'w'), indent = 4)
 EOF
 echo "[$(date +%T)] frozen midpoint $N; test outputs"
-"$PYTHON" -u "$E" "$RUN" --generate --nfe "$N" --label "$LABEL" || exit 1
+"$PYTHON" -u "$E" "$RUN" --generate --nfe "$N" --label "$LABEL" ${SETS:+--sets "$SETS"} || exit 1
 echo "[$(date +%T)] done"

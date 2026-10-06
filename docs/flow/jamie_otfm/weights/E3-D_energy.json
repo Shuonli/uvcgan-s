@@ -1,0 +1,59 @@
+{
+    "base": "/home/shuhang/cycleGAN/outdir/sphenix/flow/jamie/runs/E3-D_s0",
+    "label": "E3-D_energy",
+    "terms": [
+        "energy"
+    ],
+    "lambda": {
+        "energy": 0.005
+    },
+    "ratios": {
+        "energy": [
+            0.008104035334919274,
+            0.005095617454586312,
+            0.009685975428954259,
+            0.00444761941259911,
+            0.0032713770448081544,
+            0.004279905462515881,
+            0.005868418782181537,
+            0.0019657505902467734
+        ]
+    },
+    "rollout_checks": {
+        "8": {
+            "values_K": {
+                "energy": 0.05524545907974243
+            },
+            "values_2K": {
+                "energy": 0.10001923888921738
+            },
+            "rel_change": {
+                "energy": 0.4476516748849386
+            }
+        },
+        "16": {
+            "values_K": {
+                "energy": 0.10001923888921738
+            },
+            "values_2K": {
+                "energy": 0.2241552621126175
+            },
+            "rel_change": {
+                "energy": 0.5537948208462451
+            }
+        },
+        "32": {
+            "values_K": {
+                "energy": 0.2241552621126175
+            },
+            "values_2K": {
+                "energy": 0.33762824535369873
+            },
+            "rel_change": {
+                "energy": 0.33608853762281393
+            }
+        }
+    },
+    "roll_nfe": 32,
+    "rollout_resolved": false
+}

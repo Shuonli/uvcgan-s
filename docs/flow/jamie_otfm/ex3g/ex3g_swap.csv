@@ -1,0 +1,2 @@
+model,corr_cone_swap_condition,corr_cone_swap_noise_input,fluct_corr_cone_same_noise,corr_ring_swap_condition,corr_ring_swap_noise_input,fluct_corr_ring_same_noise,corr_girth_swap_condition,corr_girth_swap_noise_input,fluct_corr_girth_same_noise,swap_closer_to_condition
+C hard,0.10918727909018962,-0.06783323602421155,0.03384603725260253,0.04356867426470066,-0.0016403602503273506,0.03738362932063227,0.1778462044102395,-0.005593829623991387,0.03182403791836374,0.696

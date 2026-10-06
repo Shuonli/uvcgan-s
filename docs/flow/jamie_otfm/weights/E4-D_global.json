@@ -1,0 +1,59 @@
+{
+    "base": "/home/shuhang/cycleGAN/outdir/sphenix/flow/jamie/runs/E4-D_s0",
+    "label": "E4-D_global",
+    "terms": [
+        "inv_global"
+    ],
+    "lambda": {
+        "inv_global": 0.05
+    },
+    "ratios": {
+        "inv_global": [
+            0.06501353952886652,
+            0.03489295300584493,
+            0.03784300278381729,
+            0.047862990129988035,
+            0.0727973436299521,
+            0.08766680837126234,
+            0.049972604532770595,
+            0.04349319377016117
+        ]
+    },
+    "rollout_checks": {
+        "8": {
+            "values_K": {
+                "inv_global": 0.036330267786979675
+            },
+            "values_2K": {
+                "inv_global": 0.03489076346158981
+            },
+            "rel_change": {
+                "inv_global": 0.04125746136150242
+            }
+        },
+        "16": {
+            "values_K": {
+                "inv_global": 0.03489076346158981
+            },
+            "values_2K": {
+                "inv_global": 0.03498770296573639
+            },
+            "rel_change": {
+                "inv_global": 0.0027706735775569263
+            }
+        },
+        "32": {
+            "values_K": {
+                "inv_global": 0.03498770296573639
+            },
+            "values_2K": {
+                "inv_global": 0.035265643149614334
+            },
+            "rel_change": {
+                "inv_global": 0.007881330355972382
+            }
+        }
+    },
+    "roll_nfe": 8,
+    "rollout_resolved": true
+}

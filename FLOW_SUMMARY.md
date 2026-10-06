@@ -1,6 +1,6 @@
 # Summary: speeding up UVCGAN-S, and flow matching for sPHENIX background subtraction
 
-*As of 2026-10-05, 19:10. Branch `ddp` of github.com/Shuonli/uvcgan-s.
+*As of 2026-10-06, 06:00. Branch `ddp` of github.com/Shuonli/uvcgan-s.
 This file is the short version. The full logs, with job numbers and
 commands, are `SCALING_NOTES.md` (UVCGAN-S training) and `FLOW_NOTES.md`
 (flow matching). The consolidated comparison with its slides is Part 9;
@@ -8,7 +8,8 @@ two single-question experiments (a learned pairing, a noisy training path)
 are Parts 10 and 11, both negative. Part 12 tests the intended application
 directly: turning clean PYTHIA jets into JEWEL-like ones, now also against
 a CycleGAN trained on the same task. Part 13 asks for several different
-outputs per input jet.*
+outputs per input jet. Part 14 repeats Jamie Nagle's four toy exercises,
+where the truth is known, with our flow matching.*
 
 ## The task
 
@@ -898,6 +899,66 @@ A sequence of cheap diagnostics, then controls:
   `docs/flow/translation/condfm/` (its `README.md` lists the files), the
   4-slide appendix `condfm/slides/condfm_appendix.pdf`.
 
+## Part 14: Jamie Nagle's toy exercises with OT flow matching
+
+- **Question:** Jamie Nagle's deck (`nagle_cyclegan_explained.pdf`) runs
+  four toy exercises where the truth is known, and finds that a CycleGAN
+  leaves a halo, erases the medium-induced recoil, gets quenching right
+  only on average, and follows its prior rather than the data. Does our OT
+  flow matching do better, worse, or fail differently?
+- **The toy:** reimplemented from the deck's code listings (Jamie's code
+  was not available): 24 x 64 towers, toy jets, a toy UE of about 0.6 GeV
+  a tower, and a random quenching that moves a fraction f of the jet energy
+  into about 15 recoil particles at 0.3-1.0 from the axis. Our checks
+  match his numbers to within about 10%.
+- **Two models:** D, the deterministic OT-CFM (one output per input), and
+  C, noise-driven conditional FM (many outputs per input), both on the
+  UVCGAN-S network, trained on independent pools matched by minibatch OT
+  ("pure unpaired"), on mixtures we build ourselves ("synthetic paired"),
+  on both ("hybrid"), or on true pairs (a positive control only). 1.5 GPU
+  hours per model, short continuations to test one change at a time; 32
+  GPU hours in all.
+
+| exercise | Jamie's CycleGAN | OT flow matching |
+| :--- | :--- | :--- |
+| 1. remove the UE | +11 GeV halo; fixed by GeV-based losses | no halo, but 25% of the jet core goes into the background; no loss change fixes it |
+| 2. frozen subtractor on quenched jets | recoil erased (2% kept) | recoil mostly erased (18-29% kept), core change right |
+| 3. vacuum -> quenched, no UE | average right, single jets no better than random | the same: D under-quenches; unpaired C has the right population but ignores its input; true pairs work |
+| 4. the same with UE | UE inverted without an identity rule; best result 84% / 69% | with a pre-specified matching cost, this event's UE kept as exactly as the truth, 114% / 80% of the core / ring change; C regenerates the UE |
+| prior against data | the prior decides, the data change nothing | the data change something, but the prior still decides most |
+
+- **Why the jet core is lost (a diagnosis, not a guess):** the network's
+  one-step estimate of the background is right on the core (within 2%),
+  and shows Jamie's halo instead. Solving the flow moves the mixtures onto
+  realistic UE images, which need their large fluctuations somewhere, and
+  the flow puts them under the brightest towers: the jet core. Losses that
+  act on the one-step estimate therefore cannot fix it.
+- **Why unpaired C fails the conditional test:** it learns exactly the
+  pairs it is given, and minibatch OT on clean jets pairs them by position,
+  not energy. Its outputs are realistic quenched jets with nearly no memory
+  of the input. Trained on true pairs, the same network learns the right
+  per-jet randomness.
+- **What keeps the event's UE:** the matching cost, not a penalty. With
+  the whole-image cost the pairs match the UE and ignore the jet; with a
+  cost split into near-jet and far parts (fixed before training, after an
+  audit of what the pairs match), D keeps every far tower. C, which draws
+  its output from noise, regenerates the UE in every setting.
+- **Two seeds:** the two trainings agree jet by jet (correlation 0.85-0.90)
+  and neither predicts the jet's actual change (0.08-0.10, where 0.48 is
+  possible): Jamie's "agreement is not proof", reproduced.
+- **Numerical lessons:** the clean-jet D flow cannot be solved accurately
+  (towers empty at both ends amplify tiny errors about 580 times); and a
+  constraint trained through a cheap 8-step solve can hold only for that
+  solve (C's far penalty: correlation 0.94 at 8 steps, 0.21 at the
+  accurate solve).
+- **Not established:** anything about PYTHIA or JEWEL; one seed for most
+  runs; short continuations. The PYTHIA-jet extension and the paired
+  two-channel arm were not run.
+- **Where:** `FLOW_NOTES.md`, "Jamie's toy exercises with OT flow
+  matching" (the six questions answered at its end); `docs/flow/jamie_otfm/`
+  (`README.md`, `coverage.csv`, `ledger.csv`), deck
+  `docs/flow/jamie_otfm/slides/jamie_otfm.pdf`.
+
 ## Where everything is
 
 - `FLOW_NOTES.md`: the full log of the flow study (pre-registration,
@@ -921,6 +982,9 @@ A sequence of cheap diagnostics, then controls:
   (`slides/translation_appendix.pdf`), the OT-FM and the OT-FM-against-
   CycleGAN decks; `README.md` lists them. `condfm/`: the stochastic pilot
   (Part 13), with its own `README.md`.
+- `docs/flow/jamie_otfm/`: Jamie's toy exercises (Part 14): generator
+  checks, matching audit, solver checks, per-exercise tables and figures,
+  coverage table, run ledger, the deck; `README.md` lists them.
 - `scripts/flow/`: all code:
   - `fm_common.py`: the models;
   - `fm_train.py`, `fm_eval.py`, `fm_compare.py`: train, score, compare;
@@ -929,7 +993,8 @@ A sequence of cheap diagnostics, then controls:
   - the coupling diagnostics;
   - `dsbm*.py`: the learned pairing (Part 10); `noisy_*.py`,
     `sine_path_check.py`: the noisy-path pilot (Part 11);
-    `translation_*.py`: the translation pilot (Part 12).
+    `translation_*.py`: the translation pilot (Part 12);
+    `toycalo.py`, `jamie_*.py`: the toy exercises (Part 14).
 - `outdir/sphenix/flow/<run>/`: checkpoints, training histories and
   per-event outputs (not in git); the translation pilot's caches, runs and
   outputs under `outdir/sphenix/flow/translation/`.
@@ -953,5 +1018,11 @@ A sequence of cheap diagnostics, then controls:
   (minibatch OT, a teacher, the Schrodinger bridge at two noise levels)
   beats doing nothing jet by jet.
 - Why the background-only flow stops short in the jet core, even from the
-  true path (Part 11). A noisy path does not change it; an explanation by
-  posterior averaging is untested.
+  true path (Part 11). A noisy path does not change it. On Jamie's toy
+  (Part 14) the one-step estimate has the core right and the solved flow
+  loses it, by moving the UE's largest fluctuations under the core; whether
+  the same holds on the sPHENIX data is untested.
+- On the toy (Part 14): a training signal that makes the unpaired
+  conditional model (C) keep the input's energy and the event's UE; and a
+  solve for the clean-jet D flow (towers empty at both ends make it
+  diverge).

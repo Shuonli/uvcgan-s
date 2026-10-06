@@ -4110,9 +4110,30 @@ A6000s on dahlia; final checkpoint at the budget, EMA weights):**
 | B16-B19 | the 2 x 2: hybrid (prior vacuum or broad) x (mixture data vacuum + UE or quenched + UE), lambda_U = 1 | hybrid | A2 | 4000 |
 | B20-B21 | synthetic only, vacuum and broad priors (lambda_U = 0) | synthetic paired | A2 | 4000 |
 | B22 | hybrid (vacuum prior, quenched data) + batch-mean UE profile | hybrid | A2 | 4000 |
+| A14 | E4-Cnf: C on the near/far cost (added 2026-10-05 23:50, see below) | pure unpaired (altered coupling) | scratch | 1.5 h |
+| B23 | E4-Cnf + far penalty (added with A14) | pure unpaired (altered coupling) | A14 | 4000 |
 
 - Estimated 19.5 h (A) + about 13 h (B, the rollout arms at about half the
-  update rate) = 32.5 h; evaluation extra. Continuations restart the EMA
+  update rate) = 32.5 h; evaluation extra.
+- **Added after the first Exercise 4 outputs (A14, B23; not in the plan as
+  fixed at 19:45):** the ledger paired C only with the full-image cost,
+  which the audit had already shown to ignore the jet; A11's outputs then
+  showed a C that regenerates the UE and places jets independently of the
+  input axis. The study's instruction is to repeat the selected far-region
+  setup with C, and the near/far cost is the pre-specified Exercise 4
+  alternative, so C is also run on it, with its far-penalty continuation
+  (C's pairing now honours `--toy-cost`; before, only D's did). Nothing
+  else was changed; about 2 GPU-hours more.
+- **Amended 2026-10-06 00:55, before B23 trained (validation only):** B15
+  (E4-C + far penalty) kept the far UE at the 8-NFE rollout it was trained
+  through (validation far-tower r 0.94) but not at the accurate 32-64 NFE
+  solve its outputs come from (r 0.21-0.22, the same at 32 and 64); its own
+  penalty is 0.09 at 8 NFE and 0.60 at 32 (`jamie_weights.py --transfer`).
+  The rule that picks the rollout NFE (K against 2K at the base checkpoint)
+  does not stop the continuation from learning a field whose coarse solve
+  satisfies the constraint. B23 therefore rolls out at its base's frozen
+  test NFE (`ROLL_AT_BASE=1`); every other arm runs as fixed, and every
+  solved-endpoint continuation gets the same transfer check. Continuations restart the EMA
   warm-up (fresh step count) and continue the base's Adam state; equal
   updates within a family, wall time and rollout cost reported.
 - **Extra-term weights:** one training-only gradient-scale audit on the
@@ -4195,6 +4216,507 @@ noises. Continuations use their base's N after one N-vs-2N check each.
   combined bootstrap sd; the prior invents recoil if a vacuum jet's ring
   exceeds the truth's by more than 3 sd.
 
+### Solver results (posts of every run; re-solves 20697 (failed, see below), 20701-20707; diagnostics 20669, 20671, 20674-20676, 20685, 20699; transfer 20708)
+
+`docs/flow/jamie_otfm/solver/`, table `slides/tables/solver.tex`. Frozen on
+validation before any test score:
+- Baselines: E1-U, E1-P at 32 NFE (32 against 64: 0.1% of the model's
+  change); E3-Cp, E3-Ch, E4-D, E4-Dnf at 64; E3-Cs, E3g-C at 128; E4-C,
+  E4-Cnf at 32 (C: also below 1/10 of the difference between two noises).
+- Continuations were checked once at their base's NFE; the ten that failed
+  (E4-C_far, E4-D_ctl, E4-D_global, E3-Ch_ctl, E3-Ch_profile and five 2 x 2
+  cells) were re-solved by the same doubling rule from twice that NFE
+  (`jamie_repost.sh`; the 2 x 2 cells regenerate only their scored set).
+  All converged except E4-D_global, frozen at the 256 cap (64 against 128:
+  2.9%, 128 against 256: 1.6%). The E3-D family (E3-D_ctl, E3-D_energy,
+  E3-D_s1) and E3g-D stay unresolved at the cap (below). One re-solve job
+  failed because its job script was edited while it ran; it was rerun
+  unchanged.
+- **E3-D is not resolved.** The per-image cone energy of N against 2N
+  differs by 2.8 GeV (N = 32), 5.1 (64), 1.3 (128), 1.5 (256) and 1.0 (512,
+  `E3-D_s0_fine.csv`), against an rms change of 5.7 GeV made by the model;
+  the population W1 shifts (0.02-0.13 sd) stay above their bootstrap sd.
+  Frozen at 256, the planned maximum; a reported limitation.
+- **Why** (`--vnorm`, 64 validation jets, 1024 NFE): two E3-D trajectories
+  started 1e-3 apart end 580 times further apart (median; 90%: 850).
+  Perturbing only the input's empty towers gives the same 580, only its
+  occupied towers 5. In every other run the factor is 1.0-1.6 (E3-Cp 90%:
+  3.1). In the clean-jet D flow, a tower empty at both ends sits exactly at
+  the floor value along every training path, so the network's response to a
+  departure from the floor is never trained. The solver's small errors leave
+  the floor and are amplified. Starts that fill every tower (the UE in
+  Exercises 1, 2 and 4; Gaussian noise for C) do not have this. The velocity
+  itself is smooth; E3-Cp's is stiffer near t = 1 and still converges.
+  Consequence: E3-D's outputs carry about 1-1.5 GeV rms of numerical noise
+  in the cone energy per jet, and its continuations and seed 1 inherit it.
+- **Four Euler steps** (speed diagnostic only, `euler4.csv`): the per-image
+  key energy is off the frozen solve by 0.04 (E1-P), 0.17 (E1-U), 0.45
+  (E3-Cp), 1.2 (E4-D) and 3.2 (E3-D) times the model's own change; 1.1 ms
+  per image against 8.7 (32 NFE) to 70 ms (256 NFE).
+- **Constraints learned through a rollout** (`jamie_weights.py --transfer`,
+  `weights/*_transfer.json`, `slides/tables/transfer.tex`): each
+  solved-endpoint continuation's own term with its final EMA weights, at
+  the training rollout's NFE and at its frozen test solve, same batches and
+  noise:
+
+| continuation | term | rollout NFE: value | test NFE: value | test / rollout |
+| :--- | :--- | :--- | :--- | ---: |
+| E4-C_far | far change | 8: 0.091 | 128: 0.587 | 6.4 |
+| E4-D_global | global change | 8: 0.0047 | 256: 0.0177 | 3.8 |
+| E3-Ch_profile | radial profile | 8: 0.054 | 128: 0.122 | 2.3 |
+| E4-D_far | far change | 8: 0.0039 | 64: 0.0070 | 1.8 |
+| E3-D_energy | total GeV | 32: 0.0060 | 256: 0.0085 | 1.4 |
+| E4-D_s1_far | far change | 16: 0.0039 | 64: 0.0056 | 1.4 |
+| E4-Dnf_far | far change | 8: 0.0024 | 64: 0.0031 | 1.3 |
+| E3-Ch_div | diversity | 8: -0.194 | 64: -0.175 | 0.9 |
+| E4-Cnf_far (rollout at the test NFE) | far change | 32: 0.79 | 32: 0.79 | 1 |
+
+  The rollout NFE rule (K against 2K at the base checkpoint, within 5%)
+  does not keep the network from learning a field whose coarse solve meets
+  the constraint and whose accurate solve does not: badly for C's far
+  penalty (validation far-tower r 0.94 at 8 NFE, 0.21 at 32-64), mildly for
+  D's terms. With the rollout at the test NFE (E4-Cnf_far) the far term
+  falls only from 0.78 to 0.60 in 4000 updates: within this budget the far
+  penalty does not make C keep the event's UE either way.
+
+### Exercise 1: subtraction (jobs 20559-20560 training, 20609-20617 continuations, 20699 one-step diagnostic, 20709 final report)
+
+`docs/flow/jamie_otfm/ex1/`; 20k held-out mixtures (t1_mix), true axis,
+J_hat = M - B_hat raw and signed:
+
+| model | offset, GeV | RMS (calibrated) | halo R < 0.4, positive | true towers > 1 GeV | negative towers | UE-only fakes: largest cone > 10; anti-kT |
+| :--- | ---: | ---: | ---: | ---: | ---: | :--- |
+| E1-U (pure unpaired) | -5.63 | 2.53 (2.54) | 2.1 | -7.1 GeV (-26%) | 28% | 0.08%; 0.04% |
+| E1-P (synthetic paired) | -5.03 | 2.53 (2.62) | 2.2 | -6.7 GeV (-25%) | 2.7% | 0.10%; 0.06% |
+| rho x A (rho from R > 1.2) | +0.85 | 4.54 | - | - | - | 88%; 99.9% |
+| rho per tower, negatives dropped | +9.49 | 3.63 | 9.1 | +0.3% | 0 | |
+
+- **The jet core goes into the background.** True towers above 1 GeV lose
+  7.1 GeV (26%); the soft true towers lose another 1.0 instead of
+  compensating; the leading tower is 2.6 GeV low. Jamie's ring table, on
+  true towers: r < 0.1 13.9 of 17.7 GeV, 0.1-0.2 5.4 of 8.0, 0.2-0.3 0.9 of
+  2.1, 0.3-0.4 0.10 of 0.58 (E1-P alike).
+- **The halo is small:** 2.1 GeV on truth-empty towers in R < 0.4, 1.3-1.5
+  in the ring 0.4-1.0, 5.6 spread over the far region (about 0.004 GeV a
+  tower).
+- **Pre-registered reading:** Jamie's core-loss failure is reproduced (more
+  than 10%), his halo is not (less than 3 GeV).
+- The offset grows with the jet energy: -4.6 GeV at 10-20 GeV, -8.8 at
+  50-80 (E1-P -4.5, -6.5). Extrapolation slices: 5-20 GeV -3.1, 60-80 -9.6,
+  80-100 -10.8 (E1-P -3.2, -6.9, -7.3).
+- Resolution 2.5 GeV against rho x A's 4.5 (Jamie's fixed network 2.4-2.6
+  against 4.4). Re-found anti-kT jets the same (offset -5.6, rms 2.5, all
+  found). UE-only events: 0.1% fakes by either definition (rho x A 88%,
+  Jamie 88%).
+- Synthetic pairs against pure unpaired: the same resolution and core loss,
+  a 0.6 GeV smaller offset, and far less negative energy (E1-U 28% of
+  towers negative, -0.84 GeV an event, mostly far from the jet).
+- **Why the core is lost** (`jamie_eval.py --onestep`, 500 validation
+  mixtures, `ex1/ex1_onestep.csv`). The network's one-step estimate at
+  t = 0, x_0 + v(0, x_0) (the mean target the regression learns), gets the
+  core right: hard-tower error -2% (E1-P) and +1% (E1-U), B_hat on the true
+  hard towers 0.71 and 0.53 GeV against a true UE of 0.58 there. The solved
+  ODE loses 25-26% of the core, with B_hat 2.0 GeV on those towers, 3.4
+  times the true UE. The flow carries the mixture distribution onto the UE
+  distribution, and a UE-like image needs its large fluctuations somewhere:
+  the map puts them where the mixture is brightest, under the jet core.
+  The one-step mean fails the other way: it leaves the UE fluctuations in
+  the jet (cone offset +1.7 GeV for E1-P, +7.3 for E1-U), Jamie's halo. So
+  the regression target is right and the transport is what loses the core;
+  a loss on the one-step surrogate cannot see it (B2-B3 below).
+
+**Continuations of E1-P (B1-B4, synthetic paired; 4000 updates each; jobs
+20609-20617):** weights from the gradient audit: abs 0.001, bal 0.1, ring
+0.02 (each term's gradient then about the FM gradient's size).
+
+| E1-P + | offset, GeV | RMS | halo R < 0.4 | true towers > 1 GeV | negative towers | response slope | 60-80 GeV offset |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| (base) | -5.03 | 2.53 | 2.2 | -24.5% | 2.7% | 0.94 | -6.9 |
+| unchanged loss (B1) | -5.00 | 2.56 | 2.2 | -24.4% | 1.9% | 0.95 | -6.7 |
+| GeV + balanced 3-mask (B2) | -5.22 | 2.55 | 2.0 | -24.3% | 0.16% | 0.95 | -6.8 |
+| + ring sums (B3) | -5.27 | 2.57 | 2.0 | -24.4% | 0.24% | 0.95 | -6.8 |
+| flat 5-80 GeV prior (B4) | -4.66 | 2.64 | 2.3 | -23.3% | 2.0% | 0.98 | -5.7 |
+
+- **What changes with the loss:** the GeV and mask terms remove the negative
+  towers (2.7% to 0.2%), trim the halo (2.2 to 2.0 GeV) and the occupancy
+  (16 to 14 towers above 0.05 GeV in the cone); the ring sums add nothing.
+  **What does not:** the core loss and the offset. The surrogate terms
+  themselves hardly fall during training (abs 0.233 to 0.216, bal 0.050 to
+  0.049, ring 0.0079 to 0.0076): they act on the one-step surrogate, which is
+  already nearly right (above), while the scored outputs come from the
+  solve. Jamie's fix of the same three terms removed his halo, a scoring
+  problem; our failure sits in the transport.
+- **Training support:** the flat prior flattens the energy dependence
+  (slope 0.98, the 60-80 GeV offset -5.7 against -6.9, 80-100 GeV -6.2
+  against -7.3) but not the core loss, and the 5-20 GeV slice gets worse in
+  GeV (-4.0 against -3.2). Jamie's version: better above 60 GeV, 5-15 GeV
+  still poor.
+- UE-only fakes stay at 0.0-0.1% for every arm; re-found anti-kT jets agree
+  with the true-axis cone within 0.1 GeV.
+
+### Exercise 2: a frozen subtractor (the E1 checkpoints; t2_pair, 20k jets, each vacuum and quenched over the same UE)
+
+`docs/flow/jamie_otfm/ex2/`; quenched minus vacuum, mean per jet, all
+towers, no selection:
+
+| | cone E | girth | ring 0.4-1.0 | mass (truth -0.005) | quenched jets lost (< 10 GeV) | recoil in B_hat | hard-tower loss, vacuum / quenched | ring of vacuum jets (truth 0.40) |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- | ---: |
+| truth | -6.27 GeV | +0.0274 | +6.09 GeV | | | | | |
+| E1-U | 102% | 85% | 29% | -0.40 GeV | 14.2% | 4.35 GeV | -26% / -40% | 1.50 |
+| E1-P | 108% | 84% | 18% | -0.48 GeV | 15.4% | 5.01 GeV | -25% / -40% | 1.65 |
+| rho per tower (signed) | 100% | 96% | 100% | -0.42 GeV | 3.1% | | | 2.87 |
+| Jamie's CycleGAN (halo fixed) | 136% | 69% | 2% | -0.7 GeV | 12% (to zero) | | | |
+
+- **The recoil goes into the background:** 4.4 of the 6.1 GeV ring change
+  (E1-U; E1-P 5.0) sits in B_hat. Recovered 29% and 18%, against Jamie's 2%.
+- The cone change is about right (102%, 108%) because vacuum and quenched
+  cones are low by similar amounts (-5.6, -5.7 GeV, E1-U); girth 85%. A
+  mass change of -0.4 GeV appears (true -0.005; Jamie -0.7), but the signed
+  per-tower rho readout shows the same -0.42: with substructure computed on
+  the clipped cone, mass is not a clean quenching observable for any readout
+  here.
+- The hard core loses more when quenched: 40% against 26% of the energy in
+  true towers above 1 GeV.
+- 14-15% of quenched jets fall below 10 GeV (vacuum 0.1-0.2%), driven by the
+  overall offset; Jamie's 12% vanished entirely.
+- **Pre-registered reading:** Jamie's exact failure (ring below 20% with a
+  vacuum offset within 1 GeV) is not reproduced, because the vacuum offset
+  is -5 GeV; the recoil is suppressed in both (E1-P below the 20% line).
+- **The E1-P continuations change none of it:** ring recovered 16%, 16%,
+  15% and 11% (B1-B4), the recoil in B_hat 5.1-5.4 GeV, girth 84-75%, lost
+  quenched jets 16-21%; the flat prior is the worst. Consistent with the
+  core's mechanism (not tested separately): recoil towers of 0.5-1 GeV over
+  the UE look like the UE's upper tail to the transport.
+
+### The paired positive control (E3-Cp, true-paired control; jobs 20558, 20565, 20659)
+
+C trained on vacuum jets and their own true quenchings (e3_pair), scored on
+the bank of 100 parents (128 draws against 128 true quenchings each):
+- conditional W1/sd: cone 0.117 (true-vs-true 0.065), ring 0.282 (0.120),
+  girth 0.204 (0.071); 68% coverage 72%, 60%, 68%; conditional sd model /
+  truth 1.12, 0.89, 1.05;
+- the conditional means follow the truth's (r 0.995, 0.90, 0.97); the ring
+  mean is 1.1 GeV low; within a parent the cone-ring correlation is -0.66
+  (truth -0.99, both set by one f);
+- population: the shift recovered 95% (cone), 84% (ring), 85% (girth); the
+  condition swap follows the condition in 99.5% of swaps.
+- **Gate:** passed. The architecture and the noise-driven training can
+  represent the toy's stochastic rule (with a 1 GeV ring deficit and too
+  weak a cone-ring anticorrelation), so B7-B9 run and an unpaired C failure
+  is not an implementation failure.
+
+### Exercise 3: clean translation (jobs 20561, 20570-20571, 20606 training; 20629-20668 continuations; posts and re-solves; final report 20710)
+
+`docs/flow/jamie_otfm/ex3/`; t3_pair (20k vacuum jets, one true quenching
+each), W1/sd against the true quenched jets (t3_ref, an independent
+quenched sample, gives the finite-sample floor):
+
+| model | cone | ring | girth | R > 1 | shift recovered: cone, ring, girth | r(cone, input) | own input closer |
+| :--- | ---: | ---: | ---: | ---: | :--- | ---: | ---: |
+| independent quenched sample | 0.010 | 0.023 | 0.008 | 0.015 | | | |
+| identity (the vacuum input) | 0.72 | 1.37 | 0.63 | 0.28 | 0 | 1 | 100% |
+| D, pure unpaired | 0.45 | 1.01 | 0.41 | 0.28 | 39%, 26%, 36% | 0.86 | 98% |
+| C hard, pure unpaired | 0.30 | 0.21 | 0.92 | 3.4 | 103%, 109%, 246% | 0.07 | 69% |
+| C soft, pure unpaired | 0.37 | 0.25 | 1.04 | 6.2 | 113%, 108%, 264% | 0.08 | 68% |
+| C, true-paired control | 0.044 | 0.22 | 0.10 | 0.22 | 95%, 84%, 85% | 0.86 | 99% |
+
+The bank (100 parents; 128 model draws against 128 true quenchings; the
+other 128 give the true-vs-true reference):
+
+| model | conditional W1/sd: cone, ring, girth | 68% coverage | sd model / truth | r(conditional means): cone, ring |
+| :--- | :--- | :--- | :--- | :--- |
+| true vs true | 0.065, 0.120, 0.071 | 67% | 1 | 1.00, 0.98 |
+| D (one output) | 0.65, 1.20, 0.56 | 0 | 0 | 0.87, 0.10 |
+| C hard | 0.90, 0.59, 1.11 | 84%, 72%, 61% | 3.1, 1.7, 2.8 | 0.50, -0.32 |
+| C soft | 0.97, 0.60, 1.21 | 87%, 75%, 58% | 3.3, 1.8, 2.9 | 0.53, -0.28 |
+| C, true-paired control | 0.12, 0.28, 0.20 | 72%, 60%, 68% | 1.1, 0.9, 1.1 | 1.00, 0.89 |
+
+- **D under-quenches and keeps the jet.** Cone 25.9 GeV (truth 21.9, input
+  28.4), ring 2.0 (6.5); outputs tied to their inputs (r 0.86, own input
+  closer in shape for 98%). The ring by tower size: 0.21 GeV in towers
+  below 0.05 GeV (truth 0.06), 0.5 in 0.05-0.5 GeV towers (1.7), 1.3 above
+  0.5 GeV (4.9): a little haze, few real recoil towers. 2.7% of the total
+  energy is lost. Its outputs carry the unresolved solve's numerical noise
+  (above).
+- **C (pure unpaired) has the right population and the wrong conditional
+  law.** The quenched means are right (cone and ring shifts 103-113%) and
+  the ring towers have the true sizes, but the output barely depends on
+  the input: r(cone, input) 0.07 (paired control 0.86); after a condition
+  swap at fixed noise the cone follows the new condition with r 0.03
+  (control 0.85). A parent's draws spread like the whole population (cone
+  sd 11.6 GeV against 3.8 per parent). Girth is 2.5 times too wide and
+  1.4-2.6 GeV lands beyond R = 1 (truth 0.1): the jets are generated off
+  the input axis, by a median 0.13 (truth 0.06), 28-31% beyond 0.2, 6-8%
+  beyond 0.5 (40-49% of the far energy). That is the plan's own pairing
+  (the audit: pairs matched by position, median axis offset 0.13, energy
+  r 0.03). C learns the pseudo-joint the plan defines, faithfully.
+- **Pre-registered reading:** C hard and soft generate variation, not the
+  conditional law (conditional W1 5-8 times the paired control's in cone
+  and girth, beyond the 1.5 limit; coverage 84-87% in the cone). The soft
+  plan changes nothing measurable. The paired control shows that the same
+  network and training recover the law when the pairs are right.
+
+**Continuations (B5-B9, pure unpaired, 4000 updates; jobs 20629-20632,
+20663-20668):**
+
+| model | shift recovered: cone, ring, girth | conditional W1/sd: cone, ring, girth | cone sd per parent (truth 3.8) | r(cone, input) |
+| :--- | :--- | :--- | ---: | ---: |
+| D | 39%, 26%, 36% | 0.65, 1.20, 0.56 | 0 | 0.86 |
+| D + unchanged (B5) | 52%, 26%, 37% | 0.58, 1.24, 0.52 | 0 | 0.86 |
+| D + total energy (B6, lambda 0.005, rollout 32 NFE) | 29%, 14%, 23% | 0.59, 1.18, 0.51 | 0 | 0.97 |
+| D seed 1 (A12) | 53%, 30%, 44% | 0.59, 1.18, 0.58 | 0 | 0.90 |
+| C hard | 103%, 109%, 246% | 0.90, 0.59, 1.11 | 11.6 | 0.07 |
+| C hard + unchanged (B7) | 128%, 111%, 252% | 0.87, 0.58, 1.13 | 11.0 | 0.07 |
+| C hard + radial profile (B8, lambda 0.01) | 133%, 110%, 234% | 0.82, 0.54, 1.04 | 10.0 | 0.09 |
+| C hard + capped diversity (B9, lambda 0.1) | 133%, 116%, 260% | 0.88, 0.57, 1.17 | 10.9 | 0.07 |
+
+- **Energy conservation pushes D toward changing less.** The total-GeV
+  term (on an actual 16-image rollout; its accuracy unresolved, like E3-D's
+  solve) recovers less of every shift, adds haze in the ring (0.43 GeV in
+  towers below 0.05 GeV, truth 0.06) and keeps fewer real recoil towers
+  (0.27 GeV above 0.5 GeV, truth 4.9); outputs closer to their inputs (r
+  0.97). For Jamie's CycleGAN the same rule broke the "delete the jet"
+  solution; FM has no such solution to break. The toy itself keeps 99.72%
+  of a vacuum image's energy, so exact equality is an approximate prior.
+- More training moves D's cone shift from 39% to 52%, the ring not at all.
+- **C's continuations do not change its conditional failure.** The
+  profile term improves the population ring slightly (W1 0.15 against 0.21)
+  and over-quenches the cone; the diversity term changes nothing (C is
+  already too diverse; its cap comes from target pairs). Two of the three
+  rollout terms hold at the test solve only partly (transfer table above:
+  profile 2.3 times larger at 128 NFE than at the 8-NFE rollout).
+- **Second seed (A12; `ex3_seeds.csv`):** the same inputs' changes agree
+  between seeds with r 0.65 (cone) and 0.81 (ring); the population cone
+  shift is 39% against 53%: E3-D's population numbers carry a seed spread
+  of about 15 points, on top of the unresolved solve.
+- **How much of a jet's quenching is predictable at all:** from the bank's
+  256 true quenchings per parent, the best correlation any deterministic
+  predictor can reach with one draw's change is 0.50 (cone), 0.49 (ring),
+  0.48 (girth). D reaches 0.30-0.32 on the cone (the energy dependence of
+  the loss) and -0.02 on the ring (Jamie's CycleGAN: 0.00).
+
+### Exercise 3, input-dependent strength (E3g; jobs 20572-20573 training, 20618 and 20627 outputs, 20710 report)
+
+`docs/flow/jamie_otfm/ex3g/`; trained on a quenched pool whose f follows
+the parent's girth (the truth's fractional cone loss correlates with the
+input image girth with r 0.87, with its energy -0.17):
+- D: cone, ring, girth shifts recovered 15%, 14%, -40%; its fractional
+  loss correlates with the input girth r 0.22, with the energy 0.15, with
+  the jet's true loss 0.17 (Jamie's CycleGAN: +0.32 with energy, -0.12
+  with width, -0.11 per jet). D picks up a little of the girth rule; the
+  solve is not resolved either (same mechanism as E3-D).
+- C hard (pure unpaired, on the girth-rule pool): the fractional loss
+  correlates with the input girth -0.09, with the energy +0.30, with the
+  jet's true loss -0.10; conditional W1 1.16 (cone), a parent's draws spread
+  12.9 GeV against 0.9 for the truth. Jamie's CycleGAN: +0.32, -0.12, -0.11.
+- Under the girth rule the loss is almost fully predictable from the input:
+  the deterministic ceiling for one draw's change is 0.97 (cone), 0.96
+  (ring), 0.92 (girth) (the remaining randomness is the recoil's
+  placement). The models' fractional cone losses correlate with the true
+  ones 0.17 (D) and -0.10 (C). As in Jamie's toy, neither finds the
+  information in the input's girth; C's losses follow the input energy
+  instead, as his CycleGAN's did.
+
+### Exercise 4: translation with the UE (jobs 20562, 20574-20575, 20680 training; 20641-20655, 20694 continuations; posts and re-solves; final report 20710)
+
+`docs/flow/jamie_otfm/ex4/`; t4_pair: input J_vac + B_a, truth J_med + B_a
+(the event's own UE kept). Core and ring with rho from the image's own
+R > 1.2, signed; far = R >= 1.0. Pre-registered event test: far towers
+r >= 0.99 and rms change <= 10% of the UE tower sd. All pure unpaired:
+
+| model | far towers: r(output, input) | far rms change / UE tower sd | core shift recovered | ring shift recovered | oracle (true UE subtracted): cone, ring, GeV | own input closer |
+| :--- | ---: | ---: | ---: | ---: | :--- | ---: |
+| truth | 0.9997 | 0.023 | 100% | 100% | 21.8, 6.6 | 99% |
+| D, full-image cost (A9) | 0.989 | 0.154 | 148% | 23% | 19.1, 3.3 | 100% |
+| + unchanged (B10) | 0.989 | 0.154 | 141% | 24% | 19.5, 3.5 | 100% |
+| + global change penalty (B11) | 0.995 | 0.108 | 116% | 15% | 21.1, 2.6 | 100% |
+| + far penalty, R >= 1 (B12) | 0.995 | 0.108 | 134% | 26% | 19.9, 3.1 | 100% |
+| D seed 1 (A13) | 0.990 | 0.145 | 146% | 24% | 19.2, 3.3 | 100% |
+| D seed 1 + far penalty (B14) | 0.996 | 0.095 | 124% | 31% | 20.5, 3.0 | 100% |
+| D, near/far cost (A10) | 0.9997 | 0.025 | 114% | 80% | 21.0, 5.5 | 99.9% |
+| + far penalty (B13) | 0.9999 | 0.016 | 108% | 68% | 21.4, 5.0 | 99.9% |
+| C, full-image cost (A11) | 0.06 | 1.51 | 397% | 30% | 3.8, 6.2 | 52% |
+| + far penalty, 8-NFE rollout (B15) | 0.25 | 1.19 | 408% | 5% | -0.2, -12.4 | 69% |
+| C, near/far cost (A14) | 0.05 | 1.39 | 215% | 176% | 14.5, 11.1 | 54% |
+| + far penalty, rollout at the test NFE (B23) | 0.07 | 1.32 | 367% | 46% | 3.9, -1.7 | 53% |
+
+- **D with the full-image cost** keeps the UE nearly (no inversion; Jamie's
+  CycleGAN: r -0.52) but fails the pre-registered event test. Rho-
+  subtracted, it takes 9.4 GeV out of the cone (truth 6.3) and adds 1.4 to
+  the ring (truth 6.3); 6.3 GeV is spread over the far UE (+0.005 GeV a
+  tower): the misplaced energy is a diffuse far haze, as in Jamie's
+  Exercise 3. The unchanged continuation changes nothing.
+- **The output-invariance penalties on D** (solved endpoints, 8-NFE
+  rollouts): global and far both raise the far correlation to 0.995 and
+  still miss the 10% rms limit (0.108). The global penalty also suppresses
+  the quenching (ring 15%, girth 77%), as expected of the control; the far
+  one leaves the jet free (core 134%, ring 26%). Both hold only partly at
+  the accurate solve (transfer 3.8 and 1.8). Seed 1 with the far penalty
+  passes narrowly (0.996, 0.095): at this margin the verdict is
+  seed-dependent.
+- **D with the near/far cost** (the pre-specified alternative, run because
+  the audit found the full-image plan UE-dominated) keeps this event's UE
+  as closely as the truth does (r 0.9997, rms change 0.025 against the
+  truth's 0.023), and recovers 114% of the core shift and 80% of the ring
+  (oracle ring 5.5 of 6.6 GeV). With the far penalty: 0.016, 108% and 68%.
+  Jamie's best: 84% and 69%, after an identity rule at R > 1, energy
+  conservation and 4 times the training. The matching cost, not a penalty,
+  decides whether D keeps the event.
+- **C regenerates the UE with every cost and penalty** (far r 0.05-0.25; a
+  parent's draws differ by 45-80 GeV in the far region against 0.33 for the
+  truth, `ex4_conditional.csv`): its diversity is new UE, not quenching. A
+  noise-to-target generator has no path that copies the input's towers; its
+  targets carry another event's UE. With the full-image cost it also loses
+  the jet (rho-subtracted cone 4.3 GeV, truth 23.1); the near/far cost puts
+  part of it back (14.5 GeV oracle cone). The far penalty learned through an
+  8-NFE rollout holds only for that solve (above); through an accurate
+  rollout it barely trains in 4000 updates (0.78 to 0.60).
+- **Second seed (A13, B14; `ex4_seeds.csv`):** jet by jet, the two seeds'
+  changes agree with r 0.85 (core) and 0.90 (ring) (with the far penalty
+  0.80, 0.84) and the population numbers agree within 2 points. Each seed's
+  change correlates with the jet's true change at 0.08-0.12; the bank's
+  deterministic ceiling is 0.48. Jamie: 0.84 and 0.93 between trainings,
+  -0.02 with the truth. Agreement between seeds is not correctness.
+
+### Prior against data: the 2 x 2 (B16-B22; jobs 20619-20638, re-solves 20702-20707)
+
+`docs/flow/jamie_otfm/prior_data/`; every cell is a 4000-update
+continuation of E1-P (whose prior is vacuum jets in |eta| < 0.7, 20-80 GeV:
+a finite warm start, not four independent trainings). Hybrid: L_syn
+(synthetic sums from the cell's prior and the UE pool) + lambda_U L_unp
+(OT pairs of an independent mixture pool to UE), lambda_U = 1; synthetic
+only: lambda_U = 0. The training logs show both terms in the gradient:
+mean gradient norms over the logged steps 0.022-0.038 (synthetic) and
+0.020-0.037 (unpaired) in the four cells. Scored as Exercise 2 on the same
+20k vacuum/quenched pairs:
+
+| cell | supervision | cone shift | girth shift | ring shift (GeV) | ring of vacuum jets (truth 0.40) | recoil in B_hat |
+| :--- | :--- | ---: | ---: | :--- | ---: | ---: |
+| E1-P (the common start) | synthetic paired | 108% | 84% | 18% (1.08) | 1.65 | 5.0 |
+| vacuum prior, synthetic only | synthetic paired | 108% | 83% | 14% (0.82) | 1.44 | 5.3 |
+| vacuum prior x vacuum + UE data | hybrid | 109% | 76% | 11% (0.67) | 1.36 | 5.4 |
+| vacuum prior x quenched + UE data | hybrid | 104% | 90% | 30% (1.85) | 2.32 | 4.2 |
+| broad prior, synthetic only | synthetic paired | 109% | 86% | 20% (1.25) | 2.91 | 4.8 |
+| broad prior x vacuum + UE data | hybrid | 110% | 80% | 13% (0.78) | 1.90 | 5.3 |
+| broad prior x quenched + UE data | hybrid | 106% | 84% | 17% (1.06) | 3.03 | 5.0 |
+| vacuum x quenched + UE profile term | hybrid | 114% | 63% | -24% (-1.46) | -3.92 | 7.5 |
+
+- **The data matter (pre-registered: beyond 3 combined sd).** With the
+  vacuum prior, quenched instead of vacuum mixture data raise the recovered
+  ring change from 11% to 30% (+1.18 GeV, 72 sd) and girth from 76% to 90%
+  (15 sd); with the broad prior +0.28 GeV of ring (23 sd). Jamie found the
+  two data sets giving identical answers to three digits.
+- **But the effect is only partly quenching-specific:** the quenched data
+  also add ring energy to vacuum jets (1.36 to 2.32 GeV), and the recovered
+  recoil stays at 30% or less. The decomposition still mostly follows the
+  common start and the prior.
+- **The prior invents recoil:** every cell leaves more ring in vacuum jets
+  than the truth (the common start already +1.25 GeV; pre-registered test:
+  all cells beyond 3 sd). The broad prior adds 0.54 (vacuum data) and 0.72
+  GeV (quenched data) over the vacuum prior (Jamie: 0.9 against 0.2), and
+  alone, without mixture data, 1.5 GeV.
+- **The batch-mean UE profile constraint (B22, lambda 3, on the one-step
+  surrogate around the mixture axes) breaks the subtraction:** the solved
+  background over-subtracts the ring (vacuum jets -3.9 GeV, quenched ring
+  change -24%, 29% of quenched jets lost, girth 63%). Consistent with the
+  one-step diagnosis: the surrogate under-estimates the UE level, so
+  matching its profile pushes the solved B_hat above the true UE. Jamie's
+  averaging rule: little help, +2.8 GeV ring in vacuum jets.
+
+### Answers to the six questions
+
+Population agreement, event-preserving correspondence and the conditional
+law are kept apart; all on the reimplemented toy.
+
+1. **Does OT-FM reproduce Jamie's halo, core loss or lost recoil, and which
+   measured failure changes with the loss?** Core loss and lost recoil:
+   yes. Halo: no. The solved subtractor gives 25-26% of the true hard-tower
+   energy to the background (pure unpaired and synthetic paired alike) and,
+   on quenched jets, 71-82% of the recoil. Its halo is 2.1-2.2 GeV, below
+   the 3 GeV line. The cause is diagnosed: the network's one-step estimate
+   at t = 0 has the core right (-2%, +1%), but leaves the UE fluctuations in
+   the jet (Jamie's halo). The solved flow carries the mixtures onto the UE
+   distribution and puts the UE's largest fluctuations under the jet core.
+   With the loss, only side effects change: GeV and balanced-mask terms
+   remove the negative towers (2.7% to 0.2%) and trim the halo (2.2 to 2.0
+   GeV); ring sums add nothing; a flat 5-80 GeV prior flattens the energy
+   dependence. No loss term changes the core loss or the recoil, because
+   they act on the one-step surrogate, not on the solve.
+2. **Does a vacuum-trained subtractor preserve the known medium
+   modification?** Partly. The cone energy change is about right (102-108%;
+   Jamie 136%), girth 84-85% (69%). The recoil is mostly assigned to the
+   background (18-29% kept; Jamie 2%), quenched cores lose more (40% against
+   26% of the hard-tower energy), and 14-15% of quenched jets fall below 10
+   GeV. The invented mass change (-0.4 GeV) is equally large for the rho
+   readouts here.
+3. **Does stochastic FM recover the conditional distribution, or merely
+   generate variation?** Unpaired, it generates variation. C trained on OT
+   pseudo-pairs has the right quenched population (shifts 103-113%, real
+   recoil towers) but a parent's draws spread like the whole population
+   (cone sd 10-13 GeV against 3.8), the output barely depends on the input
+   (r 0.07), and jets land 0.13 off the axis: exactly the pairing the plan
+   defines (position, not energy). Soft plan, profile and diversity terms
+   do not change this; in Exercise 4 its spread is regenerated UE. The
+   true-paired control does recover the law (coverage 60-72%, widths
+   0.9-1.1 of the truth), so the network can represent the toy's randomness;
+   the unpaired pairing is what is missing.
+4. **Does translation preserve this event's UE, or only the UE
+   population?** It depends on the coupling and the model. D with the
+   pre-specified near/far matching cost keeps this event's UE as well as
+   the truth (far towers r 0.9997, change 2.5% of the UE sd; with the far
+   penalty 0.9999), and recovers 108-114% of the core shift and 68-80% of
+   the ring. D with the full-image cost keeps it only approximately (r
+   0.989-0.996, 10-15% change, a 6 GeV far haze), penalties or not. C
+   regenerates the UE with every cost and penalty (r 0.05-0.25): population
+   only.
+5. **Does independent mixture data alter the learned decomposition beyond
+   the synthetic prior?** Yes, measurably, unlike in Jamie's test:
+   quenched instead of vacuum mixture data raise the recovered recoil from
+   11% to 30% and the girth shift from 76% to 90% (vacuum prior; 15-72 sd).
+   But they also add ring energy to vacuum jets, the recoil stays below a
+   third of the truth, and the broad prior still invents 0.5-0.7 GeV of
+   ring in vacuum jets. The decomposition is mostly set by the common start
+   and the prior; the batch-mean UE-profile constraint breaks it.
+6. **Which conclusion survives a second seed and an accurate solve?** The
+   Exercise 4 conclusions survive both: the population numbers repeat
+   within 2 points; per jet the seeds agree (r 0.85, 0.90) and neither
+   predicts the jet's true change (0.08-0.10 against a ceiling of 0.48).
+   Agreement is not correctness, as in Jamie's slide. The UE-preservation
+   verdicts survive the accurate solve (resolved at 64 NFE), except that
+   the far-penalty arms sit at the 10% line and flip with the seed. The
+   Exercise 1-2 and C conclusions rest on resolved solves (one seed). Two
+   things do not survive: E3-D's numbers, whose ODE does not converge (an
+   amplification of about 580 from towers empty at both ends; per-jet noise
+   of 1-1.5 GeV) and whose population cone shift moves from 39% to 53%
+   with the seed; and any constraint learned through a coarse rollout
+   (C's far penalty holds at 8 NFE, r 0.94, and not at 32-128, r 0.21-0.25).
+
+A success here would justify a test on PYTHIA/JEWEL; it would not establish
+the physical modification. The one positive result (event-preserving UE
+with the near/far cost) is a property of the matching cost on this toy.
+
+### Limitations and what was not run
+
+- The toy is a reimplementation from the deck's listings (unlisted details:
+  the grid, the girth definition, the redraw of non-positive UE scales).
+- One seed except A12-A13 and B14; 1.5 GPU hours per baseline and 4000
+  updates per continuation; continuations are warm starts (the 2 x 2 from
+  E1-P's vacuum prior).
+- E3-D and its family are not numerically resolved (above). Rollout terms
+  were learned through rollouts coarser than the test solve, except B23.
+- Matching costs: full-image squared distance, and for Exercise 4 the one
+  pre-specified near/far alternative; Exercise 3 used only the full-image
+  cost.
+- Not run: the paired two-channel arm; the PYTHIA-jet extension of
+  Exercise 1; C's diversity term in Exercise 4; network widths or a
+  compact backbone; longer training beyond the 4000-update controls (the
+  curves raised no single convergence question that 2 GPU hours would
+  settle); Jamie's discriminator architectures, learning rates and cycle
+  weights (not applicable to OT-CFM); a separately resampled-UE diagnostic
+  for Exercise 4.
+- GPU time: 32.4 GPU hours of training on A6000s (`ledger.csv`), plus
+  evaluation (solver checks, outputs, re-solves, diagnostics).
+
 ## Commands
 
 From the repository root, on the a6k partition (A6000 nodes for anything
@@ -4275,18 +4797,40 @@ time and NFE, `checkpoints/`, `evals/closure_{val,train}_sde30.csv`):
 
 Paired noisy-interpolant pilot: `docs/flow/bench/README.md` (end).
 
+Jamie's toy exercises: `docs/flow/jamie_otfm/README.md`.
+
 PYTHIA -> JEWEL translation pilot: `docs/flow/translation/README.md` and the
 end of its section above. The CycleGAN baseline and the stochastic
 conditional FM pilot: `docs/flow/translation/README.md` and
 `docs/flow/translation/condfm/README.md`.
 
-## Status (2026-10-05 19:10)
+## Status (2026-10-06 06:00)
 
 Running: the CycleGAN baseline (job 20490, to 24 h of training time) and its
-evaluation chains at 8 h (job 20505, about 21:30) and 24 h (job 20506, about
-13:30 tomorrow), which rebuild `docs/flow/translation/slides/translation_deck.pdf`.
+24-h evaluation chain (job 20506, about 13:30), which rebuilds
+`docs/flow/translation/slides/translation_deck.pdf`; the 8-h checkpoint is
+in (section "CycleGAN baseline: results at 8 hours").
 
-- **Latest: the stochastic conditional FM pilot** (section above; appendix
+- **Latest: Jamie Nagle's toy exercises with OT flow matching** (section
+  above; `docs/flow/jamie_otfm/`, deck `slides/jamie_otfm.pdf`; 32.4 GPU h
+  of training).
+  - Subtraction: the solved flow gives 25% of the jet core to the
+    background (the one-step mean has it right and shows Jamie's halo
+    instead); no halo; GeV, mask, ring and prior changes do not move the
+    core loss. A frozen subtractor keeps the quenched core change and loses
+    71-82% of the recoil.
+  - Clean translation: D under-quenches and keeps each jet; unpaired C gets
+    the population and not the conditional law (the OT pairs carry position
+    only); the true-paired control recovers the law. The clean-jet D ODE does
+    not converge (an amplification of about 580 from empty towers).
+  - With the UE: D with the pre-specified near/far matching cost keeps the
+    event's own UE as well as the truth and recovers 114% / 80% of the core /
+    ring shifts; C regenerates the UE whatever the cost or penalty;
+    constraints learned through coarse rollouts hold only for that rollout.
+  - Prior against data: the mixture data change the decomposition
+    measurably (unlike Jamie's), but the recoil stays at 30% or less and the
+    broad prior still invents ring energy in vacuum jets.
+- **Earlier: the stochastic conditional FM pilot** (section above; appendix
   `docs/flow/translation/condfm/slides/condfm_appendix.pdf`).
   - Noise-to-target conditional FM, the PYTHIA jet as an input, pairs from
     minibatch OT (hard) or entropic OT (soft, reg 7); 2 GPU h each; the ODE

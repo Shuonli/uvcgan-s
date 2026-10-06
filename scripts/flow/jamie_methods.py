@@ -285,8 +285,12 @@ class ToyMethod:
         return (a, b[j], j)
 
     def pair(self, cond, x1):
-        """C: every condition row with one target drawn from the plan."""
-        (c, y, j) = self.coupling(cond, x1, self.gens['pair'])
+        """C: every condition row with one target drawn from the plan (on the
+        near/far cost with --toy-cost nearfar)."""
+        if self.cost == 'nearfar':
+            (c, y, j) = self.coupling_nearfar(cond, x1, self.cur['unp'])
+        else:
+            (c, y, j) = self.coupling(cond, x1, self.gens['pair'])
         self.cur['unp']['j'] = j
         self.last_parts = dict(self.coupling.last)
         return (c, y)

@@ -1,0 +1,5 @@
+{
+    "nfe": 32,
+    "solver": "midpoint",
+    "resolved": true
+}

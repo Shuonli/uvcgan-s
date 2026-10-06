@@ -1,0 +1,59 @@
+{
+    "base": "/home/shuhang/cycleGAN/outdir/sphenix/flow/jamie/runs/E4-Cnf_s0",
+    "label": "E4-Cnf_far",
+    "terms": [
+        "inv_far"
+    ],
+    "lambda": {
+        "inv_far": 0.04
+    },
+    "ratios": {
+        "inv_far": [
+            0.04820290834739071,
+            0.025564973716337765,
+            0.032160012836964645,
+            0.0506393122539684,
+            0.052989814032297994,
+            0.03970321862486215,
+            0.033071634935922876,
+            0.04684397915375999
+        ]
+    },
+    "rollout_checks": {
+        "8": {
+            "values_K": {
+                "inv_far": 0.8096069693565369
+            },
+            "values_2K": {
+                "inv_far": 0.8110557198524475
+            },
+            "rel_change": {
+                "inv_far": 0.0017862527326411193
+            }
+        },
+        "16": {
+            "values_K": {
+                "inv_far": 0.8110557198524475
+            },
+            "values_2K": {
+                "inv_far": 0.8111647367477417
+            },
+            "rel_change": {
+                "inv_far": 0.0001343955060611712
+            }
+        },
+        "32": {
+            "values_K": {
+                "inv_far": 0.8111647367477417
+            },
+            "values_2K": {
+                "inv_far": 0.811277449131012
+            },
+            "rel_change": {
+                "inv_far": 0.00013893198115021429
+            }
+        }
+    },
+    "roll_nfe": 8,
+    "rollout_resolved": true
+}

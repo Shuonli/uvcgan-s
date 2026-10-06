@@ -1,0 +1,28 @@
+\tiny
+\setlength{\tabcolsep}{2.5pt}
+\begin{tabular}{p{0.15\linewidth}p{0.25\linewidth}p{0.22\linewidth}p{0.33\linewidth}}
+\toprule
+Jamie tried & his result & FM counterpart (runs) & our result \\
+\midrule
+GeV |error| per tower + balanced groups of jet, near-empty and far towers (Ex. 1) & offset +9.9 -> +3.4 GeV; halo 9.6 -> 4.5 GeV & the same terms on the local endpoint surrogate (t <= 0.25), continuation of E1-P & PENDING \\
++ ring energy sums (Ex. 1) & offset +1.0 GeV, halo 3.4, scatter 2.6 GeV, fakes 0.3\% & + ring sums, same edges (surrogate) & PENDING \\
+radial-profile rule, averaged over jets (Ex. 3) & shift recovered core 95\%, ring 80\%, girth 36\% & batch-mean radial profile of C's solved outputs against an independent quenched batch & PENDING \\
+total energy out = in (Ex. 3 v9) & stops the lazy solutions; core 89\%, ring 19\%, girth 32\%; energy 96\% +- 19\% per jet & total-GeV term on a differentiable 16-image midpoint rollout, continuation of E3-D & PENDING \\
+dice: random numbers fed to the generator (Ex. 3 v10-v11, Ex. 4 v5) & samples 1/3 of the true spread (Ex. 3), then ignored with longer training; ignored (Ex. 4) & C: noise-driven conditional FM on the OT pseudo-joint, hard and entropic plans; true-paired control & PENDING \\
+diversity rule: different dice, different output (Ex. 3 v12, Ex. 4 v6) & spread a free knob: 1.6 vs 4.7 GeV (Ex. 3), 8.0 vs 4.5 GeV (Ex. 4) & capped mode-seeking term between two solved C draws (cap from target pairs) & PENDING \\
+no identity rule (Ex. 4 v1) & half the ring, core overshot, UE inverted (far-tower r -0.52) & D without any invariance term; its unchanged continuation & PENDING \\
+identity rule everywhere (Ex. 4 v2) & near-copy: UE kept, no ring & global output-change penalty on solved endpoints & PENDING \\
+identity rule only at R > 1.0, + energy conservation (Ex. 4 v3-v5) & near-copy at first (core 30\%, no ring); after 4x training core 78-84\%, ring 65-70\%, UE unchanged & output-change penalty at R >= 1.0 on solved endpoints; also with the near/far matching cost and for C & PENDING \\
+jets below the 20 GeV training range; jets flat in 5-80 GeV (Ex. 1, v7) & -6 GeV at 5-10 GeV: bent toward known jets; flat 5-80 GeV: better above 60 GeV, 5-15 GeV still poor & 5-20, 60-80, 80-100 GeV test slices; flat 5-80 GeV prior continuation & PENDING \\
+longer training (Ex. 1 v8: x4; Ex. 3 v11: x4, +2400 steps; Ex. 4 v4: x4) & Ex. 1 offset +13 -> +11 GeV; Ex. 3 core 78\% -> 155\%; Ex. 4 near-copy -> core 78\%, ring 65\% & unchanged-loss continuations of 4000 updates; validation curves & PENDING \\
+two trainings, different random start (Ex. 4 v4s2) & agree jet by jet (r 0.84, 0.93), not with the truth (-0.02) & seed 1 of E4-D (+ far penalty) and of E3-D; same inputs' outputs compared & PENDING \\
+loss set by the jet's girth (Ex. 3 toy variant) & losses follow energy (+0.32) not width (-0.12); per jet vs truth -0.11 & D and C trained on separate girth-rule pools & PENDING \\
+vacuum or broad prior x vacuum or quenched data (Ex. 1 setup) & vacuum prior: girth +0.019/+0.020, ring +0.2/+0.2 of +5.7 GeV either data; broad: girth +0.023, ring +0.9 in vacuum jets & hybrid L\_syn + L\_unp (lambda\_U = 1), four cells and two synthetic-only arms, continuations of E1-P & PENDING \\
+batch-averaged UE around the jet must be flat (Ex. 1 setup) & girth 61\% -> 70\%, recoil 0.3 of 5.7 GeV, +2.8 GeV ring in vacuum jets & batch-mean UE radial profile of B\_hat against independent UE under the same geometry, on the vacuum-prior x quenched-data cell & PENDING \\
+vacuum-trained subtractor on quenched jets (Ex. 2) & cone 136\%, girth 69\%, ring 2\%, mass -0.7 GeV invented, 12\% of quenched jets lost & the frozen Exercise 1 checkpoints on held-out pairs with shared UE & PENDING \\
+0.2M -> 0.9M -> 3.5M parameters (Ex. 1) & offset +13.4 -> +8.6 GeV & not run: one fixed backbone (UVCGAN-S ViT-ModNet, 32M); no architecture search & - \\
+identity term and cycle weight 100; whole-image discriminator heads, three discriminators, cycle weight 10 -> 2 and discriminator learning rate x2 & identity + cycle 100: halo worse & not applicable: OT-CFM has no discriminator, cycle or identity loss & - \\
+PYTHIA jets in toy UE (Ex. 1) & the same halo and the same cure & deferred (budget) & - \\
+- & - & our paired two-channel decomposer on the toy: optional, not run & - \\
+\bottomrule
+\end{tabular}

@@ -49,12 +49,12 @@ def setup():
 def style(k):
     return dict(color = PALETTE[k % len(PALETTE)], ls = DASHES[k % len(DASHES)], lw = 1.3)
 
-def draw_image(ax, img, eta0, phi0, title, vmax = 1.5):
+def draw_image(ax, img, eta0, phi0, title, vmax = 1.5, half_width = None):
     """A canvas centred in phi on the jet axis, log10(E + 0.1), circles at
-    R = 0.4 and 1.0."""
+    R = 0.4 and 1.0; half_width: show only |phi - phi_jet| < half_width."""
     shift = int(round(tc.NPHI / 2 - np.mod(phi0, 2 * np.pi) / tc.DPHI))
     x = np.roll(img, shift, axis = 1)
-    ax.imshow(np.log10(np.clip(x, 0, None) + 0.1), origin = 'lower', aspect = 'auto',
+    ax.imshow(np.log10(np.clip(x, 0, None) + 0.1), origin = 'lower', aspect = 'equal',
               cmap = 'viridis', vmin = -1, vmax = vmax,
               extent = (-np.pi, np.pi, tc.ETA_MIN, tc.ETA_MAX))
     phi_c = np.mod(phi0, 2 * np.pi) + shift * tc.DPHI - np.pi
@@ -62,7 +62,11 @@ def draw_image(ax, img, eta0, phi0, title, vmax = 1.5):
     t = np.linspace(0, 2 * np.pi, 100)
     for r in (0.4, 1.0):
         ax.plot(phi_c + r * np.cos(t), eta0 + r * np.sin(t), color = 'white', lw = 0.5)
-    ax.set_xlim(-np.pi, np.pi)
+    if half_width:
+        ax.set_xlim(phi_c - half_width, phi_c + half_width)
+    else:
+        ax.set_xlim(-np.pi, np.pi)
+    ax.set_ylim(tc.ETA_MIN, tc.ETA_MAX)
     ax.set_title(title, fontsize = 5.5, pad = 2)
     ax.set_xticks([])
     ax.set_yticks([])
@@ -95,7 +99,7 @@ def fig_ex1(models, out, plt):
         if b is not None:
             cols.append((f'{lab}: M - B_hat', mix - b[:300]))
     cols.append(('rho per tower (signed)', mix - rho[:, None, None]))
-    (fig, axes) = plt.subplots(len(ev), len(cols), figsize = (1.25 * len(cols), 1.0 * len(ev) + 0.3))
+    (fig, axes) = plt.subplots(len(ev), len(cols), figsize = (1.5 * len(cols), 0.8 * len(ev) + 0.4))
     for (r, i) in enumerate(ev):
         for (c, (name, x)) in enumerate(cols):
             cs = (x[i] * cone[i]).sum()
@@ -108,7 +112,8 @@ def fig_ex1(models, out, plt):
     plt.close(fig)
     # Jamie's ring table: true support against empty towers
     t = pd.read_csv(os.path.join(out, 'ex1_subtraction.csv'))
-    t = t[t['ring_0_0.1_true'].notna()]
+    # the per-tower rho with negatives dropped is in the table only (255 GeV far)
+    t = t[t['ring_0_0.1_true'].notna() & ~t['model'].str.contains('negatives dropped')]
     rings = [ '0_0.1', '0.1_0.2', '0.2_0.3', '0.3_0.4', '0.4_0.6', '0.6_inf' ]
     labels = [ 'r<0.1', '0.1-0.2', '0.2-0.3', '0.3-0.4', '0.4-0.6', '>0.6' ]
     (fig, axs) = plt.subplots(1, 2, figsize = (6.4, 2.1))
@@ -128,7 +133,8 @@ def fig_ex1(models, out, plt):
         a.set_title(title, loc = 'left')
         a.axhline(0, color = AXIS, lw = 0.6)
         a.set_xlabel('distance to the jet axis')
-    axs[0].set_yscale('symlog', linthresh = 0.1)
+    for a in axs:
+        a.set_yscale('symlog', linthresh = 0.1)
     axs[0].legend(fontsize = 5, ncol = 2)
     fig.tight_layout()
     fig.savefig(os.path.join(out, 'ex1_rings.png'))
@@ -151,10 +157,9 @@ def fig_shifts(out, name, plt, title):
         a.axvline(0, color = AXIS, lw = 0.6)
         a.set_yticks(np.arange(len(vals)))
         a.set_yticklabels(names if a is axs[0] else [ '' ] * len(vals), fontsize = 5.5)
-        a.set_title(f'quenched - vacuum: {lab}', loc = 'left', fontsize = 6)
+        a.set_title(lab, loc = 'left', fontsize = 6)
         a.invert_yaxis()
-    axs[0].legend(fontsize = 5.5)
-    fig.suptitle(title, fontsize = 6.5)
+    fig.suptitle(title + '; quenched - vacuum, mean per jet; dashed: truth', fontsize = 6.5)
     fig.tight_layout(rect = (0, 0, 1, 0.93))
     fig.savefig(os.path.join(out, f'{name}_shifts.png'))
     plt.close(fig)
@@ -238,10 +243,11 @@ def fig_translation(models, out, ex, plt):
                 a.set_title(f'parent {p}', fontsize = 6)
             a.set_xlabel(f'{q} (GeV)', fontsize = 6)
             a.set_yticks([])
-    axs[0][0].legend(fontsize = 4.5)
+    (handles, labels) = axs[0][0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc = 'lower center', ncol = len(labels), fontsize = 5.5)
     fig.suptitle(f'Exercise {ex}: one input jet, many true quenchings against many model '
                  'draws (the conditional law)', fontsize = 6.5)
-    fig.tight_layout(rect = (0, 0, 1, 0.93))
+    fig.tight_layout(rect = (0, 0.07, 1, 0.93))
     fig.savefig(os.path.join(out, f'ex{ex}_conditional.png'))
     plt.close(fig)
     # displays: one illustration parent, true quenchings and model draws, every image
@@ -251,17 +257,21 @@ def fig_translation(models, out, ex, plt):
         x = jr.output(dirn, f'{bankname}_illu')
         if x is not None:
             rows.append((lab, x[1][:5].astype(np.float32)))
-    (fig, axs) = plt.subplots(len(rows), 6, figsize = (6.6, 1.0 * len(rows) + 0.3))
+    (fig, axs) = plt.subplots(len(rows), 6, figsize = (6.6, 1.05 * len(rows) + 0.4),
+                              squeeze = False)
     for (r, (lab, imgs)) in enumerate(rows):
-        draw_image(axs[r][0], inp[p], a4[1, 0], a4[1, 1], 'input' if r == 0 else '')
+        draw_image(axs[r][0], inp[p], a4[1, 0], a4[1, 1], 'input', half_width = 1.6)
         axs[r][0].set_ylabel(lab, fontsize = 5.5)
         for c in range(5):
             a = axs[r][c + 1]
             if c < len(imgs):
-                draw_image(a, imgs[c], a4[1, 0], a4[1, 1], f'{lab}: {c + 1}' if r == 0 else '')
+                name = (f'true quenching {c + 1}' if r == 0 else
+                        f'draw {c + 1}' if len(imgs) > 1 else 'its one output')
+                draw_image(a, imgs[c], a4[1, 0], a4[1, 1], name, half_width = 1.6)
             else:
                 a.axis('off')
-    fig.suptitle(f'Exercise {ex}: one fixed parent; each panel one image (no averaging)',
+    fig.suptitle(f'Exercise {ex}: one fixed parent (cone {readout(inp[p:p + 1], jr.dr_of(a4[1:2]))["cone"][0]:.1f}'
+                 ' GeV); each panel one image, no averaging; |phi - phi_jet| < 1.6, circles R = 0.4, 1.0',
                  fontsize = 6.5)
     fig.tight_layout(rect = (0, 0, 1, 0.94), h_pad = 0.2, w_pad = 0.2)
     fig.savefig(os.path.join(out, f'ex{ex}_displays.png'))
@@ -302,6 +312,7 @@ def main():
         fig_shifts(os.path.join(cmdargs.out, 'prior_data'), 'prior_data', plt,
                    'Prior against data: the same 20k pairs, each cell a continuation of E1-P')
     else:
+        os.makedirs(os.path.join(cmdargs.out, f'ex{ex}'), exist_ok = True)
         fig_translation(models, os.path.join(cmdargs.out, f'ex{ex}'), ex, plt)
 
 if __name__ == '__main__':

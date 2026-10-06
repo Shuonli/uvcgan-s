@@ -1,0 +1,20 @@
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrlrrrrr}
+\toprule
+ & frozen & & \multicolumn{3}{c}{$N$ against $2N$ (validation)} & \multicolumn{2}{c}{4 Euler steps} \\
+run & NFE & resolved & key / change & $W_1$ shifts & key / two noises & key / change & ms / image \\
+\midrule
+E1-U\_s0 & 32 & yes & 0.001 & within sd & -- & 0.17 & 1.1 / 8.7 \\
+E1-P\_s0 & 32 & yes & 0.001 & within sd & -- & 0.04 & 1.1 / 8.7 \\
+E3-D\_s0 & 256 & no & 0.256 & beyond sd & -- & 3.16 & 1.1 / 70.1 \\
+E3-Ch\_s0 & 64 & yes & 0.009 & within sd & 0.009 & -- & -- \\
+E3-Cs\_s0 & 128 & yes & 0.004 & within sd & 0.004 & -- & -- \\
+E3-Cp\_s0 & 64 & yes & 0.006 & within sd & 0.008 & 0.45 & 1.1 / 17.6 \\
+E3g-C\_s0 & 128 & yes & 0.003 & within sd & 0.002 & -- & -- \\
+E4-D\_s0 & 64 & yes & 0.005 & within sd & -- & 1.19 & 1.1 / 17.6 \\
+E4-D\_s1 & 64 & yes & 0.009 & within sd & -- & -- & -- \\
+E4-Dnf\_s0 & 64 & yes & 0.003 & within sd & -- & -- & -- \\
+E4-C\_s0 & 32 & yes & 0.001 & within sd & 0.003 & -- & -- \\
+\bottomrule
+\end{tabular}

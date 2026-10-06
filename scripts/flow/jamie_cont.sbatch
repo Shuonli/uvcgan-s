@@ -9,6 +9,8 @@
 #   LABEL=E3-D_energy BASE=E3-D_s0 TERMS=energy sbatch -w dahlia scripts/flow/jamie_cont.sbatch \
 #       --method toyflow --toy-kind clean --toy-pairing unpaired --toy-source e3_vac --toy-target e3_med
 #
+# ROLL_AT_BASE=1: the solved-endpoint rollout at the base's frozen test NFE.
+#
 #SBATCH -p a6k
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -34,6 +36,11 @@ if [ -n "${TERMS:-}" ]; then
     fi
     LAM=$("$PYTHON" -c "import json; d = json.load(open('$W/$LABEL.json')); print(','.join(str(d['lambda'][t]) for t in d['terms']))")
     NFE=$("$PYTHON" -c "import json; print(json.load(open('$W/$LABEL.json')).get('roll_nfe', 16))")
+    if [ -n "${ROLL_AT_BASE:-}" ]; then
+        # the rollout at the base's frozen test solve, not the audit's cheaper K
+        # (a coarse rollout's constraint need not hold at the accurate solve)
+        NFE=$("$PYTHON" -c "import json; print(json.load(open('docs/flow/jamie_otfm/solver/${BASE}_frozen.json'))['nfe'])")
+    fi
     EXTRA=(--toy-extra "$TERMS" --toy-lambda "$LAM" --roll-nfe "$NFE")
     echo "[$(date +%T)] terms $TERMS, lambda $LAM, rollout NFE $NFE"
 fi
