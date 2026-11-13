@@ -297,6 +297,56 @@ def fig_far(outs, inp, dr, out, plt):
     fig.savefig(os.path.join(out, 'ex4_far.png'))
     plt.close(fig)
 
+def fig_girth(models, out, plt):
+    """The girth rule, jet by jet (top) and as it shows in a pile of quenched
+    jets alone (bottom). Top: the vacuum input's girth against the fractional
+    cone loss, 1 - cone_out / cone_in. Bottom: the output's own cone girth
+    against its recoil share, ring / (cone + ring)."""
+    # pylint: disable=too-many-locals
+    d = jr.cache('t3g_pair')
+    ax = jr.axes(d)
+    dr = jr.dr_of(ax)
+    jet = d['jet']
+    g_in = np.asarray(jr.obs(jet, ax, sub = False)['girth'])
+    c_in = jr.region_sum(jet, dr, 0, 0.4)
+    cols = [ ('truth (one quenching)', d['med']) ]
+    for (lab, dirn) in models:
+        x = jr.output(dirn, 't3g_pair_vac')
+        if x is not None:
+            cols.append((lab, x))
+    (fig, axs) = plt.subplots(2, len(cols), figsize = (2.2 * len(cols), 4.0), squeeze = False)
+    def panel(a, x, y, xr, yr):
+        ok = np.isfinite(x) & np.isfinite(y)
+        (x, y) = (x[ok], y[ok])
+        a.hexbin(x, y, gridsize = 45, extent = (*xr, *yr), cmap = 'Blues', mincnt = 1, linewidths = 0)
+        # the trend: median in ten equal-count bins of x
+        edges = np.quantile(x, np.linspace(0, 1, 11))
+        mid = [ np.median(x[(x >= lo) & (x <= hi)]) for (lo, hi) in zip(edges[:-1], edges[1:]) ]
+        med = [ np.median(y[(x >= lo) & (x <= hi)]) for (lo, hi) in zip(edges[:-1], edges[1:]) ]
+        a.plot(mid, med, color = INK, lw = 1.2, marker = 'o', ms = 2.5)
+        a.set_xlim(*xr)
+        a.set_ylim(*yr)
+        return float(np.corrcoef(x, y)[0, 1])
+    for (k, (lab, x)) in enumerate(cols):
+        cone = jr.region_sum(x, dr, 0, 0.4)
+        ring = jr.region_sum(x, dr, 0.4, 1.0)
+        r = panel(axs[0][k], g_in, 1 - cone / c_in, (0.03, 0.22), (-0.6, 1.0))
+        axs[0][k].set_title(f'{lab}\nr = {r:.2f}', fontsize = 6.5)
+        axs[0][k].axhline(0, color = AXIS, lw = 0.6)
+        axs[0][k].set_xlabel('girth of the vacuum input')
+        g_out = np.asarray(jr.obs(x, ax, sub = False)['girth'])
+        r = panel(axs[1][k], g_out, ring / (cone + ring), (0.03, 0.30), (-0.05, 0.8))
+        axs[1][k].set_title(f'r = {r:.2f}', fontsize = 6.5)
+        axs[1][k].set_xlabel("the output's own cone girth")
+    axs[0][0].set_ylabel('fractional cone loss')
+    axs[1][0].set_ylabel('recoil share of the output')
+    fig.suptitle('Girth rule (wider jets lose more): 20k held-out jets; line: median in ten bins.\n'
+                 'Top: is the rule applied to each input? Bottom: does the output pile alone show it?',
+                 fontsize = 6.5)
+    fig.tight_layout(rect = (0, 0, 1, 0.92))
+    fig.savefig(os.path.join(out, 'ex3g_girth_scatter.png'))
+    plt.close(fig)
+
 def main():
     cmdargs = parse_cmdargs()
     plt = setup()
@@ -314,6 +364,8 @@ def main():
     else:
         os.makedirs(os.path.join(cmdargs.out, f'ex{ex}'), exist_ok = True)
         fig_translation(models, os.path.join(cmdargs.out, f'ex{ex}'), ex, plt)
+        if ex == '3g':
+            fig_girth(models, os.path.join(cmdargs.out, f'ex{ex}'), plt)
 
 if __name__ == '__main__':
     main()

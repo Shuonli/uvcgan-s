@@ -946,6 +946,14 @@ A sequence of cheap diagnostics, then controls:
 - **Two seeds:** the two trainings agree jet by jet (correlation 0.85-0.90)
   and neither predicts the jet's actual change (0.08-0.10, where 0.48 is
   possible): Jamie's "agreement is not proof", reproduced.
+- **The repository's CycleGAN on the girth-rule toy (2026-11-13):** in the
+  toy where wider jets lose more, UVCGAN2 trained 8 h on the two unpaired
+  piles does not reconstruct the rule, as D and C do not. Its loss against
+  the input's girth is -0.13 (truth 0.87), against the jet's true loss
+  -0.20; Jamie's small CycleGAN gave -0.12 and -0.11. It removes about 30%
+  of the cone from every jet whatever its width, keeps the jet's shape, and
+  loses 5.8 GeV a jet. Its checkpoints at 1.5 h, 4 h and 8 h disagree (mean
+  cone 31, 48, 20 GeV), so the run had not settled. One seed, no tuning.
 - **Numerical lessons:** the clean-jet D flow cannot be solved accurately
   (towers empty at both ends amplify tiny errors about 580 times); and a
   constraint trained through a cheap 8-step solve can hold only for that

@@ -4624,6 +4624,95 @@ mean gradient norms over the logged steps 0.022-0.038 (synthetic) and
   the surrogate does not explain it. Jamie's averaging rule: little help,
   +2.8 GeV ring in vacuum jets.
 
+### CycleGAN on the girth-rule toy (set up 2026-11-12 before training; run 2026-11-13)
+
+**Question.** In the girth-rule toy (wider jets lose more; E3g), neither
+flow model applies the rule jet by jet. Does the repository's CycleGAN
+(UVCGAN2), trained on the same two unpaired piles, reconstruct it? Jamie's
+own small CycleGAN did not (slide 109: loss against width -0.12, against
+energy +0.32, per jet -0.11).
+
+**A check first (20k held-out jets, no model).** The quenched pile alone
+carries the rule: a quenched jet's recoil share, ring / (cone + ring),
+tracks its true loss (r 0.99), and correlates with its own cone girth at
+0.81 (0.34 in the random toy), with its un-widened girth at 0.65 (-0.01).
+So unpaired data hold the rule here, as a relation inside each quenched jet.
+C's outputs keep part of that relation as a trend (r 0.13, medians rising
+as the truth's) while applying it to the wrong inputs (loss against input
+girth -0.09); D makes almost no recoil (`ex3g/ex3g_girth_scatter.png`).
+
+**Model and run** (`scripts/flow/jamie_cgan.py`, `jamie_cgan.sbatch`):
+UVCGAN2 exactly as in the PYTHIA -> JEWEL baseline (ViT-ModNet generators,
+the sPHENIX 24 x 64 resnet discriminator, hinge loss, gradient penalty
+0.01, Adam 5e-5, batch 32, EMA 0.9999, cycle 10, identity 0.5), on e3_vac
+and e3g_med in the toy's standardised log coordinates; outputs decoded raw
+as the flows' are; seed 0; one A6000; 8 h of training time with
+checkpoints at 1.5 h (the flows' budget) and 4 h. One EMA generator pass
+per jet (deterministic).
+
+**Reading (fixed now).** Scored as E3g-D: `ex3g_girth_rule.csv` and the
+scatter figure. The rule counts as reconstructed if, at 8 h, the
+fractional cone loss correlates with the input girth above 0.43 (half the
+truth's 0.87) and with the jet's true loss above 0.5 (ceiling 0.97).
+Reported besides: the population shifts, whether the output pile shows the
+recoil-share against girth relation, and the 1.5 h and 4 h checkpoints.
+One seed; no tuning.
+
+**Result (2026-11-13; 61,000 updates in 8 h, job 21332).** The CycleGAN
+does not reconstruct the rule. At 8 h both pre-set thresholds fail, and the
+pattern is Jamie's (slide 109: -0.12, +0.32, -0.11): losses follow the
+jet's energy, not its width (`ex3g/ex3g_girth_rule.csv`, 20k held-out
+jets).
+
+| fractional cone loss against | input girth | input energy | the jet's true loss |
+| :--- | ---: | ---: | ---: |
+| truth (one quenching) | 0.87 | -0.17 | 1 (ceiling 0.97) |
+| needed to count as reconstructed | > 0.43 | | > 0.5 |
+| D | 0.22 | 0.15 | 0.17 |
+| C | -0.09 | 0.30 | -0.10 |
+| CycleGAN 1.5 h | -0.35 | 0.02 | -0.34 |
+| CycleGAN 4 h | 0.13 | -0.13 | 0.05 |
+| CycleGAN 8 h | -0.13 | 0.27 | -0.20 |
+
+Mean fractional cone loss +- its spread, in fifths of the input girth
+(median girth 0.061, 0.079, 0.095, 0.115, 0.146); W1 in units of the
+loss fraction:
+
+| | narrowest | | | | widest | all jets | W1 to the truth: all / within the fifths |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| truth | 0.09 +- 0.05 | 0.14 +- 0.06 | 0.20 +- 0.07 | 0.29 +- 0.08 | 0.42 +- 0.11 | 0.23 +- 0.14 | |
+| D | -0.09 +- 0.23 | 0.00 +- 0.21 | 0.04 +- 0.21 | 0.07 +- 0.23 | 0.08 +- 0.27 | 0.02 +- 0.24 | 0.21 / 0.22 |
+| C | 0.24 +- 0.53 | 0.18 +- 0.52 | 0.15 +- 0.54 | 0.11 +- 0.56 | 0.10 +- 0.56 | 0.16 +- 0.55 | 0.28 / 0.36 |
+| CycleGAN 8 h | 0.27 +- 0.14 | 0.31 +- 0.10 | 0.32 +- 0.10 | 0.30 +- 0.10 | 0.24 +- 0.12 | 0.29 +- 0.12 | 0.09 / 0.14 |
+
+- **What the 8 h CycleGAN does:** it removes about 30% of the cone from
+  every jet, whatever its width. The distribution of losses over all jets
+  is the closest of the three models to the truth's (W1 0.09), and it is
+  assigned to the wrong jets: flat across the girth fifths where the truth
+  rises from 0.09 to 0.42.
+- **It keeps the input's shape.** Output against input: girth r 0.97, cone
+  energy r 0.86, own-input shape EMD 0.04 (the truth's 0.11). It recovers
+  38% of the girth shift and 41% of the ring shift, and overshoots the cone
+  shift (135%).
+- **The lost energy mostly vanishes.** Mean cone 19.7 GeV (truth 21.9,
+  input 28.2), ring 2.9 GeV (truth 6.4), total 22.7 GeV where the toy keeps
+  28.5: 5.8 GeV a jet is missing.
+- **The output pile does not show the rule either.** Recoil share against
+  the output's own cone girth: r 0.15, medians flat near 0.13 (truth 0.81;
+  C 0.13 with a rising trend; D 0.40 with almost no recoil). Figure:
+  `ex3g/ex3g_girth_scatter.png`.
+- **The training had not settled.** The mean cone energy is 30.7 GeV at
+  1.5 h, 48.3 GeV at 4 h (20 GeV added to every jet) and 19.7 GeV at 8 h,
+  and the correlation with the input girth changes sign twice. The
+  generator and discriminator losses were still swinging in the last 20
+  epochs (target-side cycle loss between 0.17 and 0.34 from one epoch to
+  another). The 8 h numbers are one
+  checkpoint of an unconverged run, not a converged model.
+- **Limits:** one seed, no tuning, the baseline's settings. A longer run,
+  another seed or other loss weights could differ; none was tried. Why the
+  discriminator does not enforce the recoil-share against girth relation
+  was not investigated.
+
 ### Answers to the six questions
 
 Population agreement, event-preserving correspondence and the conditional

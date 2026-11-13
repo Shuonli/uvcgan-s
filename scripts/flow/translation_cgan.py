@@ -149,7 +149,8 @@ class Budget:
     sum of the trainer's epoch_time (checkpointing and this callback not
     included), as fm_train.py and dsbm.py count theirs."""
 
-    def __init__(self, hours, milestones, steps):
+    def __init__(self, hours, milestones, steps, norm_path = None):
+        self.norm_path = norm_path or fc.translation_norm_path()
         self.budget = 3600 * hours
         self.milestones = sorted(3600 * m for m in milestones)
         self.steps = steps
@@ -174,7 +175,7 @@ class Budget:
             raise BudgetReached()
 
     def write(self, model, hist = None):
-        info = { 'milestones' : self.marks, 'norm_path' : fc.translation_norm_path(),
+        info = { 'milestones' : self.marks, 'norm_path' : self.norm_path,
                  'wall_since_start' : time.perf_counter() - self.t0 }
         if hist is not None:
             t = float(hist['epoch_time'].sum())

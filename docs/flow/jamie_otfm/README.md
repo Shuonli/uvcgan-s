@@ -35,7 +35,7 @@ available. Every result is labelled by its supervision:
 | `ex1/` | Exercise 1: `ex1_subtraction.csv` (offset, resolution, halo, core loss, negatives, Jamie's ring table, energy slices), `ex1_slices.csv`, `ex1_refound.csv` (anti-kT), `ex1_fakes.csv` (UE-only events), `ex1_onestep.csv` (the one-step mean against the solved output), displays and ring figure |
 | `ex2/` | Exercise 2: `ex2_shifts.csv` (quenched - vacuum shifts, recovered fractions, lost jets, recoil in B_hat, hard-core loss), `ex2_errors.csv` (error distributions) |
 | `prior_data/` | the 2 x 2 prior/data test, the same files as `ex2/`, and `prior_data_effects.csv` (the pre-registered readings: data effect in combined sd, ring invented in vacuum jets) |
-| `ex3/`, `ex3g/`, `ex4/` | translation: `*_population.csv` (W1/sigma to the true quenched jets), `*_dependence.csv` (shift recovered, input correlations; Exercise 4 also the far-region tower tests and the oracle), `*_emd.csv` (own-input shape EMD), `*_conditional.csv` (the bank: conditional W1, coverage, widths), `*_swap.csv` (condition swap, C), `*_seeds.csv` (seed 0 against seed 1, same inputs), `ex3g_girth_rule.csv`; figures |
+| `ex3/`, `ex3g/`, `ex4/` | translation: `*_population.csv` (W1/sigma to the true quenched jets), `*_dependence.csv` (shift recovered, input correlations; Exercise 4 also the far-region tower tests and the oracle), `*_emd.csv` (own-input shape EMD), `*_conditional.csv` (the bank: conditional W1, coverage, widths), `*_swap.csv` (condition swap, C), `*_seeds.csv` (seed 0 against seed 1, same inputs), `ex3g_girth_rule.csv`; figures. `ex3g/` also holds the repository's CycleGAN (UVCGAN2) at 1.5 h, 4 h and 8 h, trained by `scripts/flow/jamie_cgan.py` (`jamie_cgan.sbatch`), and `ex3g_girth_scatter.png` (girth against loss, jet by jet and inside the output pile) |
 | `ledger.csv` | every run: supervision, base, updates, GPU hours, solver |
 | `coverage.csv` | Jamie's changes, our counterpart, run, result or reason for omission |
 | `slides/` | the deck and its tables (`slides/tables/*.tex`, from `jamie_slides_tables.py`) |
@@ -106,5 +106,10 @@ endpoint surrogate at t <= 0.25), `energy` (total GeV of a solved endpoint),
 unchanged-loss control. `ROLL_AT_BASE=1` rolls out at the base's frozen
 test NFE instead of the audit's cheaper K (used for E4-Cnf_far only).
 
+    # the repository's CycleGAN on the girth-rule toy: 8 h of training, then
+    # its outputs, the ex3g report and figures
+    LABEL=E3g-CG_s0 HOURS=8 MILESTONES=1.5,4 sbatch -J E3g-CG scripts/flow/jamie_cgan.sbatch
+
 Runs added after the plan was fixed (FLOW_NOTES.md says why): E4-Cnf_s0 and
-E4-Cnf_far (C on the near/far cost), and E4-Cnf_far's accurate rollout.
+E4-Cnf_far (C on the near/far cost), E4-Cnf_far's accurate rollout, and
+E3g-CG_s0 (the CycleGAN on the girth-rule toy, 2026-11-13).
