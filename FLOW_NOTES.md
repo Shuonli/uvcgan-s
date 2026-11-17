@@ -4769,6 +4769,30 @@ scores).
   on a core tower costs 1/1536 of a unit: the losses hardly hold the energy
   scale. The flows regress in the same coordinates but do not depend on an
   adversary to set the scale.
+- **Why the same CycleGAN matched the marginals on PYTHIA -> JEWEL and
+  not here (a comparison of the inputs, not a tested cause).** There the
+  EMA copy reached W1 0.01-0.12 at 8 h and 0.01-0.15 at 24 h on seven
+  marginals (3.9 at 2 h, with 65 GeV jets). The images the CycleGAN sees
+  differ:
+
+| | PYTHIA -> JEWEL | this toy |
+| :--- | ---: | ---: |
+| image | 16 x 16 = 256 towers | 24 x 64 = 1536 towers |
+| towers above 1 MeV | 13-14% (33-36 a jet) | 0.6% vacuum, 1.6% quenched (10, 25 a jet) |
+| standardisation of ln(E + 0.1) | sd 0.63 | sd 0.24 |
+| brightest tower, z (mean; largest) | 6.9; 9.9 | 19.7; 27.0 |
+| floor value, z | -0.28 | -0.09 |
+| energy in the three brightest towers | 57-61% | 81% vacuum, 61% quenched |
+
+  The toy's standardisation is set by its empty towers, so a jet is ten
+  towers at z near 20 on a constant floor: inputs and targets two to three
+  times larger than in the run that worked, on a six times larger and
+  twenty times emptier image. The loss-weight argument of (b) alone is
+  weaker than stated there: per relative energy error on a core tower the
+  toy's mean L1 is about 2.3 times smaller than PYTHIA -> JEWEL's, not
+  orders of magnitude. No unpaired model matched the marginals on the clean
+  toy (D 0.4-1.0, C 0.2-0.9 in Exercise 3; only the true-paired control
+  reached 0.04-0.22), where OT-FM reached 0.01-0.03 on PYTHIA -> JEWEL.
 - **The PYTHIA -> JEWEL CycleGAN baseline was also scored with the EMA
   copy.** Its 1.5 h checkpoint had the same kind of excursion (mean energy
   65 GeV, truth 27). Its 8 h and 24 h numbers have not been rechecked
