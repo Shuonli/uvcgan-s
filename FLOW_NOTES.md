@@ -4658,7 +4658,9 @@ Reported besides: the population shifts, whether the output pile shows the
 recoil-share against girth relation, and the 1.5 h and 4 h checkpoints.
 One seed; no tuning.
 
-**Result (2026-11-13; 61,000 updates in 8 h, job 21332).** The CycleGAN
+**Result (2026-11-13; 61,000 updates in 8 h, job 21332; see the
+correction of 2026-11-17 below: these outputs are the EMA copy's, which is
+not representative of the trained generator).** The CycleGAN
 does not reconstruct the rule. At 8 h both pre-set thresholds fail, and the
 pattern is Jamie's (slide 109: -0.12, +0.32, -0.11): losses follow the
 jet's energy, not its width (`ex3g/ex3g_girth_rule.csv`, 20k held-out
@@ -4712,6 +4714,69 @@ loss fraction:
   another seed or other loss weights could differ; none was tried. Why the
   discriminator does not enforce the recoil-share against girth relation
   was not investigated.
+
+**Correction (2026-11-17): the EMA copy was the wrong generator to score.**
+The 8 h model above does not match even the marginals (ring W1 0.85, total
+energy 0.59 in units of the truth's spread, floor 0.01-0.02), which prompted
+a check of the setup (`ex3g/ex3g_cgan_checkpoints.csv`, 4000 test jets, all
+nine saved checkpoints; `jamie_cgan.py --generate --raw` for the 20k-jet
+scores).
+
+- **Data and decoding are right.** The training files decode to the pools
+  within 1.3e-5 GeV; the outputs use the same decoding.
+- **The EMA copy (momentum 0.9999, the repository's inference default) is
+  much worse than the generator that was trained.** Mean ring energy of the
+  trained generator against its EMA copy, by checkpoint (truth 6.5 GeV):
+  7.5 / 0.8 (10k updates), 4.7 / 1.6 (20k), 6.0 / 2.7 (31k), 4.6 / 2.7
+  (50k), 5.2 / 2.9 (61k). At 20k updates the EMA copy outputs 131 GeV jets
+  where the trained generator gives 27 GeV. The statements above that "the
+  lost energy mostly vanishes", "ring 2.9 GeV" and "about 30% of the cone
+  from every jet" describe the EMA copy only and are withdrawn as
+  statements about the CycleGAN.
+- **The trained generator, 20k jets:**
+
+| | total (GeV) | cone | ring | W1 total | cone | ring | girth | loss vs input girth | vs true loss |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| truth | 28.4 | 21.9 | 6.4 | 0.02 | 0.01 | 0.01 | 0.01 | 0.87 | 1 |
+| input | 28.6 | 28.2 | 0.4 | 0.01 | 0.66 | 1.44 | 0.55 | | |
+| EMA copy, 8 h | 22.7 | 19.7 | 2.9 | 0.59 | 0.29 | 0.85 | 0.34 | -0.13 | -0.20 |
+| no EMA, 1.5 h | 31.4 | 26.3 | 4.4 | 0.30 | 0.46 | 0.50 | 0.37 | -0.12 | -0.14 |
+| no EMA, 4 h | 25.8 | 19.7 | 6.0 | 0.28 | 0.27 | 0.18 | 0.24 | 0.02 | -0.04 |
+| no EMA, 8 h | 36.1 | 30.1 | 5.2 | 0.79 | 0.86 | 0.30 | 0.35 | 0.12 | 0.06 |
+
+- **The marginals are still not matched, and the energy scale drifts.**
+  The trained generator's mean total energy is 25.8, 31.5, 27.2, 23.1,
+  25.8, 35.9, 24.6, 29.2, 36.2 GeV over the nine checkpoints (truth 28.6;
+  the toy conserves energy). The best checkpoint (4 h) is at 0.14-0.31 on
+  the six marginals of `ex3g_marginals_cgan.png`; the last (8 h) adds 2 GeV
+  to the cone instead of removing 6. This run is not a working model of the
+  quenched pile, with or without the EMA.
+- **The girth rule's answer does not change.** Loss against input girth for
+  the trained generator: -0.32 to +0.15 over the nine checkpoints, 0.12 at
+  8 h (threshold 0.43); against the true loss at most 0.06 at the three
+  milestones. The pre-set
+  reading (EMA copy, 8 h) stands as registered and also fails. At 4 h the
+  trained generator's output pile shows part of the recoil-share against
+  own-girth relation (r 0.40, a rising median; truth 0.81) while applying
+  the loss to the wrong inputs (0.02), as C does
+  (`ex3g_girth_scatter_cgan_checkpoints.png`).
+- **Likely causes, not tested.** (a) The EMA averages the weights of a
+  generator that was still moving over its roughly 10,000-update window;
+  the average of such weights need not be a good generator. (b) The
+  coordinates: 98-99% of towers sit at one floor value, a jet's bright
+  towers at z of 10 to 27, and one unit of z is a factor 1.28 in energy.
+  The cycle and identity L1 are means over 1536 towers of z, so a 28% error
+  on a core tower costs 1/1536 of a unit: the losses hardly hold the energy
+  scale. The flows regress in the same coordinates but do not depend on an
+  adversary to set the scale.
+- **The PYTHIA -> JEWEL CycleGAN baseline was also scored with the EMA
+  copy.** Its 1.5 h checkpoint had the same kind of excursion (mean energy
+  65 GeV, truth 27). Its 8 h and 24 h numbers have not been rechecked
+  against the trained generator.
+- **What a fair test would need (not run):** a setup that first matches the
+  marginals: no EMA or a much shorter one, a learning-rate decay so the
+  generator settles, and a term that holds the energy scale (Jamie's fix
+  for his CycleGAN was GeV-based losses); then the girth reading.
 
 ### Answers to the six questions
 

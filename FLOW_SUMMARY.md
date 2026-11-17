@@ -946,14 +946,19 @@ A sequence of cheap diagnostics, then controls:
 - **Two seeds:** the two trainings agree jet by jet (correlation 0.85-0.90)
   and neither predicts the jet's actual change (0.08-0.10, where 0.48 is
   possible): Jamie's "agreement is not proof", reproduced.
-- **The repository's CycleGAN on the girth-rule toy (2026-11-13):** in the
-  toy where wider jets lose more, UVCGAN2 trained 8 h on the two unpaired
-  piles does not reconstruct the rule, as D and C do not. Its loss against
-  the input's girth is -0.13 (truth 0.87), against the jet's true loss
-  -0.20; Jamie's small CycleGAN gave -0.12 and -0.11. It removes about 30%
-  of the cone from every jet whatever its width, keeps the jet's shape, and
-  loses 5.8 GeV a jet. Its checkpoints at 1.5 h, 4 h and 8 h disagree (mean
-  cone 31, 48, 20 GeV), so the run had not settled. One seed, no tuning.
+- **The repository's CycleGAN on the girth-rule toy (2026-11-13, corrected
+  2026-11-17):** in the toy where wider jets lose more, UVCGAN2 trained 8 h
+  on the two unpaired piles does not reconstruct the rule, as D and C do
+  not: its loss against the input's girth is between -0.32 and +0.15 at
+  every saved checkpoint (truth 0.87; Jamie's small CycleGAN -0.12). The
+  run is not a working model of the quenched jets either: the mean jet
+  energy swings between 23 and 36 GeV from checkpoint to checkpoint (truth
+  28.6) and no checkpoint matches the marginals (best 0.14-0.31 of the
+  truth's spread, floor 0.02). The weight-averaged (EMA) generator the
+  repository uses for inference is much worse than the trained one (ring
+  2.9 against 5.2 GeV at 8 h, truth 6.5); the first write-up scored it.
+  The PYTHIA -> JEWEL CycleGAN baseline was scored the same way and has not
+  been rechecked. One seed, no tuning.
 - **Numerical lessons:** the clean-jet D flow cannot be solved accurately
   (towers empty at both ends amplify tiny errors about 580 times); and a
   constraint trained through a cheap 8-step solve can hold only for that

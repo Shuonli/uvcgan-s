@@ -19,6 +19,7 @@ batch 32, EMA 0.9999 of the generators (used for inference), cycle weights
     jamie_cgan.py --prepare [--target e3g_med]      # h5 copies of the pools
     jamie_cgan.py --label E3g-CG_s0 --hours 8 --milestones 1.5,4
     jamie_cgan.py --generate --label E3g-CG_s0      # test outputs per milestone
+    jamie_cgan.py --generate --raw --label E3g-CG_s0    # the same, generator without EMA
 
 Outputs go to jamie/outputs/LABEL_<h>h/ in jamie_eval.py's layout for a
 deterministic model (one output per input), so jamie_report.py and
@@ -57,6 +58,9 @@ def parse_cmdargs():
     parser = argparse.ArgumentParser(description = 'CycleGAN on the toy translation')
     parser.add_argument('--prepare', action = 'store_true')
     parser.add_argument('--generate', action = 'store_true')
+    parser.add_argument('--raw', action = 'store_true',
+                        help = 'with --generate: the trained generator, not its EMA copy '
+                               '(outputs LABEL_raw_<h>h)')
     parser.add_argument('--label', default = 'E3g-CG_s0')
     parser.add_argument('--source', default = 'e3_vac')
     parser.add_argument('--target', default = 'e3g_med', choices = list(TESTS))
@@ -135,6 +139,12 @@ def generate(cmdargs):
         model.load(m['epoch'])
         model.eval()
         gen = model.models['avg_gen_ab']
+        if cmdargs.raw:
+            # the EMA copy has the generator's architecture; load the trained
+            # weights into it (only the EMA copies are built at inference)
+            gen.load_state_dict(torch.load(os.path.join(
+                run, 'checkpoints', f"{m['epoch']:04d}_net_gen_ab.pth"), map_location = device))
+            gen.eval()
         @torch.no_grad()
         def translate(x):
             out = []
@@ -143,7 +153,7 @@ def generate(cmdargs):
                 y = gen(norm.z(j, 'clean').unsqueeze(1))
                 out.append(norm.energy(y[:, 0], 'clean').cpu())
             return torch.cat(out).numpy()
-        label = f"{cmdargs.label}_{m['milestone_h']:g}h"
+        label = f"{cmdargs.label}{'_raw' if cmdargs.raw else ''}_{m['milestone_h']:g}h"
         od = os.path.join(jm.jamie_root(), 'outputs', label)
         os.makedirs(od, exist_ok = True)
         t0 = time.perf_counter()
@@ -154,6 +164,7 @@ def generate(cmdargs):
             np.save(os.path.join(od, f'{bankname}_{key}.npy'),
                     translate(d['jet'][parents])[:, None].astype(np.float16))
         meta = { 'run' : os.path.basename(run), 'model' : 'uvcgan-v2', **m, 'cond' : False,
+                 'generator' : 'gen_ab' if cmdargs.raw else 'avg_gen_ab',
                  'kind' : 'clean', 'nfe' : 1, 'solver' : 'generator',
                  'sets' : { f'{setname}_vac' : { 'n' : len(out), 'seconds' : dt,
                                                  'ms_per_image' : 1000 * dt / len(out) } } }
