@@ -4802,6 +4802,27 @@ scores).
   generator settles, and a term that holds the energy scale (Jamie's fix
   for his CycleGAN was GeV-based losses); then the girth reading.
 
+**A 16 x 16 window around the jet (set up 2026-11-17, before training;
+job 22058).** The same CycleGAN matched the marginals on PYTHIA -> JEWEL's
+16 x 16 jet images, so the toy is retrained on a 16 x 16 window centred on
+the tower holding each jet's axis (`jamie_cgan.py --crop 16`), with the
+PYTHIA -> JEWEL discriminator and nothing else changed (8 h, seed 0).
+
+- **What the window does to the images.** It holds 99.99% of a vacuum
+  jet's energy and 94.5% of a quenched jet's (recoil beyond about 0.75 is
+  cut; the ring inside the window carries 5.0 of the 6.4 GeV). Towers above
+  1 MeV: 3.9% and 8.3% (PYTHIA -> JEWEL 13-14%). Standardised again on the
+  windows: sd 0.57 (0.63), a 20 GeV tower at z = 9.1 (8.2).
+- **Scoring** (`jamie_cgan_score.py`): the truth and the input restricted
+  to the same window; EMA copy and trained generator both.
+- **Reading, fixed now.** First, does it model the quenched pile: at 8 h,
+  W1 of total, cone, ring, girth, mass and p_T^D to the truth all below
+  0.15 (the level this CycleGAN reached on PYTHIA -> JEWEL at 8 h), for the
+  trained generator or its EMA copy. Only if so is the girth reading
+  meaningful: reconstructed if the loss correlates with the input girth
+  above 0.43 and with the true loss above 0.5, as before. The 1.5 h and 4 h
+  checkpoints are reported. One seed.
+
 ### Answers to the six questions
 
 Population agreement, event-preserving correspondence and the conditional

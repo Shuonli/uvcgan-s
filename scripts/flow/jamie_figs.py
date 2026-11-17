@@ -297,11 +297,12 @@ def fig_far(outs, inp, dr, out, plt):
     fig.savefig(os.path.join(out, 'ex4_far.png'))
     plt.close(fig)
 
-def fig_girth(models, out, plt):
+def fig_girth(models, out, plt, mask = None, name = 'ex3g_girth_scatter.png', note = ''):
     """The girth rule, jet by jet (top) and as it shows in a pile of quenched
     jets alone (bottom). Top: the vacuum input's girth against the fractional
     cone loss, 1 - cone_out / cone_in. Bottom: the output's own cone girth
-    against its recoil share, ring / (cone + ring)."""
+    against its recoil share, ring / (cone + ring). `mask`, (N, 24, 64): the
+    towers of the truth a model could fill (a cropped CycleGAN's window)."""
     # pylint: disable=too-many-locals
     d = jr.cache('t3g_pair')
     ax = jr.axes(d)
@@ -309,7 +310,7 @@ def fig_girth(models, out, plt):
     jet = d['jet']
     g_in = np.asarray(jr.obs(jet, ax, sub = False)['girth'])
     c_in = jr.region_sum(jet, dr, 0, 0.4)
-    cols = [ ('truth (one quenching)', d['med']) ]
+    cols = [ ('truth (one quenching)', d['med'] if mask is None else d['med'] * mask) ]
     for (lab, dirn) in models:
         x = jr.output(dirn, 't3g_pair_vac')
         if x is not None:
@@ -340,11 +341,11 @@ def fig_girth(models, out, plt):
         axs[1][k].set_xlabel("the output's own cone girth")
     axs[0][0].set_ylabel('fractional cone loss')
     axs[1][0].set_ylabel('recoil share of the output')
-    fig.suptitle('Girth rule (wider jets lose more): 20k held-out jets; line: median in ten bins.\n'
+    fig.suptitle(f'Girth rule (wider jets lose more): 20k held-out jets{note}; line: median in ten bins.\n'
                  'Top: is the rule applied to each input? Bottom: does the output pile alone show it?',
                  fontsize = 6.5)
     fig.tight_layout(rect = (0, 0, 1, 0.92))
-    fig.savefig(os.path.join(out, 'ex3g_girth_scatter.png'))
+    fig.savefig(os.path.join(out, name))
     plt.close(fig)
 
 def main():
