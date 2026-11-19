@@ -959,6 +959,16 @@ A sequence of cheap diagnostics, then controls:
   2.9 against 5.2 GeV at 8 h, truth 6.5); the first write-up scored it.
   The PYTHIA -> JEWEL CycleGAN baseline was scored the same way and has not
   been rechecked. One seed, no tuning.
+- **The same CycleGAN on a 16 x 16 window around the jet (2026-11-18):**
+  the window makes the toy images like PYTHIA -> JEWEL's, and the loss now
+  follows the input's girth with the right sign at most checkpoints (full
+  image: -0.32 to +0.15). At 8 h the EMA copy orders the jets rightly
+  (0.59 with the girth, 0.48 with the true loss; thresholds 0.43 and 0.5)
+  but quenches a quarter as much as it should; the trained generator
+  matches five of six marginals (0.11-0.15) but applies the losses to the
+  wrong jets (-0.19). The energy scale still swings between checkpoints
+  (21 to 44 GeV). By the reading fixed beforehand the rule is not
+  reconstructed; image size was part of the problem, not all of it.
 - **Numerical lessons:** the clean-jet D flow cannot be solved accurately
   (towers empty at both ends amplify tiny errors about 580 times); and a
   constraint trained through a cheap 8-step solve can hold only for that

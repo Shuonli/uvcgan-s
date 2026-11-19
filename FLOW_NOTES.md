@@ -4823,6 +4823,55 @@ PYTHIA -> JEWEL discriminator and nothing else changed (8 h, seed 0).
   above 0.43 and with the true loss above 0.5, as before. The 1.5 h and 4 h
   checkpoints are reported. One seed.
 
+**Result of the 16 x 16 window run (2026-11-18; 72,000 updates in 8 h, job
+22058).** By the reading fixed above the rule is not reconstructed: neither
+generator copy passes the marginal test, and neither passes both girth
+thresholds. The window does change the picture: the loss now follows the
+input's girth with the right sign at most checkpoints
+(`ex3g/ex3g_cgan16.csv`, 20k jets, inside the window;
+`ex3g_cgan16_checkpoints.csv`, 4000 jets, all ten saved checkpoints).
+
+| at 8 h, inside the window | total (GeV) | cone | ring | W1 total | cone | ring | girth | mass | p_T^D | loss vs input girth | vs true loss |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| truth | 27.0 | 21.9 | 5.0 | | | | | | | 0.87 | 1 |
+| input | 28.6 | 28.2 | 0.4 | 0.16 | 0.66 | 1.33 | 0.55 | 0.10 | 0.26 | | |
+| needed | | | | < 0.15 | < 0.15 | < 0.15 | < 0.15 | < 0.15 | < 0.15 | > 0.43 | > 0.5 |
+| trained generator | 27.5 | 21.1 | 6.4 | 0.12 | 0.11 | 0.38 | 0.15 | 0.11 | 0.12 | -0.19 | -0.24 |
+| EMA copy | 28.2 | 26.7 | 1.5 | 0.17 | 0.51 | 1.02 | 0.39 | 0.08 | 0.23 | 0.59 | 0.48 |
+
+Mean fractional cone loss in fifths of the input girth, narrowest to
+widest: truth 0.09, 0.15, 0.21, 0.29, 0.42; EMA copy -0.08, -0.01, 0.06,
+0.13, 0.19; trained generator 0.32, 0.28, 0.24, 0.20, 0.19.
+
+- **The trained generator at 8 h models the pile and misapplies the
+  rule.** Five of six marginals are at 0.11-0.15 (the full-image run's best
+  was 0.14-0.31); the ring has too much energy (6.4 against 5.0 GeV, W1
+  0.38). Its output pile shows the rule almost as the truth does (recoil
+  share against the output's own girth: r 0.62, truth 0.77), but the losses
+  go to the wrong inputs: narrow jets lose more (-0.19), in two clusters
+  near 0.05 and 0.6 (`ex3g_girth_scatter_cgan16.png`).
+- **The EMA copy orders the jets rightly and quenches too little.** Its
+  loss rises with the input's girth by 0.27 from the narrowest to the
+  widest fifth (truth 0.33), correlation 0.59 with the girth and 0.48 with
+  the jet's true loss, but its mean loss is 0.06 where the truth's is 0.23
+  and it makes 1.5 of the 5.0 GeV of ring.
+- **Over the checkpoints** the trained generator's loss-against-girth
+  correlation is positive at eight of ten (0.17 to 0.66) and negative at
+  13k (-0.15) and at the last, 72k (-0.20); the EMA copy's is 0.38 to 0.60
+  at nine of ten, and 0.57-0.60 over the last three. On the full image the
+  trained generator's range was -0.32 to +0.15. The trained generator's
+  energy scale still swings (mean total 21 to 44 GeV; 40 GeV at 70k, 27.5
+  at 72k), so "8 h" is one draw of a moving generator, as before.
+- **What this shows and does not.** The image size was a real handicap:
+  on the jet window the adversarial training extracts part of the girth
+  ordering from unpaired piles, which neither flow model nor Jamie's
+  CycleGAN did (D 0.22, C -0.09, Jamie -0.12; the flows were trained on the
+  full image, so that comparison is not like for like). It does not show a
+  CycleGAN that both models the pile and applies the rule: the copy with
+  the right ordering under-quenches, the copy with the right population
+  has the ordering reversed, and the unsettled energy scale is unchanged by
+  the window. One seed.
+
 ### Answers to the six questions
 
 Population agreement, event-preserving correspondence and the conditional
